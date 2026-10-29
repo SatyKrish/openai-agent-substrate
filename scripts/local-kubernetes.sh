@@ -74,7 +74,7 @@ case "${1:-help}" in
     configure_docker
     uv run --locked python -m examples.document_intelligence.deploy --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG" --image localhost:5501/openai-agent-substrate-document-intelligence:local
     DOCUMENT_TEMPLATE="$(uv run --locked python -c 'import json; print(json.load(open("artifacts/examples/document_intelligence/deployment/deployment.json"))["template"])')"
-    uv run --locked python -m examples.document_intelligence --backend substrate --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG" --template "$DOCUMENT_TEMPLATE" --output-dir "$LOCAL_DIR/document-intelligence"
+    uv run --locked python -m examples.document_intelligence --test --backend substrate --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG" --template "$DOCUMENT_TEMPLATE" --output-dir "$LOCAL_DIR/document-intelligence"
     SUBSTRATE_RUN_KUBERNETES_TESTS=1 SUBSTRATE_KUBE_CONTEXT="kind-$CLUSTER" SUBSTRATE_KUBECONFIG="$KUBECONFIG" SUBSTRATE_DOCUMENT_TEMPLATE="$DOCUMENT_TEMPLATE" uv run --locked pytest -q tests/kubernetes/test_document_intelligence.py
     ;;
   agent-setup)

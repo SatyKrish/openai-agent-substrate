@@ -10,10 +10,11 @@ from pathlib import Path
 
 import pytest
 
-from examples.document_intelligence.main import EXAMPLE, digests, run, stage_inputs
-from examples.document_intelligence.verify import OUTPUTS, verify_artifacts
+from examples.document_intelligence.main import digests, run, stage_inputs
+from examples.document_intelligence.agent.agent import AGENT_ROOT
+from examples.document_intelligence.agent.lib.verify import OUTPUTS, verify_artifacts
 
-HELPER = EXAMPLE / "skills/document-analysis/scripts/documents.py"
+HELPER = AGENT_ROOT / "skills/document-analysis/scripts/documents.py"
 
 
 async def test_skill_drives_real_sdk_tools_and_artifacts(server, tmp_path):
@@ -22,6 +23,8 @@ async def test_skill_drives_real_sdk_tools_and_artifacts(server, tmp_path):
     summary = await run(args, server)
     assert summary["host_contract_verified"] is True
     assert summary["model_inference"] is False
+    assert summary["execution_mode"] == "scripted-eval"
+    assert summary["api_response_ids"] == []
     assert summary["tools_used"] == ["apply_patch", "exec_command", "load_skill"]
     assert summary["operating_margins_pct"] == {"ACME": "22.93", "BETA": "30.19"}
     directory = Path(summary["artifact_directory"])
@@ -44,7 +47,7 @@ def generated(tmp_path):
         (tmp_path / "inputs" / name).write_bytes(data)
     (tmp_path / "inputs/manifest.json").write_text(json.dumps(dict(analysis_id="test-analysis", files=digests(inputs))))
     subprocess.run([sys.executable, str(HELPER), "extract"], cwd=tmp_path, check=True, capture_output=True)
-    subprocess.run([sys.executable, str(EXAMPLE / "scripted_analysis.py")], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run([sys.executable, str(Path(__file__).parent / "fixtures/analysis.py")], cwd=tmp_path, check=True, capture_output=True)
     return tmp_path, inputs
 
 

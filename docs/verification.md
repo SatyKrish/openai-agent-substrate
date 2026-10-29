@@ -16,15 +16,15 @@ Date: 2026-10-29.
 
 | Check | Result |
 | --- | --- |
-| Default unit/integration suite | 47 passed; three real-cluster tests are skipped by default |
-| Unit/integration suite using the actual upstream Go execution server | 47 passed; three real-cluster tests skipped |
+| Default unit/integration suite | 51 passed; three real-cluster tests are skipped by default |
+| Unit/integration suite using the actual upstream Go execution server | 51 passed; three real-cluster tests skipped |
 | Opt-in Kubernetes integration test | Passed against a fresh real Actor |
 | SDK scripted workflow on Kubernetes | Passed: shell tool execution, report creation, serialized session resume, and preserved edits |
 | Kubernetes filesystem behavior | Passed: binary file round trips, SDK patching, and nonzero shell exit codes |
 | Repeated setup | Reused the existing cluster; the retained Actor and its files remained usable |
 | Document Intelligence on Kubernetes | Passed: native `load_skill`, shell inspection/extraction, `apply_patch`, Python execution, exact citations, and independent host artifact checks |
 | Domain artifact rejection tests | Passed: altered citations, calculations, CSV, missing report evidence/limitations, staged digest mismatches, and source-table disagreements are rejected |
-| Secret-backed Kubernetes agent pod | Passed: five OpenAI settings match mounted files and environment, the model is selected from the Secret, and real document analysis runs with no harness credential in the Actor |
+| Secret-backed Kubernetes agent pod | Passed: five OpenAI settings match mounted files and environment, an explicit evaluation override is required, and real document analysis runs with no harness credential in the Actor |
 | Source distribution and wheel | Built successfully; `twine check` passed |
 
 The Kubernetes path uses owned loopback `kubectl ate proxy actor` processes and authenticated Substrate ingress. Tests exercise the real SDK runner and actual sandbox execution; no OpenAI API key or model call was required.
@@ -52,10 +52,11 @@ See [the domain guide](../examples/document_intelligence/README.md).
 ## Environment configuration in the agent pod
 
 A temporary Secret carried a dummy key, `https://example.invalid/v1`,
-`OPENAI_MODEL=scripted`, and test organization/project IDs. The dedicated non-root
+a configured model name, and test organization/project IDs. Evaluation was
+explicitly selected with `--test`. The dedicated non-root
 harness Job confirmed that all five environment values matched the read-only
-Secret files. Model selection came from the Secret, with no command-line model
-override. The native skill, shell, patch, and Python workflow completed against a
+Secret files. The mounted model configuration was preserved, and `--test` explicitly selected
+the scripted evaluation model. The native skill, shell, patch, and Python workflow completed against a
 real Substrate Actor, whose credential preflight passed. No OpenAI API call was
 made. The test deleted its Job and Secret; report artifacts were collected from
 the retained PVC using a temporary reader pod without credential mounts.
@@ -63,6 +64,22 @@ the retained PVC using a temporary reader pod without credential mounts.
 Local unit tests also construct the actual OpenAI client without requests and
 verify its endpoint, API key, organization, and project settings from environment
 variables. Live endpoint/model execution remains unverified.
+
+## Authored agent layout and live defaults
+
+The domain project now has `agent/agent.py`, `agent/instructions.md`, native tool
+registration, skills, trusted `lib/` helpers, and a `sandbox/` workspace and image.
+Sibling `evals/` contains scripted decisions, code fixtures, and execution checks.
+This organization follows [Eve's project conventions](https://eve.dev/docs/concepts/project-structure)
+with explicit Python loading through the OpenAI Agents SDK.
+
+Normal domain execution selects a configured live model and requires an API key.
+Missing credentials cause an error. Scripted evaluation requires `--test` or an
+explicit `--model scripted`; an environment value alone cannot select it. Run
+records identify `openai-live` or `scripted-eval` and include returned API response
+IDs. Scripted evaluations have no API response IDs. The reorganized harness passed
+its real Kubernetes pod evaluation. A live OpenAI call remains unverified because
+no `.env` or API key was configured during these checks.
 
 ## External snapshot recovery
 

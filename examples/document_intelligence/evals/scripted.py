@@ -21,7 +21,7 @@ class DocumentWorkflowModel(Model):
     def __init__(self, python="python3"):
         python = shlex.quote(python)
         helper = f"{python} {SKILL_ROOT}/scripts/documents.py"
-        code = Path(__file__).with_name("scripted_analysis.py").read_text()
+        code = (Path(__file__).parent / "fixtures/analysis.py").read_text()
         patch = "*** Begin Patch\n*** Add File: work/analyze.py\n" + "\n".join("+" + line for line in code.splitlines()) + "\n*** End Patch"
         self.steps = [
             ("load_skill", {"skill_name": "document-analysis"}, "loaded"),

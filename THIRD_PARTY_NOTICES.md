@@ -12,11 +12,11 @@ The Apache-2.0 license in the repository root covers original project code and d
 
 ## Document Intelligence synthetic fixtures
 
-- Files: `examples/document_intelligence/fixtures/acme-2024.md`, `beta-2024.md`, and `kpis-2024.csv`.
+- Files: `examples/document_intelligence/agent/sandbox/workspace/inputs/acme-2024.md`, `beta-2024.md`, and `kpis-2024.csv`.
 - Copyright: 2026 SatyKrish and contributors.
-- License: [MIT](examples/document_intelligence/fixtures/LICENSE).
+- License: [MIT](examples/document_intelligence/agent/sandbox/workspace/inputs/LICENSE).
 - Source: [bedrock-document-intelligence-agent](https://github.com/SatyKrish/bedrock-document-intelligence-agent/tree/7eb1dfbba95f87512aa20dc3444111983f0f3b3e/fixtures), commit `7eb1dfbba95f87512aa20dc3444111983f0f3b3e`.
-- Reproduced without modification. Checksums and provenance accompany the fixtures. This license also applies when the example stages the fixture contents into a sandbox.
+- Reproduced without modification. Checksums and provenance are recorded in `examples/document_intelligence/agent/sandbox/PROVENANCE.json`. This license also applies when the example stages the fixture contents into a sandbox.
 
 ## OpenAI architecture diagram
 

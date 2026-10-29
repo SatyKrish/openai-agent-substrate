@@ -9,7 +9,59 @@ The workflow follows the domain example in
 [SatyKrish/bedrock-document-intelligence-agent](https://github.com/SatyKrish/bedrock-document-intelligence-agent/tree/7eb1dfbba95f87512aa20dc3444111983f0f3b3e).
 Only its MIT-licensed synthetic fixtures are reused. This implementation uses
 OpenAI Agents SDK and Agent Substrate with Kubernetes as the compute provider.
-See [fixture provenance](fixtures/PROVENANCE.json) and [license](fixtures/LICENSE).
+See [fixture provenance](agent/sandbox/PROVENANCE.json) and [license](agent/sandbox/workspace/inputs/LICENSE).
+
+## Agent project structure
+
+This Python project adopts the organization described in
+[Eve's project structure guide](https://eve.dev/docs/concepts/project-structure)
+and [agent files reference](https://eve.dev/docs/reference/agent-files). A single
+`agent/` directory holds authored behavior and capabilities. `evals/` sits beside
+it. The OpenAI Agents SDK explicitly loads these files and runs the agent.
+
+```text
+examples/document_intelligence/
+  agent/
+    agent.py                       SandboxAgent definition
+    instructions.md                Standing agent behavior
+    tools/capabilities.py          Native SDK shell, patch, and skill registration
+    skills/document-analysis/      Domain procedure, scripts, output contract
+    lib/                           Trusted configuration and artifact verification
+    sandbox/
+      sandbox.py                   Provider and workspace manifest
+      Dockerfile                   Python execution image
+      PROVENANCE.json              Synthetic input provenance
+      workspace/inputs/            Reports, KPI table, and MIT license
+  evals/
+    scripted.py                    Test-only fixed model decisions
+    fixtures/analysis.py           Code fixture emitted through apply_patch
+    test_workflow.py               Execution and output contract checks
+    test_configuration.py          Live defaults and explicit test-mode checks
+  main.py                          Host CLI and workflow orchestration
+  deploy.py                        Image build and ActorTemplate deployment
+```
+
+The factory reads `instructions.md`, registers capabilities from `tools/`, and
+points native SDK skill discovery at `agent/skills/`. Host helpers in `lib/` stay
+in the trusted harness. Only selected files from `sandbox/workspace/inputs/` and
+the lazily loaded skill enter the Actor. Runtime-created code and output files
+stay in its workspace. Evaluation fixtures are imported only for explicit tests.
+
+## Live OpenAI execution
+
+The normal agent path uses a live OpenAI model, Kubernetes compute, and the
+configured API endpoint. It requires credentials and never falls back to the
+scripted model. For the Kubernetes harness, configure `.env` and run:
+
+```sh
+./scripts/local-kubernetes.sh agent-setup
+./scripts/local-kubernetes.sh agent-run
+```
+
+The [agent setup guide](../../deploy/kubernetes/README.md) describes API key,
+endpoint, model, optional account settings, and Secret mounting. `OPENAI_MODEL`
+selects the model; `OPENAI_BASE_URL` selects the endpoint. The live model chooses
+tools and writes analysis code. These commands can incur model API usage.
 
 ## Skill and tool execution
 
@@ -24,7 +76,7 @@ capabilities = [
     Shell(),
     Filesystem(),
     Skills(lazy_from=LocalDirLazySkillSource(
-        source=LocalDir(src=EXAMPLE / "skills"),
+        source=LocalDir(src=AGENT_ROOT / "skills"),
     )),
 ]
 ```
@@ -37,11 +89,11 @@ capabilities = [
 | `exec_command` | Execute that Python code, calculate margins with `Decimal`, and generate report artifacts |
 | `exec_command` | Reopen the outputs, verify calculations and exact source quotes, and correct failures if needed |
 
-The [skill](skills/document-analysis/SKILL.md) owns the domain workflow. Its
-[helper](skills/document-analysis/scripts/documents.py) checks input bytes and
+The [skill](agent/skills/document-analysis/SKILL.md) owns the domain workflow. Its
+[helper](agent/skills/document-analysis/scripts/documents.py) checks input bytes and
 hashes, extracts exact quotes, and reconciles the KPI table. The agent's generated
 code computes operating margins and the revenue gap. A separate
-[host verifier](verify.py) checks downloaded artifacts against original host inputs
+[host verifier](agent/lib/verify.py) checks downloaded artifacts against original host inputs
 without executing downloaded code. Checks cover the required structured fields
 and report evidence; they do not establish the semantic correctness of arbitrary
 additional prose or provide a prompt-injection security guarantee.
@@ -50,11 +102,11 @@ additional prose or provide a prompt-injection security guarantee.
 
 ```sh
 uv sync --locked
-uv run python -m examples.document_intelligence
+uv run python -m examples.document_intelligence --test
 ```
 
 This runs the real SDK tool loop with eight fixed tool decisions, including skill
-loading, patching, and Python execution. `scripted_analysis.py` is a code fixture
+loading, patching, and Python execution. `evals/fixtures/analysis.py` is a code fixture
 emitted through `apply_patch`, not an input file pre-staged in the sandbox. There
 is no model inference in scripted mode. The local protocol simulator executes on
 your host and provides no sandbox isolation; it only accepts scripted mode.
@@ -83,7 +135,7 @@ uv run python -m examples.document_intelligence.deploy \
 # Use the template name printed by deploy.py.
 uv run python -m examples.document_intelligence --backend substrate \
   --context YOUR_KUBERNETES_CONTEXT \
-  --template document-intelligence-CONFIG_DIGEST
+  --template document-intelligence-CONFIG_DIGEST --model YOUR_OPENAI_MODEL_ID
 ```
 
 Pass `--kubeconfig PATH` to both commands when needed. `deploy.py` also accepts
@@ -93,10 +145,11 @@ atespace and `workload=sandbox` worker pool must exist. The upstream
 The Dockerfile pins both base images, and the registered template uses the pushed
 image digest. Build on the same architecture as the sandbox workers. Template names change when their configuration changes.
 
-For live model decisions, set `OPENAI_API_KEY` in your trusted host environment
-and add `--model YOUR_OPENAI_MODEL_ID` to the Substrate run. Live mode uses the
+For host execution, set `OPENAI_API_KEY` in your trusted host environment
+and choose `OPENAI_MODEL` or pass `--model YOUR_OPENAI_MODEL_ID`. Live mode uses the
 same skill, files, tools, and contract checks. It incurs model API usage. Local
-scripted tests do not validate live model behavior.
+scripted tests do not validate live model behavior. Use explicit `--test` to run
+a deterministic evaluation. `OPENAI_MODEL=scripted` alone is rejected.
 
 To load endpoint, model, and credentials from `.env` into a Kubernetes-hosted
 agent harness instead, use the [Secret-backed agent setup](../../deploy/kubernetes/README.md).
@@ -109,8 +162,10 @@ Each successful run creates a unique directory under
 - `comparison.md`, `kpis.csv`, and `result.json`: verified domain outputs.
 - `analysis.py`: downloaded code written by the agent, retained for inspection.
 - `tool-trace.json`: actual SDK tool calls and results for this synthetic task.
-- `verification.json`: backend, model mode, tool names, input/output hashes, and
-  contract verification status.
+- `verification.json`: backend, `execution_mode`, `model_inference`, returned API
+  response IDs, tool names, input/output hashes, and contract verification status.
+  Scripted evaluations have `execution_mode=scripted-eval`, no API response IDs,
+  and `model_inference=false`. A successful live run records `openai-live`.
 
 The local Kubernetes helper instead writes to `artifacts/local/document-intelligence/`.
 Expected fixture results: ACME operating margin **22.93%**, BETA **30.19%**,

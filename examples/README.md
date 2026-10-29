@@ -1,6 +1,8 @@
 # Domain examples
 
-Each folder contains an end-to-end domain workflow: inputs, agent, reusable
+Each folder contains an agent project with `agent/` and sibling `evals/`, following
+[Eve’s organization](https://eve.dev/docs/concepts/project-structure). It contains
+an end-to-end domain workflow: inputs, agent, reusable
 skills, sandbox runtime requirements, and verified output artifacts. Run commands
 from the repository root after `uv sync --locked`.
 
@@ -11,17 +13,23 @@ from the repository root after `uv sync --locked`.
 ```text
 examples/
   document_intelligence/
-    main.py                  SDK harness and trusted artifact checks
-    scripted.py              Key-free tool decisions for execution testing
-    scripted_analysis.py     Code fixture emitted by the scripted model
-    verify.py                Host-side source reconciliation
-    fixtures/                MIT-licensed synthetic reports and KPI table
-    skills/document-analysis/
-      SKILL.md
-      scripts/documents.py   Sandbox extraction and verification
-      references/            Output contract
-    Dockerfile               Python-capable Actor image
-    deploy.py                Image build, push, and immutable ActorTemplate
+    agent/
+      agent.py
+      instructions.md
+      tools/
+      skills/document-analysis/
+      lib/
+      sandbox/
+        sandbox.py
+        Dockerfile
+        workspace/inputs/
+    evals/
+      scripted.py
+      fixtures/
+      test_workflow.py
+      test_configuration.py
+    main.py
+    deploy.py
     README.md
 ```
 

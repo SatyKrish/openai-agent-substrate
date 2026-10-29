@@ -57,7 +57,7 @@ def test_pod_reads_model_from_environment_and_explicit_override(monkeypatch):
     monkeypatch.setenv("SUBSTRATE_TEMPLATE", "python-template")
     monkeypatch.setattr(sys, "argv", ["run_agent.py"])
     assert configuration().model == "project-model"
-    monkeypatch.setattr(sys, "argv", ["run_agent.py", "--model", "scripted"])
+    monkeypatch.setattr(sys, "argv", ["run_agent.py", "--test"])
     assert configuration().model == "scripted"
 
 
@@ -76,7 +76,7 @@ def test_job_mounts_config_only_into_trusted_harness():
     job = kubernetes_agent.make_job("image@sha256:123", "python-template", "scripted", "smoke-config")
     pod = job["spec"]["template"]["spec"]
     assert len(pod["containers"]) == 1
-    assert pod["containers"][0]["args"] == ["--model", "scripted"]
+    assert pod["containers"][0]["args"] == ["--test"]
     assert pod["containers"][0]["envFrom"] == [{"secretRef": {"name": "smoke-config"}}]
     assert pod["volumes"][0]["secret"]["secretName"] == "smoke-config"
     assert pod["containers"][0]["volumeMounts"][0]["readOnly"] is True

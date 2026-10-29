@@ -9,7 +9,7 @@ description = "Reference implementation of a Kubernetes sandbox provider for the
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
-license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md", "third_party/substrate-sandbox/LICENSE", "examples/document_intelligence/fixtures/LICENSE"]
+license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md", "third_party/substrate-sandbox/LICENSE", "examples/document_intelligence/agent/sandbox/workspace/inputs/LICENSE"]
 keywords = ["openai", "agents", "kubernetes", "sandbox", "agent-substrate"]
 classifiers = [
     "Intended Audience :: Developers",
@@ -35,7 +35,7 @@ dev = ["pytest>=9.2,<10", "pytest-asyncio>=1.4,<2", "twine>=6,<7"]
 where = ["src"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "examples/document_intelligence/evals"]
 pythonpath = ["src", "."]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"

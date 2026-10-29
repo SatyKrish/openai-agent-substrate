@@ -53,7 +53,7 @@ Secret mount before document processing begins.
 
 The [Document Intelligence example](../examples/document_intelligence/README.md)
 keeps orchestration and original-input checks in the harness. The native SDK
-`Skills` capability discovers a local `document-analysis` bundle and materializes
+`Skills` capability discovers a local `agent/skills/document-analysis` bundle and materializes
 it in the Actor on `load_skill`. Shell tools read its instructions and run its
 extractor. The agent writes `work/analyze.py` with `apply_patch`, executes Python
 inside the Actor, and produces reports for independent host verification. Its

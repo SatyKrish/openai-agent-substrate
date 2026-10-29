@@ -45,8 +45,8 @@ workflow, and runs `tests/kubernetes/test_document_intelligence.py`. It uses the
 same dedicated local context and kubeconfig as the provider tests.
 
 The optional harness-pod test uses a temporary dummy-key Secret with an invalid
-endpoint and `OPENAI_MODEL=scripted`. It verifies mounted files, environment-based
-model selection, real Actor execution, and absence of harness credentials in the
+endpoint and an explicit `--test` override. It verifies mounted files, explicit evaluation
+selection, real Actor execution, and absence of harness credentials in the
 Actor. Build the harness first, then explicitly select the local cluster:
 
 ```sh
@@ -73,7 +73,7 @@ The wheel contains the SDK adapter, CLI, testing helpers, and license notices. T
 
 - Keep Actor lifecycle and credentials in the trusted application.
 - Implement backend behavior in `src/openai_agent_substrate/`.
-- Keep domain examples and their reusable skills under `examples/DOMAIN/`; keep generic session utilities under `scripts/`.
+- Keep domain agent definitions and skills under `examples/DOMAIN/agent/` and their evaluations under sibling `evals/`; keep generic session utilities under `scripts/`.
 - Keep provider scripted models and loopback emulation under `src/openai_agent_substrate/testing/`.
 - Put pure lifecycle tests in `tests/unit/` and HTTP/SDK contract tests in `tests/integration/`.
 - Keep unsupported capabilities explicit and preserve saved-session compatibility.

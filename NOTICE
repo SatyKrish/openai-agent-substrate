@@ -13,4 +13,5 @@ THIRD_PARTY_NOTICES.md for attribution and the original source.
 
 The Document Intelligence example includes synthetic fixtures under the MIT
 License, Copyright (c) 2026 SatyKrish and contributors. See
-examples/document_intelligence/fixtures/LICENSE and PROVENANCE.json.
+examples/document_intelligence/agent/sandbox/workspace/inputs/LICENSE and
+examples/document_intelligence/agent/sandbox/PROVENANCE.json.

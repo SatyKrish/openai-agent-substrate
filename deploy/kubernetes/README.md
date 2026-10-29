@@ -19,7 +19,7 @@ Supported configuration:
 | --- | --- |
 | `OPENAI_API_KEY` | Model API credential; required for live inference |
 | `OPENAI_BASE_URL` | OpenAI API base URL, default example `https://api.openai.com/v1` |
-| `OPENAI_MODEL` | Model selected by the pod; use `scripted` for an execution test without inference |
+| `OPENAI_MODEL` | Live model selected by the pod; scripted evaluation requires explicit `--test` |
 | `OPENAI_ORG_ID` | Optional OpenAI organization |
 | `OPENAI_PROJECT_ID` | Optional OpenAI project |
 
@@ -77,7 +77,7 @@ described in the [verification limits](../../docs/verification.md#limits-of-this
 ## Test, then run a live model
 
 ```sh
-# Uses the mounted configuration, overriding the model to scripted. No API calls.
+# Uses the mounted configuration, requesting explicit --test mode. No API calls.
 ./scripts/local-kubernetes.sh agent-test
 
 # Uses OPENAI_MODEL and OPENAI_BASE_URL from .env. Makes billable model API calls.
@@ -88,7 +88,9 @@ described in the [verification limits](../../docs/verification.md#limits-of-this
 ```
 
 Each run refreshes the Secret and starts a fresh Job, so edits to endpoint, model,
-and credentials take effect on the next run. The Job prints configuration key
+and credentials take effect on the next run. Setting `OPENAI_MODEL=scripted` does not enable test mode by itself. The
+`agent-test` command supplies explicit `--test`; `agent-run` uses live model
+configuration. The Job prints configuration key
 names and whether the mounted files match the environment; it omits values.
 Its SDK workflow still loads the skill, patches and executes analysis code, and
 checks the output contract. The sandbox is checked for absence of the harness

@@ -23,11 +23,11 @@ def test_env_secret_mount_and_endpoint_model_configuration(tmp_path):
     env_file = tmp_path / ".env"
     env_file.write_text("\n".join([
         f"OPENAI_API_KEY={canary}", "OPENAI_BASE_URL=https://example.invalid/v1",
-        "OPENAI_MODEL=scripted", "OPENAI_ORG_ID=org-test", "OPENAI_PROJECT_ID=proj_test", "",
+        "OPENAI_MODEL=configured-live-model", "OPENAI_ORG_ID=org-test", "OPENAI_PROJECT_ID=proj_test", "",
     ]))
     args = argparse.Namespace(context=context, kubeconfig=Path(os.environ["SUBSTRATE_KUBECONFIG"]),
         env_file=env_file, secret_name="openai-agent-env-smoke", state_file=agent.ROOT / "artifacts/local/agent-deployment.json",
-        template=os.environ["SUBSTRATE_DOCUMENT_TEMPLATE"], model=None, wait=False)
+        template=os.environ["SUBSTRATE_DOCUMENT_TEMPLATE"], model="scripted", wait=False)
     name = None
     try:
         agent.import_secret(args)
@@ -42,6 +42,8 @@ def test_env_secret_mount_and_endpoint_model_configuration(tmp_path):
         assert set(mounted["keys"]) == {"OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL", "OPENAI_ORG_ID", "OPENAI_PROJECT_ID"}
         assert summary["model"] == "scripted"
         assert summary["model_inference"] is False
+        assert summary["execution_mode"] == "scripted-eval"
+        assert summary["api_response_ids"] == []
         assert summary["host_contract_verified"] is True
         assert summary["actor_api_key_absent"] is True
         assert summary["tools_used"] == ["apply_patch", "exec_command", "load_skill"]

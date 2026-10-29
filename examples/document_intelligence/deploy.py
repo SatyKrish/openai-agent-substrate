@@ -36,7 +36,7 @@ def main():
     existing = json.loads(checked([*kubectl, "get", "actor-templates", "--atespace", args.atespace, "-o", "json"],
                                    capture_output=True).stdout)
     docker = ["docker"] + (["--context", args.docker_context] if args.docker_context else [])
-    checked([*docker, "build", "--provenance=false", "-f", str(ROOT / "examples/document_intelligence/Dockerfile"),
+    checked([*docker, "build", "--provenance=false", "-f", str(ROOT / "examples/document_intelligence/agent/sandbox/Dockerfile"),
              "-t", args.image, str(ROOT)])
     checked([*docker, "push", args.image])
     digests = json.loads(checked([*docker, "image", "inspect", args.image, "--format", "{{json .RepoDigests}}"],

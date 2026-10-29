@@ -15,6 +15,10 @@ This project follows the [harness separate from compute pattern](https://develop
 
 `SubstrateSandboxClient` connects the SDK sandbox interface to the Kubernetes execution environment. Agent Substrate manages Actor lifecycle and routes execution requests to each workspace. See the [architecture and supported capabilities](docs/architecture.md).
 
+The Document Intelligence agent uses the configured OpenAI model for normal
+execution. `--test` and `agent-test` select deterministic execution evaluations.
+See [its agent layout and live run guide](examples/document_intelligence/README.md).
+
 ## Quick start
 
 Requires Python 3.11+, macOS or Linux, and [uv](https://docs.astral.sh/uv/).
@@ -76,7 +80,7 @@ checks reconcile the downloaded results with original inputs.
 
 ```sh
 # Key-free execution test on the host protocol simulator (no isolation)
-uv run python -m examples.document_intelligence
+uv run python -m examples.document_intelligence --test
 
 # After local Kubernetes setup: build the Python Actor image, deploy, and test
 ./scripts/local-kubernetes.sh document-intelligence

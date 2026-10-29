@@ -9,18 +9,18 @@ import os
 from pathlib import Path
 
 from examples.document_intelligence.main import run
+from examples.document_intelligence.agent.lib.configuration import select_model
 
 
 def configuration():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model", help="Override OPENAI_MODEL; use scripted for a key-free execution test")
+    parser.add_argument("--model", help="Override the live OPENAI_MODEL")
+    parser.add_argument("--test", action="store_true", help="Explicitly run a scripted evaluation without API calls")
     args = parser.parse_args()
-    model = args.model or os.environ.get("OPENAI_MODEL")
-    if not model:
-        parser.error("Set OPENAI_MODEL in .env or provide --model")
-    if model != "scripted" and not os.environ.get("OPENAI_API_KEY"):
-        parser.error("Set OPENAI_API_KEY in .env before running a live model")
-    args.model = model
+    try:
+        args.model = select_model(args.model, test=args.test)
+    except ValueError as error:
+        parser.error(str(error))
     args.context = "in-cluster"
     args.kubeconfig = Path("/etc/agent/kubeconfig")
     args.atespace = os.environ.get("SUBSTRATE_ATESPACE", "ate-demo-sandbox")
