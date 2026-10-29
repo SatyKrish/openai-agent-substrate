@@ -89,6 +89,20 @@ uv run --locked twine check dist/*
 
 The wheel contains the SDK adapter, tracing, testing helpers, and license notices. It installs no console command or example application. The source distribution also contains the guides, examples, tests, diagram, and upstream execution server.
 
+## Dependency boundaries and manifest contracts
+
+`tests/deploy/` checks reusable base resources and dependency direction. Library
+tests stay under `tests/unit`, `tests/integration` and `tests/kubernetes` and do
+not import example applications. Example checks live under their `evals/`
+folders, including the Document Intelligence Kubernetes checks.
+
+Base, agent Job, reader and Jaeger builder outputs are compared against saved
+pre-refactor manifests. These JSON files are test expectations; production code
+does not read them. Review intentional manifest changes alongside the expected
+output. The wheel ships only `src/`; the source distribution includes deployment
+modules, examples, tests and guides. No separate example pyproject or workspace
+is required while its dependencies match the library.
+
 ## Working on the provider
 
 - Keep Actor lifecycle and credentials in the trusted application.

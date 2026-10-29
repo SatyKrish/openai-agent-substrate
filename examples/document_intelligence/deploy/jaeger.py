@@ -15,6 +15,39 @@ from deploy.kubernetes.base import resources as base
 from . import cli as agent
 
 
+JAEGER_IMAGE = "jaegertracing/all-in-one:1.76.0@sha256:ab6f1a1f0fb49ea08bcd19f6b84f6081d0d44b364b6de148e1798eb5816bacac"
+
+
+def build_jaeger(namespace=base.NAMESPACE):
+    base.dns_name(namespace)
+    def metadata(name):
+        return {"name": name, "namespace": namespace}
+
+    return {"apiVersion": "v1", "kind": "List", "items": [
+        {"apiVersion": "apps/v1", "kind": "Deployment", "metadata": metadata("jaeger-all-in-one"),
+         "spec": {"replicas": 1, "strategy": {"type": "Recreate"}, "selector": {"matchLabels": {"app": "jaeger-all-in-one"}},
+                  "template": {"metadata": {"labels": {"app": "jaeger-all-in-one"}}, "spec": {
+                      "automountServiceAccountToken": False,
+                      "securityContext": {"runAsNonRoot": True, "runAsUser": 10001, "runAsGroup": 10001, "seccompProfile": {"type": "RuntimeDefault"}},
+                      "containers": [{"name": "jaeger", "image": JAEGER_IMAGE,
+                          "env": [{"name": "COLLECTOR_OTLP_ENABLED", "value": "true"}, {"name": "SPAN_STORAGE_TYPE", "value": "memory"}, {"name": "MEMORY_MAX_TRACES", "value": "1000"}],
+                          "ports": [{"name": "otlp-http", "containerPort": 4318}, {"name": "query", "containerPort": 16686}, {"name": "admin", "containerPort": 14269}],
+                          "securityContext": {"allowPrivilegeEscalation": False, "readOnlyRootFilesystem": True, "capabilities": {"drop": ["ALL"]}},
+                          "resources": {"requests": {"cpu": "100m", "memory": "128Mi"}, "limits": {"cpu": "1", "memory": "512Mi"}},
+                          "readinessProbe": {"httpGet": {"path": "/", "port": "admin"}, "initialDelaySeconds": 2, "periodSeconds": 3},
+                          "volumeMounts": [{"name": "tmp", "mountPath": "/tmp"}],
+                      }],
+                      "volumes": [{"name": "tmp", "emptyDir": {}}],
+                  }}}},
+        {"apiVersion": "v1", "kind": "Service", "metadata": metadata("jaeger-all-in-one"),
+         "spec": {"type": "ClusterIP", "selector": {"app": "jaeger-all-in-one"}, "ports": [
+             {"name": "otlp-http", "port": 4318, "targetPort": "otlp-http"}, {"name": "query", "port": 16686, "targetPort": "query"}]}},
+        {"apiVersion": "v1", "kind": "ConfigMap", "metadata": metadata("openai-agent-tracing"),
+         "data": {"OTEL_EXPORTER_OTLP_ENDPOINT": f"http://jaeger-all-in-one.{namespace}.svc:4318",
+                  "OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf", "OTEL_SERVICE_NAME": "openai-agent-substrate"}},
+    ]}
+
+
 def verify_trace(payload, summary):
     traces = payload.get("data", [])
     if len(traces) != 1:
@@ -92,16 +125,17 @@ def main():
     parser.add_argument("--summary", type=Path, help="Document Intelligence verification.json for this run")
     parser.add_argument("--query-url", default="http://127.0.0.1:16686")
     parser.add_argument("--output-dir", type=Path, default=agent.ROOT / "artifacts/local/jaeger")
+    base.add_arguments(parser)
     args = parser.parse_args()
     if args.action in {"setup", "ui"} and (not args.context or not args.kubeconfig):
         parser.error("setup/ui require explicit --context and --kubeconfig")
     if args.action == "setup":
-        agent.apply(args, base.namespace_resource())
-        agent.apply(args, json.loads((agent.MANIFESTS / "jaeger-all-in-one.json").read_text()))
-        agent.kubectl(args, "rollout", "status", "deployment/jaeger-all-in-one", "-n", agent.NAMESPACE, "--timeout=180s")
+        agent.apply(args, base.namespace_resource(args.namespace))
+        agent.apply(args, build_jaeger(args.namespace))
+        agent.kubectl(args, "rollout", "status", "deployment/jaeger-all-in-one", "-n", args.namespace, "--timeout=180s")
         print("Jaeger is ready. New agent Jobs receive the OTLP configuration.")
     elif args.action == "ui":
-        agent.kubectl(args, "port-forward", "service/jaeger-all-in-one", "16686:16686", "-n", agent.NAMESPACE, "--address=127.0.0.1")
+        agent.kubectl(args, "port-forward", "service/jaeger-all-in-one", "16686:16686", "-n", args.namespace, "--address=127.0.0.1")
     else:
         if not args.summary:
             parser.error("verify requires --summary")

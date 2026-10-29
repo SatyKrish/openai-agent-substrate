@@ -111,7 +111,7 @@ def parse_args(argv=None):
     parser.add_argument("--kubeconfig", type=Path)
     parser.add_argument("--api-endpoint", help="Optional direct Substrate gRPC API address")
     parser.add_argument("--atespace", default="ate-demo-sandbox")
-    parser.add_argument("--template", help="Python-capable ActorTemplate produced by deploy.py")
+    parser.add_argument("--template", help="Python-capable ActorTemplate produced by the deployment CLI")
     parser.add_argument("--model", help="OpenAI model ID; defaults to OPENAI_MODEL")
     parser.add_argument("--test", action="store_true", help="Explicitly run the scripted execution evaluation without API calls")
     parser.add_argument("--keep-actor", action="store_true")
@@ -123,7 +123,7 @@ def parse_args(argv=None):
     except ValueError as error:
         parser.error(str(error))
     if args.backend == "substrate" and (not args.context or not args.template):
-        parser.error("Substrate requires --context and the Python-capable --template from deploy.py")
+        parser.error("Substrate requires --context and the Python-capable --template from the deployment CLI")
     if args.backend == "local" and (args.model != "scripted" or args.keep_actor):
         parser.error("Local mode only supports a disposable scripted workflow; it executes on the host")
     return args

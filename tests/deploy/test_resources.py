@@ -69,3 +69,32 @@ def test_forwarding_is_restricted_to_discovered_router_pods(monkeypatch, names):
     forwards = [rule for rule in role["rules"] if "pods/portforward" in rule["resources"]]
     assert forwards and all(rule["resourceNames"] == names for rule in forwards)
     assert not any("pods" in rule["resources"] and "get" in rule["verbs"] and "resourceNames" not in rule for rule in role["rules"])
+
+
+def test_base_matches_pre_refactor_deployment():
+    from pathlib import Path
+    expected = json.loads((Path(__file__).parent / "fixtures/base.json").read_text())
+    assert resources.build_resources(["router-b", "router-a", "router-a"]) == expected
+
+
+def test_independent_application_permissions_and_connection_settings():
+    config = resources.ApplicationResources(namespace="invoice-app", service_account="invoice-agent", resource_prefix="invoice", artifacts_claim="invoice-reports", control_namespace="substrate-system")
+    manifest = resources.build_resources(["router-a"], config)
+    by_kind = {item["kind"]: item for item in manifest["items"]}
+    assert by_kind["Namespace"]["metadata"]["name"] == "invoice-app"
+    assert by_kind["Role"]["metadata"] == {"name": "invoice-client", "namespace": "substrate-system"}
+    assert by_kind["RoleBinding"]["subjects"] == [{"kind": "ServiceAccount", "name": "invoice-agent", "namespace": "invoice-app"}]
+    assert by_kind["ClusterRoleBinding"]["metadata"]["name"] == "invoice-trust-bundles"
+    assert by_kind["ConfigMap"]["metadata"]["name"] == "invoice-kubeconfig"
+    assert by_kind["PersistentVolumeClaim"]["metadata"]["name"] == "invoice-reports"
+
+
+def test_empty_forwarding_grant_is_never_built():
+    with pytest.raises(ValueError, match="Router pod names"):
+        resources.build_resources([])
+
+
+def test_resource_builders_return_independent_objects():
+    first = resources.build_resources(["router-a"])
+    first["items"].clear()
+    assert resources.build_resources(["router-a"])["items"]

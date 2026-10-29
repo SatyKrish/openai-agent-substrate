@@ -16,7 +16,7 @@ Date: 2026-10-29.
 
 | Check | Result |
 | --- | --- |
-| Default unit/integration suite | 72 passed; real-cluster checks are opt-in |
+| Default unit/integration suite | 85 passed; five real-cluster checks are opt-in |
 | Unit/integration suite using the actual upstream Go execution server (before tracing change) | 63 passed; four real-cluster tests skipped |
 | Opt-in Kubernetes integration test | Passed against a fresh real Actor |
 | SDK scripted workflow on Kubernetes | Passed: shell tool execution, report creation, serialized session resume, and preserved edits |
@@ -26,7 +26,7 @@ Date: 2026-10-29.
 | Domain artifact rejection tests | Passed: altered citations, calculations, CSV, missing report evidence/limitations, staged digest mismatches, and source-table disagreements are rejected |
 | Secret-backed Kubernetes agent pod | Passed: five OpenAI settings match mounted files and environment, an explicit evaluation override is required, and real document analysis runs with no harness credential in the Actor |
 | Live OpenAI Document Intelligence on Kubernetes | Passed with `gpt-6.1-terra`: seven API responses, native skill/shell/patch tools, model-authored Python, independent artifact validation, and Actor cleanup |
-| Full suite with all local Kubernetes and Jaeger checks enabled | 77 passed, no skips; includes the Secret-backed harness and Jaeger query API |
+| Full suite with all local Kubernetes and Jaeger checks enabled | 90 passed, no skips; includes the Secret-backed harness and Jaeger query API |
 | Source distribution and wheel | Built successfully; `twine check` passed |
 
 The Kubernetes path uses owned loopback `kubectl ate proxy actor` processes and authenticated Substrate ingress. The scripted infrastructure tests exercise the real SDK runner and actual sandbox execution without model calls. The separate live OpenAI run is recorded below.
@@ -166,6 +166,29 @@ To test recovery beyond the node-local checkpoint, the test reverted this alread
 A new SDK session then resumed the same Actor through authenticated ingress. The report matched the host's original bytes and the edited input remained intact. The Actor was suspended again with another completed durable snapshot.
 
 Evidence is saved locally under ignored `artifacts/local/`, including `recovery-verification.json`, before/after Actor status, demo reports, and the setup/test logs. The directory also contains kubeconfig credentials and must not be published as a whole.
+
+## Library, base deployment and example boundaries
+
+The deployment split passed the existing local suite and a Kubernetes test of
+its relocated harness entrypoint. Both Actor and harness images built from the
+new example-owned Dockerfiles. The library wheel was inspected and imported
+outside the checkout: it contains the provider and testing helpers, with no
+example application or installed demo command.
+
+Python builders now produce the reusable base resources and the example Job,
+reader and Jaeger resources. Their full output matches saved manifests from
+before the refactor. Dependency tests enforce the library/base/example direction,
+and configurable base names are tested independently of Document Intelligence.
+The rebuilt harness and applied base/Jaeger resources passed the full local
+suite with every Kubernetes flag enabled: 90 passed, with no skips.
+
+The wheel and source distribution pass `twine check`. The source archive contains
+both relocated Dockerfiles and the JSON test expectations. An extracted source
+distribution passed 85 tests, with its five cluster checks disabled. This run used
+a temporary directory because macOS blocks the SDK's directory-descriptor
+traversal into Documents; the SDK file checks were preserved. Ruff and the
+focused mypy targets pass. These refactor checks used explicit scripted models;
+the earlier live OpenAI and Jaeger evidence remains recorded above.
 
 ## Limits of this verification
 

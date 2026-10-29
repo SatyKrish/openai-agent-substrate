@@ -106,48 +106,51 @@ def build(args):
 
 
 def run_job(args):
+    config = base.configuration(args)
     state = json.loads(args.state_file.read_text())
     if state["context"] != args.context:
         raise ValueError("Harness setup belongs to a different Kubernetes context; run build for this cluster")
     # Require the Secret before creating a pod; never display its data.
-    kubectl(args, "get", "secret", args.secret_name, "-n", NAMESPACE, "-o", "name", capture_output=True)
-    job = make_job(state["image"], args.template, args.model, args.secret_name)
+    kubectl(args, "get", "secret", args.secret_name, "-n", config.namespace, "-o", "name", capture_output=True)
+    job = make_job(state["image"], args.template, args.model, args.secret_name, resources=config)
     apply(args, job)
     name = job["metadata"]["name"]
-    print(f"Created {NAMESPACE}/{name}", flush=True)
+    print(f"Created {config.namespace}/{name}", flush=True)
     if args.wait:
         wait_for_job(args, name)
     return name
 
 
 def wait_for_job(args, name):
+    config = base.configuration(args)
     deadline = time.monotonic() + 1800
     while time.monotonic() < deadline:
-        status = json.loads(kubectl(args, "get", "job", name, "-n", NAMESPACE, "-o", "json", capture_output=True).stdout).get("status", {})
+        status = json.loads(kubectl(args, "get", "job", name, "-n", config.namespace, "-o", "json", capture_output=True).stdout).get("status", {})
         if status.get("succeeded") or status.get("failed"):
-            kubectl(args, "logs", "job/" + name, "-n", NAMESPACE, "--tail=150")
+            kubectl(args, "logs", "job/" + name, "-n", config.namespace, "--tail=150")
             if status.get("failed"):
                 raise RuntimeError(f"Agent Job {name} failed")
-            print(f"Agent Job {name} completed. Artifacts are retained on PVC openai-agent-artifacts.")
+            print(f"Agent Job {name} completed. Artifacts are retained on PVC {config.artifacts_claim}.")
             return
         time.sleep(2)
     raise TimeoutError(f"Timed out waiting for Agent Job {name}")
 
 
 def collect(args):
+    config = base.configuration(args)
     state = json.loads(args.state_file.read_text())
     if state["context"] != args.context:
         raise ValueError("Harness setup belongs to a different Kubernetes context")
     name = "openai-agent-reader-" + uuid.uuid4().hex[:12]
-    pod = make_reader_pod(state["image"], name)
+    pod = make_reader_pod(state["image"], name, resources=config)
     try:
         apply(args, pod)
-        kubectl(args, "wait", "--for=condition=Ready", "pod/" + name, "-n", NAMESPACE, "--timeout=120s", capture_output=True)
+        kubectl(args, "wait", "--for=condition=Ready", "pod/" + name, "-n", config.namespace, "--timeout=120s", capture_output=True)
         args.output_dir.mkdir(parents=True, exist_ok=True)
-        kubectl(args, "cp", "-n", NAMESPACE, name + ":/artifacts/.", str(args.output_dir))
+        kubectl(args, "cp", "-n", config.namespace, name + ":/artifacts/.", str(args.output_dir))
         print(f"Collected agent artifacts into {args.output_dir}")
     finally:
-        kubectl(args, "delete", "pod", name, "-n", NAMESPACE, "--ignore-not-found", capture_output=True)
+        kubectl(args, "delete", "pod", name, "-n", config.namespace, "--ignore-not-found", capture_output=True)
 
 
 def main():
@@ -166,6 +169,7 @@ def main():
     parser.add_argument("--model", help="Override the mounted OPENAI_MODEL; scripted performs no model inference")
     parser.add_argument("--wait", action="store_true")
     parser.add_argument("--output-dir", type=Path, help="Artifact collection or sandbox deployment output directory")
+    base.add_arguments(parser)
     args = parser.parse_args()
     if args.action != "sandbox" and not args.kubeconfig:
         parser.error("this action requires --kubeconfig")

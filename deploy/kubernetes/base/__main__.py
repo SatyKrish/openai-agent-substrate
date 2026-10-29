@@ -15,6 +15,7 @@ def main():
     parser.add_argument("--kubeconfig", type=Path, required=True)
     parser.add_argument("--env-file", type=Path, default=resources.ROOT / ".env")
     parser.add_argument("--secret-name", default="openai-agent-env")
+    resources.add_arguments(parser)
     args = parser.parse_args()
     {"resources": resources.configure_resources, "secret": resources.import_secret}[args.action](args)
 

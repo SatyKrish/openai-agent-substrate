@@ -20,7 +20,7 @@ the harness, deploy Jaeger, and run the agent:
 
 `agent-run` performs real model inference. For an explicit execution evaluation
 without model calls, use `agent-test` instead. Jaeger all-in-one 1.76.0 is pinned
-by digest in `examples/document_intelligence/deploy/jaeger-all-in-one.json`. It runs in namespace
+by digest in `examples/document_intelligence/deploy/jaeger.py`. It runs in namespace
 `openai-agent-substrate` with an in-memory store and ClusterIP Service. It has
 no harness Secret mount or service-account token. Traces disappear when the
 Jaeger pod restarts; this deployment is for local development.

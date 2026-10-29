@@ -1,0 +1,57 @@
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": {
+    "name": "reader-test",
+    "namespace": "openai-agent-substrate"
+  },
+  "spec": {
+    "automountServiceAccountToken": false,
+    "restartPolicy": "Never",
+    "securityContext": {
+      "runAsNonRoot": true,
+      "runAsUser": 10001,
+      "runAsGroup": 10001,
+      "fsGroup": 10001,
+      "seccompProfile": {
+        "type": "RuntimeDefault"
+      }
+    },
+    "containers": [
+      {
+        "name": "reader",
+        "image": "registry.example/harness@sha256:abc",
+        "command": [
+          "python",
+          "-c",
+          "import time; time.sleep(600)"
+        ],
+        "securityContext": {
+          "allowPrivilegeEscalation": false,
+          "readOnlyRootFilesystem": true,
+          "capabilities": {
+            "drop": [
+              "ALL"
+            ]
+          }
+        },
+        "volumeMounts": [
+          {
+            "name": "artifacts",
+            "mountPath": "/artifacts",
+            "readOnly": true
+          }
+        ]
+      }
+    ],
+    "volumes": [
+      {
+        "name": "artifacts",
+        "persistentVolumeClaim": {
+          "claimName": "openai-agent-artifacts",
+          "readOnly": true
+        }
+      }
+    ]
+  }
+}

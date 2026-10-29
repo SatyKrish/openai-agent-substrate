@@ -1,0 +1,206 @@
+{
+  "apiVersion": "v1",
+  "kind": "List",
+  "items": [
+    {
+      "apiVersion": "v1",
+      "kind": "Namespace",
+      "metadata": {
+        "name": "openai-agent-substrate",
+        "labels": {
+          "ate.dev/api-access": "true"
+        }
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "ServiceAccount",
+      "metadata": {
+        "name": "openai-agent",
+        "namespace": "openai-agent-substrate"
+      }
+    },
+    {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "Role",
+      "metadata": {
+        "name": "openai-agent-client",
+        "namespace": "ate-system"
+      },
+      "rules": [
+        {
+          "apiGroups": [
+            ""
+          ],
+          "resources": [
+            "services"
+          ],
+          "resourceNames": [
+            "atenet-router"
+          ],
+          "verbs": [
+            "get"
+          ]
+        },
+        {
+          "apiGroups": [
+            ""
+          ],
+          "resources": [
+            "pods"
+          ],
+          "verbs": [
+            "list"
+          ]
+        },
+        {
+          "apiGroups": [
+            ""
+          ],
+          "resources": [
+            "pods"
+          ],
+          "resourceNames": [
+            "router-a",
+            "router-b"
+          ],
+          "verbs": [
+            "get"
+          ]
+        },
+        {
+          "apiGroups": [
+            ""
+          ],
+          "resources": [
+            "pods/portforward"
+          ],
+          "resourceNames": [
+            "router-a",
+            "router-b"
+          ],
+          "verbs": [
+            "get",
+            "create"
+          ]
+        },
+        {
+          "apiGroups": [
+            ""
+          ],
+          "resources": [
+            "serviceaccounts/token"
+          ],
+          "resourceNames": [
+            "ate-client"
+          ],
+          "verbs": [
+            "create"
+          ]
+        },
+        {
+          "apiGroups": [
+            "certificates.k8s.io"
+          ],
+          "resources": [
+            "podcertificaterequests"
+          ],
+          "verbs": [
+            "create",
+            "get",
+            "delete"
+          ]
+        }
+      ]
+    },
+    {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "RoleBinding",
+      "metadata": {
+        "name": "openai-agent-client",
+        "namespace": "ate-system"
+      },
+      "subjects": [
+        {
+          "kind": "ServiceAccount",
+          "name": "openai-agent",
+          "namespace": "openai-agent-substrate"
+        }
+      ],
+      "roleRef": {
+        "apiGroup": "rbac.authorization.k8s.io",
+        "kind": "Role",
+        "name": "openai-agent-client"
+      }
+    },
+    {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "ClusterRole",
+      "metadata": {
+        "name": "openai-agent-trust-bundles"
+      },
+      "rules": [
+        {
+          "apiGroups": [
+            "certificates.k8s.io"
+          ],
+          "resources": [
+            "clustertrustbundles"
+          ],
+          "verbs": [
+            "get",
+            "list"
+          ]
+        }
+      ]
+    },
+    {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "ClusterRoleBinding",
+      "metadata": {
+        "name": "openai-agent-trust-bundles"
+      },
+      "subjects": [
+        {
+          "kind": "ServiceAccount",
+          "name": "openai-agent",
+          "namespace": "openai-agent-substrate"
+        }
+      ],
+      "roleRef": {
+        "apiGroup": "rbac.authorization.k8s.io",
+        "kind": "ClusterRole",
+        "name": "openai-agent-trust-bundles"
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "ConfigMap",
+      "metadata": {
+        "name": "openai-agent-kubeconfig",
+        "namespace": "openai-agent-substrate"
+      },
+      "data": {
+        "kubeconfig": "{\"apiVersion\":\"v1\",\"kind\":\"Config\",\"clusters\":[{\"name\":\"cluster\",\"cluster\":{\"server\":\"https://kubernetes.default.svc\",\"certificate-authority\":\"/var/run/secrets/kubernetes.io/serviceaccount/ca.crt\"}}],\"users\":[{\"name\":\"agent\",\"user\":{\"tokenFile\":\"/var/run/secrets/kubernetes.io/serviceaccount/token\"}}],\"contexts\":[{\"name\":\"in-cluster\",\"context\":{\"cluster\":\"cluster\",\"user\":\"agent\"}}],\"current-context\":\"in-cluster\"}"
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "PersistentVolumeClaim",
+      "metadata": {
+        "name": "openai-agent-artifacts",
+        "namespace": "openai-agent-substrate"
+      },
+      "spec": {
+        "accessModes": [
+          "ReadWriteOnce"
+        ],
+        "resources": {
+          "requests": {
+            "storage": "1Gi"
+          }
+        }
+      }
+    }
+  ]
+}

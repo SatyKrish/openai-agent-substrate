@@ -68,17 +68,17 @@ volumes:
       defaultMode: 0440
 ```
 
-The complete [Job manifest](agent-job.json) also configures a non-root user,
+The complete [Job builder](job.py) also configures a non-root user,
 read-only root filesystem, bounded resources, and `backoffLimit: 0` to avoid
-automatic workflow replays. The [resource manifest](../../../deploy/kubernetes/base/resources.json) grants the
+automatic workflow replays. The [resource builders](../../../deploy/kubernetes/base/resources.py) grants the
 dedicated harness ServiceAccount the operations needed by the pinned development
 Substrate CLI, including API token requests, trust bundles, certificate requests,
 and forwarding restricted to the current router pod names. Pod listing remains
 namespace-wide because the pinned upstream router client uses a label selector;
 it cannot be removed merely by setting a direct API endpoint. It grants no Secret-read verbs or cluster-admin. The API itself uses the direct
 in-cluster Service address `api.ate-system.svc:443`; forwarding to API and database
-pods is denied. Setup renders the Role from the router service selector; applying
-`resources.json` directly leaves non-matching placeholder pod names. Run
+pods is denied. Setup discovers router pods from the router Service selector
+and builds their exact Role grant. Empty discovery is rejected. Run
 `python -m deploy.kubernetes.base resources` after router rollouts, or use the local run helpers,
 which refresh the allowlist automatically.
 Substrate API/router identities remain the upstream shared development identities
