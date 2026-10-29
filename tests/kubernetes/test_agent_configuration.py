@@ -4,6 +4,7 @@
 import argparse
 import json
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -51,3 +52,15 @@ def test_env_secret_mount_and_endpoint_model_configuration(tmp_path):
         if name:
             agent.kubectl(args, "delete", "job", name, "-n", agent.NAMESPACE, "--ignore-not-found", capture_output=True)
         agent.kubectl(args, "delete", "secret", args.secret_name, "-n", agent.NAMESPACE, "--ignore-not-found", capture_output=True)
+
+
+def test_harness_cannot_forward_to_control_plane_pods():
+    args = argparse.Namespace(context=os.environ["SUBSTRATE_KUBE_CONTEXT"], kubeconfig=Path(os.environ["SUBSTRATE_KUBECONFIG"]))
+    assert args.context.startswith("kind-")
+    identity = "system:serviceaccount:openai-agent-substrate:openai-agent"
+    pods = json.loads(agent.kubectl(args, "get", "pods", "-n", "ate-system", "-o", "json", capture_output=True).stdout)["items"]
+    for app, expected in [("atenet-router", True), ("ate-api-server", False)]:
+        name = next(p["metadata"]["name"] for p in pods if p["metadata"].get("labels", {}).get("app") == app)
+        prefix = ["kubectl", "--context", args.context, "--kubeconfig", str(args.kubeconfig)]
+        result = subprocess.run(prefix + ["auth", "can-i", "create", "pods/" + name, "--subresource=portforward", "-n", "ate-system", "--as", identity], capture_output=True, text=True)
+        assert (result.returncode == 0) == expected

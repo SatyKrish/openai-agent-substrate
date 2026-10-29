@@ -73,6 +73,8 @@ class ProcessTransport:
             # Preserve the nonzero code; the upstream protocol cannot distinguish all signals.
             if result.get("error") and result["exitCode"] == 0:
                 raise ProcessTransportError("Execution server reported an error with exitCode=0")
+            # Output is JSON text: invalid UTF-8 bytes were already replaced upstream.
+            # Use the provider file API (base64) when byte-for-byte fidelity is required.
             return ProcessResult(result["stdout"].encode(), result["stderr"].encode(), result["exitCode"])
         except urllib.error.HTTPError as error:
             raise ProcessTransportError(f"Execution endpoint returned HTTP {error.code}; command was not retried") from None

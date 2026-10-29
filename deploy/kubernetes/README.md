@@ -70,7 +70,14 @@ read-only root filesystem, bounded resources, and `backoffLimit: 0` to avoid
 automatic workflow replays. The [resource manifest](resources.json) grants the
 dedicated harness ServiceAccount the operations needed by the pinned development
 Substrate CLI, including API token requests, trust bundles, certificate requests,
-and control-plane port forwarding. It grants no Secret-read verbs or cluster-admin.
+and forwarding restricted to the current router pod names. Pod listing remains
+namespace-wide because the pinned upstream router client uses a label selector;
+it cannot be removed merely by setting a direct API endpoint. It grants no Secret-read verbs or cluster-admin. The API itself uses the direct
+in-cluster Service address `api.ate-system.svc:443`; forwarding to API and database
+pods is denied. Setup renders the Role from the router service selector; applying
+`resources.json` directly leaves non-matching placeholder pod names. Run
+`kubernetes_agent.py resources` after router rollouts, or use the local run helpers,
+which refresh the allowlist automatically.
 Substrate API/router identities remain the upstream shared development identities
 described in the [verification limits](../../docs/verification.md#limits-of-this-verification).
 
@@ -110,8 +117,12 @@ uv run python scripts/kubernetes_agent.py secret \
 
 The local image builder targets a homogeneous ARM64 or AMD64 cluster, compiles
 `kubectl-ate` from the pinned upstream checkout, verifies the downloaded
-`kubectl` checksum, installs locked Python dependencies, and registers the image
+`kubectl` against the committed version/architecture checksum pins, installs locked Python dependencies, and registers the image
 by digest. See `scripts/kubernetes_agent.py --help` for build/run/collect options.
 
 This follows the standard Kubernetes mechanisms for
 [Secret volumes and environment variables](https://kubernetes.io/docs/tasks/inject-data-application/distribute-credentials-secure/).
+
+The dedicated harness namespace carries `ate.dev/api-access=true`, as required by
+Substrate's existing API ingress policy. Secret refresh preserves this label;
+no control-plane NetworkPolicy is relaxed to enable the direct API connection.

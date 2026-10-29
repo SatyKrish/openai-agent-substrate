@@ -21,6 +21,7 @@ def configuration():
         args.model = select_model(args.model, test=args.test)
     except ValueError as error:
         parser.error(str(error))
+    args.api_endpoint = os.environ.get("SUBSTRATE_API_ENDPOINT", "api.ate-system.svc:443")
     args.context = "in-cluster"
     args.kubeconfig = Path("/etc/agent/kubeconfig")
     args.atespace = os.environ.get("SUBSTRATE_ATESPACE", "ate-demo-sandbox")

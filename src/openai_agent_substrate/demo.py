@@ -99,9 +99,9 @@ async def run_demo(args, local=None):
             await client.delete(session)
 
 
-def main():
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="OpenAI SandboxAgent + Agent Substrate reference implementation")
-    parser.add_argument("--backend", choices=["local", "substrate"], default="local")
+    parser.add_argument("--backend", choices=["local", "substrate"], default="substrate")
     parser.add_argument("--router-url", help="Optional trusted HTTP gateway; defaults to an authenticated per-Actor kubectl proxy")
     parser.add_argument("--atespace", default="ate-demo-sandbox")
     parser.add_argument("--template", default="sandbox-template")
@@ -112,7 +112,7 @@ def main():
     parser.add_argument("--keep-actor", action="store_true", help="Suspend and save session.json instead of deleting the Actor")
     parser.add_argument("--output-dir", type=Path, default=Path("artifacts"))
     parser.add_argument("--upstream-binary", help="Local wire compatibility check using the upstream Go sandbox server")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.backend == "substrate" and not args.context:
         parser.error("--backend substrate requires --context")
     if args.backend == "local" and (args.model != "scripted" or args.keep_actor):
@@ -121,6 +121,11 @@ def main():
         parser.error("--upstream-binary is only for local compatibility testing")
     if args.model != "scripted" and not os.getenv("OPENAI_API_KEY"):
         parser.error("Set OPENAI_API_KEY in the host environment for a live model")
+    return args
+
+
+def main():
+    args = parse_args()
     local_context = LocalExecutionServer(upstream_binary=args.upstream_binary) if args.backend == "local" else nullcontext(None)
     with local_context as local:
         asyncio.run(run_demo(args, local))

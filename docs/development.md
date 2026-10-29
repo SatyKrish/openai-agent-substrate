@@ -11,8 +11,10 @@ The default tests and demo use a deterministic model and temporary local workspa
 ## Tests and execution checks
 
 ```sh
+uv run ruff check src scripts deploy examples tests conftest.py
+uv run mypy
 uv run pytest -q
-uv run openai-agent-substrate --output-dir artifacts/local
+uv run openai-agent-substrate --backend local --output-dir artifacts/local
 ```
 
 Tests cover native skill loading, domain code execution, exact citations and artifact reconciliation, the actual SDK tool loop, filesystem patching, binary/chunked files, shell output/exit codes, routing headers, state serialization and resume, lost Actors, unsupported manifest options, file limits, and non-replay of failed executions.
@@ -23,7 +25,7 @@ For wire compatibility with the actual upstream Go execution server:
 mkdir -p artifacts
 go build -o artifacts/upstream-sandbox-server third_party/substrate-sandbox/main.go
 SUBSTRATE_DEMO_BINARY="$PWD/artifacts/upstream-sandbox-server" uv run pytest -q
-uv run openai-agent-substrate \
+uv run openai-agent-substrate --backend local \
   --upstream-binary "$PWD/artifacts/upstream-sandbox-server" \
   --output-dir artifacts/upstream
 ```
@@ -80,3 +82,24 @@ The wheel contains the SDK adapter, CLI, testing helpers, and license notices. T
 - Update [architecture and limits](architecture.md) when behavior changes.
 
 See [CONTRIBUTING.md](../CONTRIBUTING.md) for contribution and review guidance, and [verification.md](verification.md) for the checks actually performed.
+
+## CI and pinned tools
+
+CI installs Go from `.go-version` using a commit-pinned setup action. The normal
+Python matrix runs the full suite once; the Go-server pass runs the protocol and
+document execution checks rather than repeating unrelated unit tests. Ruff checks
+syntax and Pyflakes rules across authored Python; mypy checks the typed transport,
+proxy, and lifecycle modules. These focused type checks do not cover every SDK
+adapter or example module.
+
+For a real cluster run on GitHub, manually dispatch CI with the `kubernetes`
+boolean enabled. That separate, bounded job installs Kind/Substrate, tests the
+provider and document workflow, runs the Secret-mounted harness checks, and
+collects artifacts. It uses an empty-key configuration and explicit evaluation
+mode, so it requires no OpenAI credential. The new dispatch job has been configured
+but has not been executed on GitHub in this session.
+
+The executable Substrate revision is centralized in `.substrate-revision`.
+Kubectl's version and architecture hashes are committed in
+`deploy/kubernetes/kubectl-checksums.json`; updates must replace those pins along
+with validation of the new binaries.

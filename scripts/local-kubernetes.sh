@@ -7,7 +7,7 @@ umask 077
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LOCAL_DIR="$PROJECT_ROOT/artifacts/local"
 SOURCE_DIR="${SUBSTRATE_SOURCE_DIR:-$LOCAL_DIR/substrate}"
-PIN=6949841e9dc98edbd2e0042ef95c19b4ce20aef5
+PIN="$(cat "$PROJECT_ROOT/.substrate-revision")"
 CLUSTER=openai-agent-substrate
 PROFILE=openai-agent-substrate
 export KUBECONFIG="$LOCAL_DIR/kubeconfig"
@@ -85,6 +85,7 @@ case "${1:-help}" in
     uv run --locked python scripts/kubernetes_agent.py build --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG" --source-dir "$SOURCE_DIR"
     ;;
   agent-run|agent-test)
+    uv run --locked python scripts/kubernetes_agent.py resources --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG"
     uv run --locked python scripts/kubernetes_agent.py secret --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG"
     DOCUMENT_TEMPLATE="$(uv run --locked python -c 'import json; print(json.load(open("artifacts/examples/document_intelligence/deployment/deployment.json"))["template"])')"
     AGENT_COMMAND=(uv run --locked python scripts/kubernetes_agent.py run --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG" --template "$DOCUMENT_TEMPLATE" --wait)

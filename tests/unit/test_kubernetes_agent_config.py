@@ -31,6 +31,7 @@ def test_secret_import_uses_stdin_and_does_not_log_values(monkeypatch, tmp_path,
     args = argparse.Namespace(env_file=path, secret_name="test-config")
     kubernetes_agent.import_secret(args)
     assert len(applied) == 2
+    assert applied[0]["metadata"]["labels"]["ate.dev/api-access"] == "true"
     assert applied[1]["data"]["OPENAI_API_KEY"] == resource["data"]["OPENAI_API_KEY"]
     assert "--from-env-file=" + str(path) in calls[0][0]
     assert key not in repr(calls)
@@ -52,11 +53,13 @@ def test_environment_parser_failures_do_not_disclose_input(monkeypatch, tmp_path
 
 
 def test_pod_reads_model_from_environment_and_explicit_override(monkeypatch):
+    monkeypatch.delenv("SUBSTRATE_API_ENDPOINT", raising=False)
     monkeypatch.setenv("OPENAI_MODEL", "project-model")
     monkeypatch.setenv("OPENAI_API_KEY", "not-a-real-key")
     monkeypatch.setenv("SUBSTRATE_TEMPLATE", "python-template")
     monkeypatch.setattr(sys, "argv", ["run_agent.py"])
     assert configuration().model == "project-model"
+    assert configuration().api_endpoint == "api.ate-system.svc:443"
     monkeypatch.setattr(sys, "argv", ["run_agent.py", "--test"])
     assert configuration().model == "scripted"
 

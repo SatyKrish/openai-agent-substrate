@@ -226,3 +226,56 @@ async def test_authenticated_proxy_is_owned_per_session_and_reopened_on_resume(s
         assert all(p.closed for p in control.proxies)
     finally:
         await client.delete(session)
+
+
+@pytest.mark.parametrize("symlink", [False, True])
+async def test_write_refuses_directory_without_leaving_uploads(client, server, symlink):
+    session = await client.create(manifest=Manifest(root=str(server.root), entries={"directory": Dir()}), options=options())
+    try:
+        async with session:
+            target = Path("directory")
+            if symlink:
+                await session.exec("ln", "-s", "directory", "directory-link", shell=False)
+                target = Path("directory-link")
+            with pytest.raises(ExecNonZeroError):
+                await session.write(target, io.BytesIO(b"must not become a child file"))
+            assert (server.root / "directory").is_dir()
+            assert not list(server.root.rglob(".oas-upload-*"))
+    finally:
+        await client.delete(session)
+
+
+@pytest.mark.parametrize("upload_fails", [False, True])
+async def test_upload_cleanup_never_masks_result(client, server, monkeypatch, upload_fails):
+    session = await client.create(manifest=Manifest(root=str(server.root)), options=options())
+    try:
+        async with session:
+            original = session._inner._checked
+
+            async def failing_checked(*command):
+                if command[0] == "rm":
+                    raise RuntimeError("cleanup transport failure")
+                if upload_fails and command[0] == "sh" and "base64 -d" in command[2]:
+                    raise RuntimeError("original upload transport failure")
+                return await original(*command)
+
+            monkeypatch.setattr(session._inner, "_checked", failing_checked)
+            if upload_fails:
+                with pytest.raises(RuntimeError, match="original upload transport failure"):
+                    await session.write(Path("result.txt"), io.BytesIO(b"data"))
+            else:
+                await session.write(Path("result.txt"), io.BytesIO(b"data"))
+                assert (server.root / "result.txt").read_bytes() == b"data"
+    finally:
+        await client.delete(session)
+
+
+async def test_command_output_is_utf8_text_but_file_reads_preserve_bytes(client, server):
+    session = await client.create(manifest=Manifest(root=str(server.root)), options=options())
+    try:
+        async with session:
+            result = await session.exec("printf '\\377\\376' > raw.bin; cat raw.bin")
+            assert result.stdout == "\ufffd\ufffd".encode("utf-8")
+            assert (await session.read(Path("raw.bin"))).read() == b"\xff\xfe"
+    finally:
+        await client.delete(session)

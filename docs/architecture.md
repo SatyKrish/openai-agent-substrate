@@ -23,7 +23,7 @@ flowchart LR
     Harness --> API[OpenAI API]
 ```
 
-The adapter sends `POST /process` with `command`, `cwd`, and a Go-duration `timeout`, plus `ate-target-actor: ATESPACE/ACTOR_NAME`. By default it owns a `kubectl ate proxy actor` process per session; the proxy obtains the required Pod Identity certificate and authenticates to Substrate ingress. It listens only on an ephemeral loopback port and is closed when the session closes. An explicit `router_url` selects a trusted external gateway instead. Control-plane credentials and the router endpoint are bound to the client, rather than restored from saved session state. Commands are never automatically retried, including on malformed responses, HTTP errors, or redirects: an ambiguous failure may have already executed a side effect.
+The adapter sends `POST /process` with `command`, `cwd`, and a Go-duration `timeout`, plus `ate-target-actor: ATESPACE/ACTOR_NAME`. By default it owns a `kubectl ate proxy actor` process per session; the proxy obtains the required Pod Identity certificate and authenticates to Substrate ingress. It listens only on an ephemeral loopback port and is closed when the session closes. This local port has no application authentication: any process able to connect to it can execute commands in that Actor. Loopback binding limits network exposure, but does not isolate users or processes sharing a host or pod network namespace. An explicit `router_url` selects a trusted external gateway instead. Control-plane credentials and the router endpoint are bound to the client, rather than restored from saved session state. Commands are never automatically retried, including on malformed responses, HTTP errors, or redirects: an ambiguous failure may have already executed a side effect.
 
 The upstream demo has no application authorization and buffers command output in memory. Use it only behind a trusted private ingress. Substrate provides the sandbox boundary; this adapter does not add authentication or make the demo production-ready.
 
@@ -33,6 +33,7 @@ The upstream demo has no application authorization and buffers command output in
 | Native SDK `Skills` with eager or lazy local skill files | Skills materialize as workspace files; Git-backed sources and external mounts remain unsupported |
 | `File`, `Dir`, `LocalFile`, and `LocalDir` manifests | No cloud mounts, GitRepo materialization, custom users/groups, manifest environment, or extra path grants |
 | Binary file reads/writes over base64 | 1 MiB per file; 4 MiB execution response; writes are chunked |
+| Command stdout/stderr as UTF-8 JSON text | Invalid UTF-8 bytes are replaced by U+FFFD upstream; use base64-backed file reads/writes for binary data |
 | Existing Actor suspension/resumption | Substrate owns snapshots; no portable SDK tar export/import or replacement Actor recovery |
 | Synchronous shell execution and nonzero exit codes | No PTY, stdin streaming, preview ports, or precise timeout-vs-signal classification |
 | One application owns a session at a time | Do not concurrently resume, run, or delete the same Actor from multiple workers |
@@ -48,6 +49,15 @@ Kubernetes ServiceAccount, and Substrate CLI remain in that harness pod. The
 untrusted execution Actor is a separate workload with its own image and workspace.
 A preflight check confirms the Actor has neither the harness API key nor its
 Secret mount before document processing begins.
+
+The harness calls the in-cluster API service directly at `api.ate-system.svc:443`.
+The pinned upstream Actor proxy still uses a Kubernetes port-forward for its
+router CONNECT tunnel, even when a direct API endpoint is configured. Its Role
+therefore allows forwarding only to the router pod names discovered during
+setup. Namespace-wide pod listing remains necessary for the upstream router
+selector; direct pod reads and forwarding are restricted to the named routers.
+The local run helpers refresh this allowlist before each Job. Direct helper users
+should run `scripts/kubernetes_agent.py resources` after router rollouts.
 
 ## Domain skills and code execution
 
@@ -68,3 +78,7 @@ with the harness. Scripted mode exercises the same SDK tools without inference.
 - [Verified Actor lifecycle CLI](https://github.com/agent-substrate/substrate/blob/6949841e9dc98edbd2e0042ef95c19b4ce20aef5/cmd/kubectl-ate/internal/cmd/actor.go)
 
 Upstream changes quickly. The provider was developed against the SDK above and Substrate commit `6949841e9dc98edbd2e0042ef95c19b4ce20aef5` (2026-10-29). The copied execution server retains its Apache-2.0 license in `third_party/substrate-sandbox/`. See [verification record](verification.md) for the checks performed in this environment.
+
+The dedicated harness namespace carries `ate.dev/api-access=true`, as required by
+Substrate's existing API ingress policy. Secret refresh preserves this label;
+no control-plane NetworkPolicy is relaxed to enable the direct API connection.

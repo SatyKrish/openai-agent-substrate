@@ -16,8 +16,8 @@ Date: 2026-10-29.
 
 | Check | Result |
 | --- | --- |
-| Default unit/integration suite | 51 passed; three real-cluster tests are skipped by default |
-| Unit/integration suite using the actual upstream Go execution server | 51 passed; three real-cluster tests skipped |
+| Default unit/integration suite | 63 passed; four real-cluster tests are skipped by default |
+| Unit/integration suite using the actual upstream Go execution server | 63 passed; four real-cluster tests skipped |
 | Opt-in Kubernetes integration test | Passed against a fresh real Actor |
 | SDK scripted workflow on Kubernetes | Passed: shell tool execution, report creation, serialized session resume, and preserved edits |
 | Kubernetes filesystem behavior | Passed: binary file round trips, SDK patching, and nonzero shell exit codes |
@@ -80,6 +80,26 @@ records identify `openai-live` or `scripted-eval` and include returned API respo
 IDs. Scripted evaluations have no API response IDs. The reorganized harness passed
 its real Kubernetes pod evaluation. A live OpenAI call remains unverified because
 no `.env` or API key was configured during these checks.
+
+## Review follow-up verification
+
+Directory writes and directory-symlink writes now fail without leaving uploaded
+children. Injected upload/cleanup failures confirm cleanup cannot replace the
+original upload error or turn a completed write into a failure. Both execution
+servers exercise those regressions. A binary-output check documents that command
+stdout is UTF-8 JSON text while the file API preserves the original bytes.
+
+The harness connects directly to `api.ate-system.svc:443`, using the namespace
+label required by Substrate's existing ingress policy. The pinned router proxy
+still requires port forwarding, so setup restricts that permission to discovered
+router pod names. Authorization checks allow the router and deny API/database
+pod forwarding. The Secret-mounted harness workflow passes with that narrower
+Role. The hardened artifact reader also passed server-side Restricted Pod Security
+admission and collected its reports successfully.
+
+Ruff and the focused mypy targets pass. The manual Kubernetes CI dispatch is
+configured; its GitHub-hosted run remains unverified. These infrastructure checks
+continue to use explicit scripted evaluations, with no live OpenAI API calls.
 
 ## External snapshot recovery
 

@@ -101,6 +101,7 @@ def parse_args(argv=None):
     parser.add_argument("--backend", choices=["local", "substrate"], help="Defaults to substrate; --test defaults to local")
     parser.add_argument("--context", help="Explicit Kubernetes context")
     parser.add_argument("--kubeconfig", type=Path)
+    parser.add_argument("--api-endpoint", help="Optional direct Substrate gRPC API address")
     parser.add_argument("--atespace", default="ate-demo-sandbox")
     parser.add_argument("--template", help="Python-capable ActorTemplate produced by deploy.py")
     parser.add_argument("--model", help="OpenAI model ID; defaults to OPENAI_MODEL")

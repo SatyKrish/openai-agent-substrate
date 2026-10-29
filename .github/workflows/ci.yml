@@ -5,6 +5,12 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      kubernetes:
+        description: Run the opt-in Kind/Substrate integration job
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -32,14 +38,22 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Install locked dependencies
         run: uv sync --locked
+      - name: Lint Python sources
+        run: uv run --locked ruff check src scripts deploy examples tests conftest.py
+      - name: Type-check transport, proxy, and lifecycle contracts
+        run: uv run --locked mypy
       - name: Run unit and integration tests
         run: uv run --locked pytest -q
       - name: Run the key-free demo
-        run: uv run --locked openai-agent-substrate
+        run: uv run --locked openai-agent-substrate --backend local
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: .go-version
+          cache: false
       - name: Build the upstream execution server
         run: go build -o artifacts/upstream-sandbox-server third_party/substrate-sandbox/main.go
       - name: Verify upstream protocol compatibility
-        run: uv run --locked pytest -q
+        run: uv run --locked pytest -q tests/integration examples/document_intelligence/evals/test_workflow.py
         env:
           SUBSTRATE_DEMO_BINARY: ${{ github.workspace }}/artifacts/upstream-sandbox-server
 
@@ -61,3 +75,43 @@ jobs:
         run: uv build --no-sources
       - name: Validate distribution metadata
         run: uv run --locked twine check dist/*
+
+  kubernetes:
+    name: Kubernetes integration (opt-in)
+    if: github.event_name == 'workflow_dispatch' && inputs.kubernetes
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.11.7"
+          python-version: "3.14"
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: .go-version
+          cache: false
+      - name: Configure a key-free harness
+        run: cp .env.example .env
+      - name: Set up Kind and Substrate
+        run: ./scripts/local-kubernetes.sh setup
+      - name: Verify provider on Kubernetes
+        run: ./scripts/local-kubernetes.sh test
+      - name: Prepare the harness and verify the document workflow
+        run: |
+          ./scripts/local-kubernetes.sh agent-setup
+          ./scripts/local-kubernetes.sh agent-test
+      - name: Run Secret-mounted harness integration test
+        run: |
+          export PATH="$PWD/artifacts/local/bin:$PATH"
+          export SUBSTRATE_DOCUMENT_TEMPLATE="$(uv run --locked python -c 'import json; print(json.load(open("artifacts/examples/document_intelligence/deployment/deployment.json"))["template"])')"
+          uv run --locked pytest -q tests/kubernetes/test_agent_configuration.py tests/kubernetes/test_document_intelligence.py
+        env:
+          SUBSTRATE_RUN_AGENT_POD_TESTS: "1"
+          SUBSTRATE_RUN_KUBERNETES_TESTS: "1"
+          SUBSTRATE_KUBE_CONTEXT: kind-openai-agent-substrate
+          SUBSTRATE_KUBECONFIG: ${{ github.workspace }}/artifacts/local/kubeconfig
+      - name: Verify artifact collection
+        run: ./scripts/local-kubernetes.sh agent-artifacts

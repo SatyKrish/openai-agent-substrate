@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 import io
 import uuid
+from contextlib import suppress
 from pathlib import Path, PurePosixPath
 from typing import Literal
 
@@ -253,9 +254,14 @@ class _SubstrateSession(BaseSandboxSession):
             for offset in range(0, len(payload), _WRITE_CHUNK_BYTES):
                 chunk = base64.b64encode(payload[offset:offset + _WRITE_CHUNK_BYTES]).decode()
                 await self._checked("sh", "-c", 'printf %s "$1" | base64 -d >> "$2"', "sh", chunk, str(temporary))
-            await self._checked("mv", "-f", str(temporary), str(target))
+            await self._checked(
+                "sh", "-c", '[ ! -d "$2" ] || exit 1; exec mv -f "$1" "$2"',
+                "sh", str(temporary), str(target),
+            )
         finally:
-            await self._checked("rm", "-f", str(temporary))
+            # A failed cleanup must not replace the upload result or its original error.
+            with suppress(Exception):
+                await self._checked("rm", "-f", str(temporary))
 
     async def persist_workspace(self) -> io.IOBase:
         raise NotImplementedError("Workspace persistence is provided by Substrate Actor snapshots")

@@ -27,12 +27,12 @@ Requires Python 3.11+, macOS or Linux, and [uv](https://docs.astral.sh/uv/).
 git clone https://github.com/SatyKrish/openai-agent-substrate.git
 cd openai-agent-substrate
 uv sync --locked
-uv run openai-agent-substrate
+uv run openai-agent-substrate --backend local
 ```
 
 The key-free demo invokes the real SDK runner with a scripted model, writes a report, serializes the session, reconnects, and verifies that edits survived. Results appear in `artifacts/`.
 
-**The default local mode is a protocol simulator that executes fixed commands on your host. It provides no sandbox isolation.** It requires no API key or cluster, and the CLI restricts it to the scripted model.
+**Explicit `--backend local` mode is a protocol simulator that executes fixed commands on your host. It provides no sandbox isolation.** It requires no API key or cluster, and the CLI restricts it to the scripted model. The CLI defaults to Substrate and requires an explicit Kubernetes context.
 
 ## Run on Kubernetes
 

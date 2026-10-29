@@ -1,4 +1,4 @@
-include conftest.py .dockerignore .env.example README.md LICENSE NOTICE THIRD_PARTY_NOTICES.md CONTRIBUTING.md SECURITY.md uv.lock
+include .substrate-revision .go-version conftest.py .dockerignore .env.example README.md LICENSE NOTICE THIRD_PARTY_NOTICES.md CONTRIBUTING.md SECURITY.md uv.lock
 recursive-include docs *.md *.png
 recursive-include examples *.py *.md *.csv *.json Dockerfile LICENSE
 recursive-include tests *.py

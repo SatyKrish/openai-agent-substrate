@@ -36,4 +36,4 @@ examples/
 Generic infrastructure utilities belong in `scripts/`. Use
 `scripts/resume_session.py` to inspect a retained Actor; see the
 [session guide](../docs/usage.md). The provider's small lifecycle smoke test
-remains available as `uv run openai-agent-substrate`.
+remains available as `uv run openai-agent-substrate --backend local`.

@@ -31,4 +31,4 @@ def build_manifest(inputs, analysis_id, root):
 def build_client(args, local=None):
     return SubstrateSandboxClient(atespace=args.atespace,
         router_url=local.url if local else None,
-        control=local.control if local else KubectlActorControl(context=args.context, kubeconfig=args.kubeconfig))
+        control=local.control if local else KubectlActorControl(context=args.context, kubeconfig=args.kubeconfig, endpoint=getattr(args, "api_endpoint", None)))

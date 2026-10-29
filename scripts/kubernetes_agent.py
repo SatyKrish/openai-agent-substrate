@@ -14,13 +14,15 @@ import subprocess
 import time
 import urllib.request
 import uuid
+from contextlib import suppress
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFESTS = ROOT / "deploy/kubernetes"
 NAMESPACE = "openai-agent-substrate"
 SECRET = "openai-agent-env"
-PIN = "6949841e9dc98edbd2e0042ef95c19b4ce20aef5"
+PIN = (ROOT / ".substrate-revision").read_text().strip()
+KUBECTL_RELEASE = json.loads((MANIFESTS / "kubectl-checksums.json").read_text())
 
 
 def checked(command, **kwargs):
@@ -37,6 +39,11 @@ def apply(args, resource):
                    input=json.dumps(resource).encode(), capture_output=True)
 
 
+def namespace_resource():
+    resources = json.loads((MANIFESTS / "resources.json").read_text())
+    return next(item for item in resources["items"] if item["kind"] == "Namespace")
+
+
 def import_secret(args):
     if not args.env_file.is_file():
         raise ValueError("No .env file found. Copy .env.example to .env and fill in the configuration.")
@@ -50,7 +57,8 @@ def import_secret(args):
         raise ValueError("Cannot parse .env; use plain KEY=VALUE lines without export statements") from None
     if not resource.get("data"):
         raise ValueError("The environment file contains no configuration entries")
-    apply(args, dict(apiVersion="v1", kind="Namespace", metadata=dict(name=NAMESPACE)))
+    # Preserve the label required by Substrate API ingress on every Secret refresh.
+    apply(args, namespace_resource())
     resource["metadata"]["labels"] = {"app.kubernetes.io/managed-by": "openai-agent-substrate"}
     try:
         apply(args, resource)
@@ -60,16 +68,55 @@ def import_secret(args):
 
 
 def download_kubectl(destination, architecture):
-    version = "v1.37.0"
-    base = f"https://dl.k8s.io/release/{version}/bin/linux/{architecture}/kubectl"
-    with urllib.request.urlopen(base + ".sha256", timeout=60) as response:
-        expected = response.read(256).decode().strip()
+    version = KUBECTL_RELEASE["version"]
+    expected = KUBECTL_RELEASE["sha256"].get(architecture)
+    if expected is None:
+        raise ValueError("Unsupported kubectl architecture: " + architecture)
     if not destination.exists() or hashlib.sha256(destination.read_bytes()).hexdigest() != expected:
-        with urllib.request.urlopen(base, timeout=120) as response, destination.open("wb") as handle:
-            shutil.copyfileobj(response, handle)
-    if hashlib.sha256(destination.read_bytes()).hexdigest() != expected:
-        raise RuntimeError("kubectl download checksum mismatch")
+        temporary = destination.with_name(destination.name + ".download-" + uuid.uuid4().hex)
+        try:
+            base = f"https://dl.k8s.io/release/{version}/bin/linux/{architecture}/kubectl"
+            with urllib.request.urlopen(base, timeout=120) as response, temporary.open("wb") as handle:
+                shutil.copyfileobj(response, handle)
+            if hashlib.sha256(temporary.read_bytes()).hexdigest() != expected:
+                raise RuntimeError("kubectl download checksum mismatch")
+            temporary.chmod(0o755)
+            temporary.replace(destination)
+        finally:
+            with suppress(OSError):
+                temporary.unlink(missing_ok=True)
     destination.chmod(0o755)
+
+
+def resolve_image_digest(image, digests):
+    repository = image.rsplit(":", 1)[0] if ":" in image.rsplit("/", 1)[-1] else image
+    digest = next((value for value in (digests or []) if value.startswith(repository + "@sha256:")), None)
+    if digest is None:
+        raise RuntimeError("Push did not produce a digest for the requested image repository")
+    return digest
+
+
+def prepare_resources(args):
+    service = json.loads(kubectl(args, "get", "service", "atenet-router", "-n", "ate-system", "-o", "json", capture_output=True).stdout)
+    selector = service["spec"].get("selector", {})
+    if not selector:
+        raise RuntimeError("The router service has no selector; refusing an unrestricted forwarding grant")
+    labels = ",".join(f"{key}={value}" for key, value in sorted(selector.items()))
+    pods = json.loads(kubectl(args, "get", "pods", "-n", "ate-system", "-l", labels, "-o", "json", capture_output=True).stdout)
+    names = sorted(pod["metadata"]["name"] for pod in pods["items"] if not pod["metadata"].get("deletionTimestamp"))
+    if not names:
+        raise RuntimeError("No router pods found; refusing an unrestricted forwarding grant")
+    resources = json.loads((MANIFESTS / "resources.json").read_text())
+    role = next(item for item in resources["items"] if item["kind"] == "Role")
+    for rule in role["rules"]:
+        if set(rule["resources"]) & {"pods", "pods/portforward"} and "resourceNames" in rule:
+            rule["resourceNames"] = names
+    return resources
+
+
+def configure_resources(args):
+    apply(args, prepare_resources(args))
+    print("Configured harness resources with forwarding restricted to current router pods.")
 
 
 def build(args):
@@ -111,9 +158,8 @@ def build(args):
     checked([*docker, "build", "--provenance=false", "--platform", f"linux/{architecture}", "-t", args.image, str(context)])
     checked([*docker, "push", args.image])
     digests = json.loads(checked([*docker, "image", "inspect", args.image, "--format", "{{json .RepoDigests}}"], capture_output=True).stdout)
-    repository = args.image.rsplit(":", 1)[0] if ":" in args.image.rsplit("/", 1)[-1] else args.image
-    image = next(d for d in digests if d.startswith(repository + "@sha256:"))
-    apply(args, json.loads((MANIFESTS / "resources.json").read_text()))
+    image = resolve_image_digest(args.image, digests)
+    configure_resources(args)
     args.state_file.parent.mkdir(parents=True, exist_ok=True)
     args.state_file.write_text(json.dumps(dict(image=image, context=args.context), indent=2) + "\n")
     print("Trusted harness image and Kubernetes resources are ready; no model call was made.")
@@ -163,18 +209,22 @@ def wait_for_job(args, name):
     raise TimeoutError(f"Timed out waiting for Agent Job {name}")
 
 
+def make_reader_pod(image, name):
+    return dict(apiVersion="v1", kind="Pod", metadata=dict(name=name, namespace=NAMESPACE), spec=dict(
+        automountServiceAccountToken=False, restartPolicy="Never",
+        securityContext=dict(runAsNonRoot=True, runAsUser=10001, runAsGroup=10001, fsGroup=10001, seccompProfile=dict(type="RuntimeDefault")),
+        containers=[dict(name="reader", image=image, command=["python", "-c", "import time; time.sleep(600)"],
+            securityContext=dict(allowPrivilegeEscalation=False, readOnlyRootFilesystem=True, capabilities=dict(drop=["ALL"])),
+            volumeMounts=[dict(name="artifacts", mountPath="/artifacts", readOnly=True)])],
+        volumes=[dict(name="artifacts", persistentVolumeClaim=dict(claimName="openai-agent-artifacts", readOnly=True))]))
+
+
 def collect(args):
     state = json.loads(args.state_file.read_text())
     if state["context"] != args.context:
         raise ValueError("Harness setup belongs to a different Kubernetes context")
     name = "openai-agent-reader-" + uuid.uuid4().hex[:12]
-    pod = dict(apiVersion="v1", kind="Pod", metadata=dict(name=name, namespace=NAMESPACE), spec=dict(
-        automountServiceAccountToken=False, restartPolicy="Never",
-        securityContext=dict(runAsNonRoot=True, runAsUser=10001, runAsGroup=10001, fsGroup=10001),
-        containers=[dict(name="reader", image=state["image"], command=["python", "-c", "import time; time.sleep(600)"],
-            securityContext=dict(allowPrivilegeEscalation=False, readOnlyRootFilesystem=True, capabilities=dict(drop=["ALL"])),
-            volumeMounts=[dict(name="artifacts", mountPath="/artifacts", readOnly=True)])],
-        volumes=[dict(name="artifacts", persistentVolumeClaim=dict(claimName="openai-agent-artifacts", readOnly=True))]))
+    pod = make_reader_pod(state["image"], name)
     try:
         apply(args, pod)
         kubectl(args, "wait", "--for=condition=Ready", "pod/" + name, "-n", NAMESPACE, "--timeout=120s", capture_output=True)
@@ -187,7 +237,7 @@ def collect(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["secret", "build", "run", "collect"])
+    parser.add_argument("action", choices=["secret", "build", "resources", "run", "collect"])
     parser.add_argument("--context", required=True)
     parser.add_argument("--kubeconfig", type=Path, required=True)
     parser.add_argument("--env-file", type=Path, default=ROOT / ".env")
@@ -203,7 +253,7 @@ def main():
     args = parser.parse_args()
     if args.action == "run" and not args.template:
         parser.error("run requires --template")
-    {"secret": import_secret, "build": build, "run": run_job, "collect": collect}[args.action](args)
+    {"secret": import_secret, "build": build, "resources": configure_resources, "run": run_job, "collect": collect}[args.action](args)
 
 
 if __name__ == "__main__":
