@@ -32,18 +32,19 @@ The key-free demo invokes the real SDK runner with a scripted model, writes a re
 
 ## Run on Kubernetes
 
+For a complete local setup and test, run `./scripts/local-kubernetes.sh setup` followed by `./scripts/local-kubernetes.sh test`. See the [local Kubernetes guide](docs/local-kubernetes.md).
+
 Prepare a Substrate cluster and its upstream `sandbox-template` using the [deployment guide](docs/deployment.md), then run:
 
 ```sh
 uv run openai-agent-substrate --backend substrate \
   --context YOUR_KUBERNETES_CONTEXT \
-  --router-url http://127.0.0.1:8000 \
   --atespace ate-demo-sandbox --template sandbox-template
 ```
 
 This creates a uniquely named Actor, exercises shell execution and suspend/resume, and deletes the Actor when finished. Add `--keep-actor` to retain the workspace and save session state. For live model execution, set the API key in the host environment and select a model with `--model YOUR_OPENAI_MODEL_ID`.
 
-The provider is pinned to `openai-agents==0.24.0`. Local simulator and upstream execution-server tests are available; Kubernetes isolation, durable snapshots, and live model calls have not yet been verified by the maintainers. See the [verification record](docs/verification.md).
+The provider is pinned to `openai-agents==0.24.0`. Real Actor execution, authenticated routing, suspend/resume, and external snapshot recovery have been verified on local ARM64 Kind with gVisor. Live OpenAI model calls and production isolation properties remain unverified. See the [verification record](docs/verification.md).
 
 ## Repository layout
 
@@ -54,6 +55,7 @@ examples/                   Runnable SDK and retained-session examples
 tests/                      Unit and integration tests
 docs/                       Architecture, deployment, usage, and development guides
   assets/                   Documentation images
+scripts/                    Repeatable local Kubernetes setup and tests
 third_party/                Pinned upstream execution server and its license
 .github/                    CI, dependency updates, and contribution templates
 ```
@@ -61,7 +63,8 @@ third_party/                Pinned upstream execution server and its license
 ## Documentation
 
 - [Architecture and limits](docs/architecture.md)
-- [Cluster setup](docs/deployment.md)
+- [Local Kubernetes setup and tests](docs/local-kubernetes.md)
+- [Existing-cluster setup](docs/deployment.md)
 - [SDK integration and session resume](docs/usage.md)
 - [Runnable examples](examples/README.md)
 - [Development and verification](docs/development.md)

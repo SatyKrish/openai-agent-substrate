@@ -1,17 +1,20 @@
-# Connect to a Substrate cluster
+# Deploy on Kubernetes
 
-The reference implementation reuses the upstream `sandbox-template` ActorTemplate and its `/process` server. No changes to the Substrate core are needed.
+The reference implementation uses the upstream `sandbox-template` ActorTemplate and authenticated `kubectl-ate` routing. Start with the [local Kubernetes guide](local-kubernetes.md) for a complete Kind deployment.
 
-## Prerequisites
+## Existing Substrate cluster
 
-- A Linux Kubernetes cluster with Agent Substrate installed, workers able to run its supported sandbox runtime, and durable snapshot storage configured.
-- The `kubectl-ate` plugin and cluster access for Actor create, resume, suspend, and delete.
-- The upstream sandbox demo deployed in `ate-demo-sandbox`, with its template's golden snapshot ready.
-- A trusted/private route to `atenet-router`.
+Prepare a Linux Kubernetes cluster with Agent Substrate, a supported sandbox runtime, durable snapshot storage, and the upstream sandbox demo. Install `kubectl-ate` from the same pinned Substrate source.
 
-Use the [upstream installation guide](https://github.com/agent-substrate/substrate/blob/6949841e9dc98edbd2e0042ef95c19b4ce20aef5/README.md) and [sandbox demo setup](https://github.com/agent-substrate/substrate/blob/6949841e9dc98edbd2e0042ef95c19b4ce20aef5/demos/sandbox/README.md) to prepare the cluster. This project does not install or modify an existing cluster automatically.
+The tested source is `6949841e9dc98edbd2e0042ef95c19b4ce20aef5`. Follow its [installation instructions](https://github.com/agent-substrate/substrate/blob/6949841e9dc98edbd2e0042ef95c19b4ce20aef5/README.md) and [sandbox demo setup](https://github.com/agent-substrate/substrate/blob/6949841e9dc98edbd2e0042ef95c19b4ce20aef5/demos/sandbox/README.md).
 
-## Connect
+Allow the CLI proxy's Pod Identity SPIFFE principal at Substrate ingress when installing the control plane:
+
+```text
+spiffe://cluster.local/ns/ate-system/sa/atenet-client
+```
+
+The caller also needs the upstream CLI's API permissions and permissions to create, read, and delete PodCertificateRequests in the system namespace. The upstream local installation uses shared development identities; operators should configure their own principals and authorization for shared deployments.
 
 Inspect the intended context and template:
 
@@ -20,22 +23,16 @@ kubectl config get-contexts
 kubectl ate --context YOUR_KUBERNETES_CONTEXT get actor-template sandbox-template --atespace ate-demo-sandbox
 ```
 
-Keep this router port-forward open in a separate terminal:
-
-```sh
-kubectl --context YOUR_KUBERNETES_CONTEXT port-forward \
-  -n ate-system svc/atenet-router 8000:80 --address 127.0.0.1
-```
-
-Then run from the project directory:
+Run the scripted SDK workflow:
 
 ```sh
 uv run openai-agent-substrate --backend substrate \
   --context YOUR_KUBERNETES_CONTEXT \
-  --router-url http://127.0.0.1:8000 \
   --atespace ate-demo-sandbox --template sandbox-template
 ```
 
-The control-plane CLI uses the explicit context and its own authentication/connection logic. If you already have a control API tunnel, optionally pass `--api-endpoint HOST:PORT`; the reference implementation does not disable TLS verification or read tokens itself.
+Pass `--kubeconfig PATH` for a separate kubeconfig. The provider owns an ephemeral loopback `kubectl ate proxy actor` for each session. The CLI authenticates to Substrate's router; a plain HTTP port-forward to the router does not provide that authentication. No separate port-forward is needed for the default path.
 
-An application gateway can replace the kubectl lifecycle implementation by implementing the four async methods in `ActorControl`. Keep tenant authorization and credential handling in that trusted gateway.
+An explicit `--router-url` selects a trusted HTTP gateway you operate, bypassing the owned CLI proxy. Such a gateway must provide the cluster's required upstream authentication and authorization. This option is also used by the local protocol simulator.
+
+An application gateway can implement the four lifecycle methods in `ActorControl`. Supply a trusted `router_url`, or provide an async `start_proxy(atespace, name)` method returning an object with a loopback `url` and async `aclose()` lifecycle.

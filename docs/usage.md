@@ -8,12 +8,13 @@ Use a cluster with Substrate installed and the upstream sandbox demo's `sandbox-
 uv run openai-agent-substrate \
   --backend substrate \
   --context YOUR_KUBERNETES_CONTEXT \
-  --router-url http://127.0.0.1:8000 \
   --atespace ate-demo-sandbox \
   --template sandbox-template
 ```
 
-This still uses the scripted model, so it verifies execution and suspend/resume against a real cluster without making OpenAI API calls. It creates a uniquely named Actor and deletes it on exit by default.
+The provider manages an authenticated loopback Actor proxy automatically. Use `--kubeconfig PATH` when the cluster configuration is separate.
+
+This uses the scripted model, so it verifies execution and suspend/resume against a real cluster without making OpenAI API calls. It creates a uniquely named Actor and deletes it on exit by default.
 
 For a live model, set `OPENAI_API_KEY` in the **host** environment and add `--model YOUR_OPENAI_MODEL_ID`. The key is used by the SDK harness and is never put in the manifest or execution request. Hosted tracing is disabled in this demo.
 
@@ -38,7 +39,6 @@ from openai_agent_substrate import (
 )
 
 client = SubstrateSandboxClient(
-    router_url="http://127.0.0.1:8000",
     atespace="ate-demo-sandbox",
     control=KubectlActorControl(context="YOUR_KUBERNETES_CONTEXT"),
 )

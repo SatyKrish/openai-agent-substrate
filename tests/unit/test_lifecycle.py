@@ -30,3 +30,30 @@ async def test_upstream_cli_lifecycle_contract(monkeypatch):
 def test_explicit_cluster_context_is_required():
     with pytest.raises(ValueError, match="context"):
         KubectlActorControl(context="")
+
+
+def test_authenticated_proxy_is_the_default_transport():
+    from openai_agent_substrate.provider import SubstrateSandboxClient
+
+    client = SubstrateSandboxClient(
+        atespace="test-space", control=KubectlActorControl(context="explicit-test-context"),
+    )
+    assert client.transport is None
+
+
+async def test_proxy_cli_uses_ephemeral_loopback_port_and_explicit_kubeconfig(monkeypatch):
+    from openai_agent_substrate.proxy import ActorProxy
+
+    commands = []
+
+    async def capture(command, *, timeout):
+        commands.append((command, timeout))
+        return object()
+
+    monkeypatch.setattr(ActorProxy, "start", capture)
+    control = KubectlActorControl(context="test", kubeconfig="/tmp/project-kubeconfig", timeout=42)
+    await control.start_proxy("space", "actor")
+    assert commands == [([
+        "kubectl", "ate", "--context", "test", "--kubeconfig", "/tmp/project-kubeconfig",
+        "proxy", "actor", "actor", "--atespace", "space", "0:80", "--address", "127.0.0.1",
+    ], 42)]

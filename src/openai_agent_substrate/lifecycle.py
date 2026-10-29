@@ -8,6 +8,9 @@ from __future__ import annotations
 import asyncio
 import re
 from typing import Protocol
+from pathlib import Path
+
+from .proxy import ActorProxy
 
 
 def resource_name(value: str) -> str:
@@ -26,17 +29,20 @@ class ActorControl(Protocol):
 class KubectlActorControl:
     """Use the upstream kubectl-ate plugin, always with an explicit cluster context."""
 
-    def __init__(self, *, context: str, endpoint: str | None = None, timeout: float = 120):
+    def __init__(self, *, context: str, endpoint: str | None = None, kubeconfig: str | Path | None = None, timeout: float = 120):
         if not context or context.startswith("-"):
             raise ValueError("An explicit Kubernetes context is required")
         if timeout <= 0:
             raise ValueError("Lifecycle timeout must be positive")
         self.context = context
         self.endpoint = endpoint
+        self.kubeconfig = kubeconfig
         self.timeout = timeout
 
     def command(self, verb: str, atespace: str, name: str, *extra: str) -> list[str]:
         argv = ["kubectl", "ate", "--context", self.context]
+        if self.kubeconfig is not None:
+            argv += ["--kubeconfig", str(self.kubeconfig)]
         if self.endpoint:
             argv += ["--endpoint", self.endpoint]
         return argv + [verb, "actor", resource_name(name), "--atespace", resource_name(atespace), *extra]
@@ -68,3 +74,9 @@ class KubectlActorControl:
 
     async def delete(self, atespace: str, name: str) -> None:
         await self._run(self.command("delete", atespace, name))
+
+    async def start_proxy(self, atespace: str, name: str) -> ActorProxy:
+        return await ActorProxy.start(
+            self.command("proxy", atespace, name, "0:80", "--address", "127.0.0.1"),
+            timeout=self.timeout,
+        )

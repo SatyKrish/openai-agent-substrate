@@ -29,7 +29,7 @@ _FIRST_COMMAND = (
 
 
 async def run_demo(args, local=None):
-    control = local.control if local else KubectlActorControl(context=args.context, endpoint=args.api_endpoint)
+    control = local.control if local else KubectlActorControl(context=args.context, endpoint=args.api_endpoint, kubeconfig=args.kubeconfig)
     client = SubstrateSandboxClient(
         router_url=local.url if local else args.router_url,
         atespace=args.atespace, control=control,
@@ -102,10 +102,11 @@ async def run_demo(args, local=None):
 def main():
     parser = argparse.ArgumentParser(description="OpenAI SandboxAgent + Agent Substrate reference implementation")
     parser.add_argument("--backend", choices=["local", "substrate"], default="local")
-    parser.add_argument("--router-url", default="http://127.0.0.1:8000")
+    parser.add_argument("--router-url", help="Optional trusted HTTP gateway; defaults to an authenticated per-Actor kubectl proxy")
     parser.add_argument("--atespace", default="ate-demo-sandbox")
     parser.add_argument("--template", default="sandbox-template")
     parser.add_argument("--context", help="Explicit Kubernetes context for kubectl ate")
+    parser.add_argument("--kubeconfig", type=Path, help="Explicit kubeconfig for the selected cluster")
     parser.add_argument("--api-endpoint", help="Optional kubectl ate control-plane endpoint override")
     parser.add_argument("--model", default="scripted", help="scripted (no API calls) or an OpenAI model ID")
     parser.add_argument("--keep-actor", action="store_true", help="Suspend and save session.json instead of deleting the Actor")

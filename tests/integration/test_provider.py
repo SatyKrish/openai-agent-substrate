@@ -186,3 +186,43 @@ async def test_portable_snapshots_are_explicitly_unsupported(client, server):
     with pytest.raises(NotImplementedError, match="snapshots"):
         await client.create(manifest=Manifest(root=str(server.root)), options=options(), snapshot=NoopSnapshot(id="test"))
     assert server.control.events == []
+
+
+async def test_authenticated_proxy_is_owned_per_session_and_reopened_on_resume(server):
+    from openai_agent_substrate.testing.server import LocalActorControl
+
+    class Proxy:
+        url = server.url
+        closed = False
+
+        async def aclose(self):
+            self.closed = True
+
+    class ProxyControl(LocalActorControl):
+        proxies = []
+
+        async def start_proxy(self, atespace, name):
+            assert self.actors[f"{atespace}/{name}"]
+            proxy = Proxy()
+            self.proxies.append(proxy)
+            return proxy
+
+    control = ProxyControl()
+    server.control = control
+    client = SubstrateSandboxClient(atespace="test-space", control=control)
+    session = await client.create(manifest=Manifest(root=str(server.root)), options=options())
+    try:
+        async with session:
+            await session.write(Path("retained.txt"), io.BytesIO(b"authenticated path"))
+            assert len(control.proxies) == 1
+            assert not control.proxies[0].closed
+        assert control.proxies[0].closed
+        state = client.serialize_session_state(session.state)
+        assert "127.0.0.1" not in json.dumps(state)
+        session = await client.resume(client.deserialize_session_state(state))
+        async with session:
+            assert (await session.read(Path("retained.txt"))).read() == b"authenticated path"
+        assert len(control.proxies) == 2
+        assert all(p.closed for p in control.proxies)
+    finally:
+        await client.delete(session)

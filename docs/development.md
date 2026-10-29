@@ -30,6 +30,10 @@ uv run openai-agent-substrate \
 
 This runs the actual upstream HTTP execution code locally. Lifecycle operations remain simulated; it does not prove Kubernetes suspend/resume. The upstream server briefly listens on the selected port on all host interfaces, matching its source. Run this compatibility check only on a trusted development machine.
 
+## Real Kubernetes tests
+
+See [local-kubernetes.md](local-kubernetes.md) for the opt-in cluster test. It is skipped by default and requires an explicit local Kind context and kubeconfig.
+
 ## Build distributions
 
 ```sh

@@ -79,10 +79,13 @@ class SubstrateSandboxClient(BaseSandboxClient[SubstrateSandboxOptions]):
 
     backend_id = "agent-substrate-poc"
 
-    def __init__(self, *, router_url: str, atespace: str, control: ActorControl, exec_timeout: float = 30):
+    def __init__(self, *, atespace: str, control: ActorControl, router_url: str | None = None, exec_timeout: float = 30):
         self.atespace = resource_name(atespace)
         self.control = control
-        self.transport = ProcessTransport(router_url, default_timeout=exec_timeout)
+        self.exec_timeout = exec_timeout
+        if router_url is None and not callable(getattr(control, "start_proxy", None)):
+            raise ValueError("Provide router_url or a control implementation with authenticated start_proxy support")
+        self.transport = ProcessTransport(router_url, default_timeout=exec_timeout) if router_url is not None else None
 
     async def create(self, *, options: SubstrateSandboxOptions, manifest: Manifest | None = None,
                      snapshot: SnapshotSpec | SnapshotBase | None = None) -> SandboxSession:
@@ -121,6 +124,7 @@ class SubstrateSandboxClient(BaseSandboxClient[SubstrateSandboxOptions]):
         if not inner.deleted:
             # Deletion must remain possible after failed startup/suspension.
             # It also bypasses suspension when the workspace is disposable.
+            await inner.close_proxy()
             await self.control.delete(inner.state.atespace, inner.state.actor_name)
             inner.deleted = True
             inner.active = False
@@ -135,6 +139,8 @@ class _SubstrateSession(BaseSandboxSession):
         self.active = False
         self.deleted = False
         self._cwd_ready = False
+        self._proxy = None
+        self._transport = client.transport
         self._set_start_state_preserved(preserved)
 
     @property
@@ -148,16 +154,31 @@ class _SubstrateSession(BaseSandboxSession):
         if not self.active:
             await self.client.control.resume(self.state.atespace, self.state.actor_name)
             self.active = True
+        if self.client.transport is None and self._proxy is None:
+            start_proxy = getattr(self.client.control, "start_proxy")
+            self._proxy = await start_proxy(self.state.atespace, self.state.actor_name)
+            self._transport = ProcessTransport(self._proxy.url, default_timeout=self.client.exec_timeout)
+
+    async def close_proxy(self) -> None:
+        if self._proxy is not None:
+            try:
+                await self._proxy.aclose()
+            finally:
+                self._proxy = None
+                self._transport = None
 
     async def _prepare_backend_workspace(self) -> None:
         await self._checked("mkdir", "-p", self.state.manifest.root)
         self._cwd_ready = True
 
     async def _shutdown_backend(self) -> None:
-        if self.active and not self.deleted:
-            await self.client.control.suspend(self.state.atespace, self.state.actor_name)
-            self.active = False
-            self._set_start_state_preserved(True)
+        try:
+            if self.active and not self.deleted:
+                await self.client.control.suspend(self.state.atespace, self.state.actor_name)
+                self.active = False
+                self._set_start_state_preserved(True)
+        finally:
+            await self.close_proxy()
 
     async def _after_start_failed(self) -> None:
         await self._shutdown_backend()
@@ -165,8 +186,10 @@ class _SubstrateSession(BaseSandboxSession):
     async def _exec_internal(self, *command: str | Path, timeout: float | None = None) -> ExecResult:
         if self.deleted or not self.active:
             raise RuntimeError("Enter/start the sandbox session before executing commands")
+        if self._transport is None:
+            raise RuntimeError("The Actor proxy is not running")
         try:
-            result = await self.client.transport.execute(
+            result = await self._transport.execute(
                 self.actor_ref, [str(arg) for arg in command],
                 cwd=self.state.manifest.root if self._cwd_ready else "/", timeout=timeout,
             )

@@ -22,7 +22,7 @@ from openai_agent_substrate import KubectlActorControl, SubstrateSandboxClient, 
 async def run(args):
     client = SubstrateSandboxClient(
         router_url=args.router_url, atespace=args.atespace,
-        control=KubectlActorControl(context=args.context),
+        control=KubectlActorControl(context=args.context, kubeconfig=args.kubeconfig),
     )
     manifest = Manifest(entries={"task.txt": File(content=args.task.encode())})
     agent = SandboxAgent(
@@ -52,7 +52,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--context", required=True, help="Explicit Kubernetes context")
     parser.add_argument("--model", required=True, help="An OpenAI model ID available to your account")
-    parser.add_argument("--router-url", default="http://127.0.0.1:8000")
+    parser.add_argument("--kubeconfig", type=Path, help="Explicit kubeconfig for the selected cluster")
+    parser.add_argument("--router-url", help="Optional trusted HTTP gateway; defaults to authenticated kubectl proxy")
     parser.add_argument("--atespace", default="ate-demo-sandbox")
     parser.add_argument("--template", default="sandbox-template")
     parser.add_argument("--task", default="Write a short explanation of harness separate from compute.")
