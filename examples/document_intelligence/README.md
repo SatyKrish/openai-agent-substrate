@@ -63,6 +63,14 @@ endpoint, model, optional account settings, and Secret mounting. `OPENAI_MODEL`
 selects the model; `OPENAI_BASE_URL` selects the endpoint. The live model chooses
 tools and writes analysis code. These commands can incur model API usage.
 
+## Tracing
+
+The [Jaeger tracing guide](../../docs/tracing.md) links the real OpenAI model
+turns and native tool calls with Actor lifecycle, command execution, and host
+artifact verification. Run `./scripts/local-kubernetes.sh tracing-setup` before
+`agent-run` to enable OTLP tracing through the harness ConfigMap. Each successful
+run records both SDK and OpenTelemetry trace IDs in `verification.json`.
+
 ## Skill and tool execution
 
 The trusted host keeps the model connection, provider credentials, input hashes,

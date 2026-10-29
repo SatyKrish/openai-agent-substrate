@@ -25,6 +25,7 @@ from agents.sandbox.types import ExecResult, User
 
 from .lifecycle import ActorControl, resource_name
 from .transport import ProcessTransport, ProcessTransportError
+from .tracing import operation, traced_operation
 
 MAX_FILE_BYTES = 1024 * 1024
 _WRITE_CHUNK_BYTES = 48 * 1024
@@ -88,6 +89,7 @@ class SubstrateSandboxClient(BaseSandboxClient[SubstrateSandboxOptions]):
             raise ValueError("Provide router_url or a control implementation with authenticated start_proxy support")
         self.transport = ProcessTransport(router_url, default_timeout=exec_timeout) if router_url is not None else None
 
+    @traced_operation("sandbox.create")
     async def create(self, *, options: SubstrateSandboxOptions, manifest: Manifest | None = None,
                      snapshot: SnapshotSpec | SnapshotBase | None = None) -> SandboxSession:
         if snapshot is not None:
@@ -118,6 +120,7 @@ class SubstrateSandboxClient(BaseSandboxClient[SubstrateSandboxOptions]):
             raise ValueError("Session state belongs to a different atespace")
         return state
 
+    @traced_operation("sandbox.delete")
     async def delete(self, session: SandboxSession) -> SandboxSession:
         inner = session._inner
         if not isinstance(inner, _SubstrateSession) or inner.client is not self:
@@ -153,11 +156,13 @@ class _SubstrateSession(BaseSandboxSession):
             raise RuntimeError("This Actor has been deleted")
         validate_manifest(self.state.manifest)
         if not self.active:
-            await self.client.control.resume(self.state.atespace, self.state.actor_name)
+            with operation("sandbox.resume"):
+                await self.client.control.resume(self.state.atespace, self.state.actor_name)
             self.active = True
         if self.client.transport is None and self._proxy is None:
             start_proxy = getattr(self.client.control, "start_proxy")
-            self._proxy = await start_proxy(self.state.atespace, self.state.actor_name)
+            with operation("sandbox.proxy"):
+                self._proxy = await start_proxy(self.state.atespace, self.state.actor_name)
             self._transport = ProcessTransport(self._proxy.url, default_timeout=self.client.exec_timeout)
 
     async def close_proxy(self) -> None:
@@ -175,7 +180,8 @@ class _SubstrateSession(BaseSandboxSession):
     async def _shutdown_backend(self) -> None:
         try:
             if self.active and not self.deleted:
-                await self.client.control.suspend(self.state.atespace, self.state.actor_name)
+                with operation("sandbox.suspend"):
+                    await self.client.control.suspend(self.state.atespace, self.state.actor_name)
                 self.active = False
                 self._set_start_state_preserved(True)
         finally:
@@ -190,10 +196,16 @@ class _SubstrateSession(BaseSandboxSession):
         if self._transport is None:
             raise RuntimeError("The Actor proxy is not running")
         try:
-            result = await self._transport.execute(
-                self.actor_ref, [str(arg) for arg in command],
-                cwd=self.state.manifest.root if self._cwd_ready else "/", timeout=timeout,
-            )
+            with operation("sandbox.exec") as span:
+                result = await self._transport.execute(
+                    self.actor_ref, [str(arg) for arg in command],
+                    cwd=self.state.manifest.root if self._cwd_ready else "/", timeout=timeout,
+                )
+                if span is not None:
+                    span.span_data.data.update(exit_code=result.exit_code,
+                        stdout_bytes=len(result.stdout), stderr_bytes=len(result.stderr))
+                    if result.exit_code:
+                        span.set_error({"message": "Command returned nonzero", "data": {}})
         except ProcessTransportError as error:
             raise ExecTransportError(
                 command=tuple(str(c) for c in command), cause=error, retryable=False,

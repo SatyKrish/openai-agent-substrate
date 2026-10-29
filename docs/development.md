@@ -62,6 +62,24 @@ uv run pytest -q tests/kubernetes/test_agent_configuration.py
 It deletes its temporary Job and Secret after the check; artifacts remain on the
 harness PVC. No live OpenAI call is required.
 
+## Jaeger integration test
+
+Build the harness and deploy Jaeger with `agent-setup` and `tracing-setup`.
+Keep `tracing-ui` running in another terminal, then run:
+
+```sh
+SUBSTRATE_RUN_JAEGER_TESTS=1 \
+SUBSTRATE_KUBE_CONTEXT=kind-openai-agent-substrate \
+SUBSTRATE_KUBECONFIG="$PWD/artifacts/local/kubeconfig" \
+SUBSTRATE_DOCUMENT_TEMPLATE=YOUR_PYTHON_TEMPLATE \
+uv run --locked pytest -q tests/kubernetes/test_jaeger_tracing.py
+```
+
+This uses a temporary dummy-key Secret and explicit scripted evaluation. It
+queries Jaeger to validate SDK tool/provider span linkage without model calls.
+The opt-in Kubernetes CI job includes this check. The regular suite tests the
+processor in memory without a collector. See [the tracing guide](tracing.md).
+
 ## Build distributions
 
 ```sh

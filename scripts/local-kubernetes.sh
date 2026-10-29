@@ -92,6 +92,11 @@ case "${1:-help}" in
     if [[ "$1" == agent-test ]]; then AGENT_COMMAND+=(--model scripted); fi
     "${AGENT_COMMAND[@]}"
     ;;
+  tracing-setup|tracing-ui)
+    TRACING_ACTION=setup
+    if [[ "$1" == tracing-ui ]]; then TRACING_ACTION=ui; fi
+    uv run --locked python -m scripts.jaeger "$TRACING_ACTION" --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG"
+    ;;
   agent-artifacts)
     uv run --locked python scripts/kubernetes_agent.py collect --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG"
     ;;
@@ -105,7 +110,7 @@ case "${1:-help}" in
     colima stop --profile "$PROFILE"
     ;;
   *)
-    echo "Usage: $0 {setup|test|document-intelligence|agent-setup|agent-test|agent-run|agent-artifacts|status|stop}"
+    echo "Usage: $0 {setup|test|document-intelligence|agent-setup|agent-test|agent-run|agent-artifacts|tracing-setup|tracing-ui|status|stop}"
     echo "Uses an isolated Kind cluster and project-local kubeconfig. setup reuses an existing cluster."
     ;;
 esac

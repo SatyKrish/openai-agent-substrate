@@ -8,6 +8,9 @@ import json
 import os
 from pathlib import Path
 
+from agents import flush_traces
+from openai_agent_substrate.tracing import configure_tracing
+
 from examples.document_intelligence.main import run
 from examples.document_intelligence.agent.lib.configuration import select_model
 
@@ -40,5 +43,9 @@ if __name__ == "__main__":
                 raise RuntimeError(f"Mounted configuration and environment disagree for {name}")
             keys.append(name)
     print(json.dumps(dict(configuration_source="Kubernetes Secret", mounted_environment_matches=True, keys=keys)), flush=True)
-    result = asyncio.run(run(args))
-    print(json.dumps(result, indent=2))
+    configure_tracing()
+    try:
+        result = asyncio.run(run(args))
+        print(json.dumps(result, indent=2))
+    finally:
+        flush_traces()

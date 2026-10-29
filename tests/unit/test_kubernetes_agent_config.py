@@ -80,7 +80,10 @@ def test_job_mounts_config_only_into_trusted_harness():
     pod = job["spec"]["template"]["spec"]
     assert len(pod["containers"]) == 1
     assert pod["containers"][0]["args"] == ["--test"]
-    assert pod["containers"][0]["envFrom"] == [{"secretRef": {"name": "smoke-config"}}]
+    assert pod["containers"][0]["envFrom"] == [
+        {"configMapRef": {"name": "openai-agent-tracing", "optional": True}},
+        {"secretRef": {"name": "smoke-config"}},
+    ]
     assert pod["volumes"][0]["secret"]["secretName"] == "smoke-config"
     assert pod["containers"][0]["volumeMounts"][0]["readOnly"] is True
     assert job["spec"]["backoffLimit"] == 0

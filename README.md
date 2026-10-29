@@ -48,7 +48,7 @@ uv run openai-agent-substrate --backend substrate \
 
 This creates a uniquely named Actor, exercises shell execution and suspend/resume, and deletes the Actor when finished. Add `--keep-actor` to retain the workspace and save session state. For live model execution, set the API key in the host environment and select a model with `--model YOUR_OPENAI_MODEL_ID`.
 
-The provider is pinned to `openai-agents==0.24.0`. Real Actor execution, authenticated routing, suspend/resume, and external snapshot recovery have been verified on local ARM64 Kind with gVisor. Live OpenAI model calls and production isolation properties remain unverified. See the [verification record](docs/verification.md).
+The provider is pinned to `openai-agents==0.24.0`. Real Actor execution, authenticated routing, suspend/resume, and external snapshot recovery have been verified on local ARM64 Kind with gVisor. A live Document Intelligence run with `gpt-6.1-terra` also passed through a Secret-backed Kubernetes harness and Substrate Actor. Production isolation properties remain unverified. See the [verification record](docs/verification.md).
 
 ## OpenAI configuration in a Kubernetes agent pod
 
@@ -88,6 +88,20 @@ uv run python -m examples.document_intelligence --test
 
 Both commands use fixed model decisions with real SDK tool execution. Select a
 live OpenAI model on Kubernetes using the example's documented `--model` option.
+
+## Tracing
+
+Export SDK model/tool spans and sandbox execution/lifecycle spans to local Jaeger:
+
+```sh
+./scripts/local-kubernetes.sh tracing-setup
+./scripts/local-kubernetes.sh agent-run
+./scripts/local-kubernetes.sh tracing-ui
+```
+
+The [tracing guide](docs/tracing.md) covers configuration, trace verification,
+span content, and the loopback UI. Rebuild the harness with `agent-setup` after
+updating source. The exporter stays in the trusted harness.
 
 ## Repository layout
 

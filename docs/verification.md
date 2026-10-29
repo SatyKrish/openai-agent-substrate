@@ -16,20 +16,22 @@ Date: 2026-10-29.
 
 | Check | Result |
 | --- | --- |
-| Default unit/integration suite | 63 passed; four real-cluster tests are skipped by default |
-| Unit/integration suite using the actual upstream Go execution server | 63 passed; four real-cluster tests skipped |
+| Default unit/integration suite | 72 passed; real-cluster checks are opt-in |
+| Unit/integration suite using the actual upstream Go execution server (before tracing change) | 63 passed; four real-cluster tests skipped |
 | Opt-in Kubernetes integration test | Passed against a fresh real Actor |
 | SDK scripted workflow on Kubernetes | Passed: shell tool execution, report creation, serialized session resume, and preserved edits |
 | Kubernetes filesystem behavior | Passed: binary file round trips, SDK patching, and nonzero shell exit codes |
 | Repeated setup | Reused the existing cluster; the retained Actor and its files remained usable |
-| Document Intelligence on Kubernetes | Passed: native `load_skill`, shell inspection/extraction, `apply_patch`, Python execution, exact citations, and independent host artifact checks |
+| Scripted Document Intelligence on Kubernetes | Passed: native `load_skill`, shell inspection/extraction, `apply_patch`, Python execution, exact citations, and independent host artifact checks |
 | Domain artifact rejection tests | Passed: altered citations, calculations, CSV, missing report evidence/limitations, staged digest mismatches, and source-table disagreements are rejected |
 | Secret-backed Kubernetes agent pod | Passed: five OpenAI settings match mounted files and environment, an explicit evaluation override is required, and real document analysis runs with no harness credential in the Actor |
+| Live OpenAI Document Intelligence on Kubernetes | Passed with `gpt-6.1-terra`: seven API responses, native skill/shell/patch tools, model-authored Python, independent artifact validation, and Actor cleanup |
+| Full suite with all local Kubernetes and Jaeger checks enabled | 77 passed, no skips; includes the Secret-backed harness and Jaeger query API |
 | Source distribution and wheel | Built successfully; `twine check` passed |
 
-The Kubernetes path uses owned loopback `kubectl ate proxy actor` processes and authenticated Substrate ingress. Tests exercise the real SDK runner and actual sandbox execution; no OpenAI API key or model call was required.
+The Kubernetes path uses owned loopback `kubectl ate proxy actor` processes and authenticated Substrate ingress. The scripted infrastructure tests exercise the real SDK runner and actual sandbox execution without model calls. The separate live OpenAI run is recorded below.
 
-## Document Intelligence
+## Scripted Document Intelligence
 
 The domain example uses the native SDK `Skills` capability with a lazy local
 bundle, `Shell`, and `Filesystem`. Its real-cluster execution image is
@@ -63,7 +65,7 @@ the retained PVC using a temporary reader pod without credential mounts.
 
 Local unit tests also construct the actual OpenAI client without requests and
 verify its endpoint, API key, organization, and project settings from environment
-variables. Live endpoint/model execution remains unverified.
+variables. A subsequent live endpoint/model run passed as described below.
 
 ## Authored agent layout and live defaults
 
@@ -78,8 +80,62 @@ Missing credentials cause an error. Scripted evaluation requires `--test` or an
 explicit `--model scripted`; an environment value alone cannot select it. Run
 records identify `openai-live` or `scripted-eval` and include returned API response
 IDs. Scripted evaluations have no API response IDs. The reorganized harness passed
-its real Kubernetes pod evaluation. A live OpenAI call remains unverified because
-no `.env` or API key was configured during these checks.
+its real Kubernetes pod evaluation. Those initial checks used no API credentials;
+the later live run below uses the updated local `.env`.
+
+## Live OpenAI execution
+
+The updated local `.env` was imported into the `openai-agent-env` Kubernetes
+Secret and exposed to the trusted harness through environment variables and
+read-only mounted files. The harness confirmed they matched. `OPENAI_MODEL` was
+`gpt-6.1-terra`; `OPENAI_BASE_URL` was unset, so the SDK used the actual default
+OpenAI endpoint, `https://api.openai.com/v1`.
+
+Job `openai-agent-8692fb0e0eae` completed successfully on the dedicated local
+Kind cluster. The run recorded `execution_mode: openai-live`,
+`model_inference: true`, and seven returned OpenAI API response IDs. No scripted
+evaluation flag was supplied. Its six native tool calls were `load_skill`, three
+`exec_command` calls, `apply_patch`, and a final `exec_command` call. The model
+loaded the document-analysis skill, inspected and extracted the source facts,
+wrote a Python program through the patch tool, and executed it in the Substrate
+Actor. The downloaded program differs from the scripted evaluation fixture.
+
+The independent host verifier accepted `comparison.md`, `kpis.csv`, and
+`result.json`, including exact source citations, calculations, required schema,
+and limitations. Downloaded artifact hashes matched the run record. Operating
+margins were ACME 22.93% and BETA 30.19%; the revenue gap was USD 117.8 billion.
+The Actor credential preflight confirmed no `OPENAI_API_KEY` or harness Secret
+mount was present. Downloaded outputs were checked against the configured
+credential, and the temporary Actor was confirmed deleted after completion.
+
+The report, model-authored program, tool trace, API response IDs, and verification
+receipt are stored under ignored `artifacts/local/`. Credentials and kubeconfig
+files must stay out of published artifacts. This validates one bounded workflow
+on synthetic Markdown/CSV fixtures; it does not establish general PDF/OCR or
+document-understanding quality.
+
+## SDK tracing to local Jaeger
+
+Jaeger all-in-one 1.76.0 was deployed by digest in the dedicated local Kind
+cluster. The updated trusted harness completed a new live Document Intelligence
+run with `gpt-6.1-terra`. Jaeger's query API returned one complete trace with
+149 spans over 54.302 seconds, including seven model response spans, the skill,
+shell and patch tools, sandbox commands, Actor lifecycle, and independent host
+verification. The UI timeline was opened and inspected.
+
+The trace verifier checked every parent reference, root and child timing, and
+sandbox execution nested beneath SDK tool calls. All three report artifacts
+passed source and hash validation; the Actor was confirmed deleted. A private
+scan found no configured API credential in the downloaded outputs or Jaeger
+payload, and the trace omitted sampled document text, generated code and paths.
+The model-authored program differs from the scripted evaluation fixture.
+
+The full suite passed with all local Kubernetes and Jaeger flags enabled: 77
+passed, with no skips. The key-free Kubernetes tracing regression also passed
+against Jaeger's API.
+Unit tests cover payload exclusion, parentage, concurrent trace isolation,
+explicit disable, hosted exporter replacement, invalid spans, and export failure.
+See [tracing setup and verification](tracing.md) for repeatable commands.
 
 ## Review follow-up verification
 
@@ -98,8 +154,8 @@ Role. The hardened artifact reader also passed server-side Restricted Pod Securi
 admission and collected its reports successfully.
 
 Ruff and the focused mypy targets pass. The manual Kubernetes CI dispatch is
-configured; its GitHub-hosted run remains unverified. These infrastructure checks
-continue to use explicit scripted evaluations, with no live OpenAI API calls.
+configured; its GitHub-hosted run remains unverified. Those infrastructure checks
+used explicit scripted evaluations. The live run is recorded separately above.
 
 ## External snapshot recovery
 
@@ -113,6 +169,6 @@ Evidence is saved locally under ignored `artifacts/local/`, including `recovery-
 
 ## Limits of this verification
 
-These checks establish local functional execution and snapshot recovery on a single-node Kind cluster. They do not establish production availability, multi-tenant authorization policy, resistance to sandbox escape, host/node-loss durability, or live OpenAI model behavior. The local installation uses upstream development identities; shared deployments need an operator-defined identity and authorization configuration.
+These checks establish local functional execution and snapshot recovery on a single-node Kind cluster. They do not establish production availability, multi-tenant authorization policy, resistance to sandbox escape, host/node-loss durability, or model quality beyond the documented live fixture workflow. The local installation uses upstream development identities; shared deployments need an operator-defined identity and authorization configuration.
 
 The existing public CI also exercises the key-free paths on Python 3.11–3.14. See [local-kubernetes.md](local-kubernetes.md) to repeat the real-cluster checks.

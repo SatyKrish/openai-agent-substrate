@@ -55,6 +55,14 @@ uv run openai-agent-substrate --backend substrate \
 
 Use `scripts/resume_session.py` with the same context, kubeconfig, and `artifacts/local/demo/session.json` to inspect the retained Actor. Add `--delete` to delete that Actor when finished.
 
+## Jaeger tracing
+
+Run `./scripts/local-kubernetes.sh tracing-setup` to deploy Jaeger all-in-one and
+configure OTLP for new agent Jobs. Run `agent-run` for live model inference, or
+`agent-test` for an explicit scripted evaluation. Start `tracing-ui` in another
+terminal to open a loopback port forward for <http://127.0.0.1:16686>.
+See [tracing and independent verification](tracing.md) for the complete workflow.
+
 ## Stop and restart
 
 ```sh

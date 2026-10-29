@@ -113,5 +113,17 @@ jobs:
           SUBSTRATE_RUN_KUBERNETES_TESTS: "1"
           SUBSTRATE_KUBE_CONTEXT: kind-openai-agent-substrate
           SUBSTRATE_KUBECONFIG: ${{ github.workspace }}/artifacts/local/kubeconfig
+      - name: Verify Jaeger SDK and sandbox tracing
+        run: |
+          ./scripts/local-kubernetes.sh tracing-setup
+          kubectl --context kind-openai-agent-substrate --kubeconfig artifacts/local/kubeconfig -n openai-agent-substrate port-forward service/jaeger-all-in-one 16686:16686 --address=127.0.0.1 > artifacts/local/jaeger-port-forward.log 2>&1 &
+          jaeger_forward_pid=$!
+          trap 'kill "$jaeger_forward_pid"' EXIT
+          export SUBSTRATE_DOCUMENT_TEMPLATE="$(uv run --locked python -c 'import json; print(json.load(open("artifacts/examples/document_intelligence/deployment/deployment.json"))["template"])')"
+          uv run --locked pytest -q tests/kubernetes/test_jaeger_tracing.py
+        env:
+          SUBSTRATE_RUN_JAEGER_TESTS: "1"
+          SUBSTRATE_KUBE_CONTEXT: kind-openai-agent-substrate
+          SUBSTRATE_KUBECONFIG: ${{ github.workspace }}/artifacts/local/kubeconfig
       - name: Verify artifact collection
         run: ./scripts/local-kubernetes.sh agent-artifacts

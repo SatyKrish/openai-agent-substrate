@@ -12,12 +12,13 @@ import uuid
 from contextlib import nullcontext
 from pathlib import Path
 
-from agents import Runner
+from agents import Runner, flush_traces, trace as workflow_trace
 from agents.run import RunConfig
 from agents.sandbox import SandboxRunConfig
 
 from openai_agent_substrate import SubstrateSandboxOptions
 from openai_agent_substrate.testing.server import LocalExecutionServer
+from openai_agent_substrate.tracing import configure_tracing, current_trace_ids, operation, tracing_enabled
 
 from .agent.agent import build_agent
 from .agent.lib.artifacts import digests
@@ -34,6 +35,12 @@ QUESTION = (
 
 async def run(args, local=None):
     analysis_id = str(uuid.uuid4())
+    with workflow_trace("Document Intelligence", group_id=analysis_id, disabled=not tracing_enabled()):
+        with operation("document_intelligence.run"):
+            return await _run(args, local, analysis_id)
+
+
+async def _run(args, local, analysis_id):
     inputs = stage_inputs()
     manifest = build_manifest(inputs, analysis_id, str(local.root) if local else "/workspace")
     client = build_client(args, local)
@@ -50,7 +57,7 @@ async def run(args, local=None):
             if not boundary.ok():
                 raise RuntimeError("The document sandbox must not contain the trusted harness API key or Secret mount")
             result = await Runner.run(agent, QUESTION, max_turns=25,
-                run_config=RunConfig(sandbox=SandboxRunConfig(session=session), tracing_disabled=True))
+                run_config=RunConfig(sandbox=SandboxRunConfig(session=session), tracing_disabled=not tracing_enabled(), trace_include_sensitive_data=False))
             # Require the skill/tool workflow in live mode too, not just plausible output text.
             trace = [item for item in result.to_input_list() if isinstance(item, dict) and item.get("type") in
                      {"function_call", "function_call_output", "custom_tool_call", "custom_tool_call_output"}]
@@ -64,7 +71,8 @@ async def run(args, local=None):
             for name in OUTPUTS:
                 with await session.read(Path("output") / name) as handle:
                     artifacts[name] = handle.read()
-            verified = verify_artifacts(artifacts, inputs, analysis_id)
+            with operation("document_intelligence.verify"):
+                verified = verify_artifacts(artifacts, inputs, analysis_id)
             with await session.read(Path("work/analyze.py")) as handle:
                 generated_code = handle.read()
         response_ids = [response.response_id for response in result.raw_responses if response.response_id]
@@ -88,7 +96,7 @@ async def run(args, local=None):
         backend="local protocol simulator (host execution; no isolation)" if local else "Agent Substrate on Kubernetes",
         model=args.model, model_inference=args.model != "scripted", skill="document-analysis",
         api_response_ids=response_ids, execution_mode="scripted-eval" if args.model == "scripted" else "openai-live",
-        tools_used=sorted(tools_used),
+        tools_used=sorted(tools_used), tracing=current_trace_ids(),
         actor=actor, actor_retained=args.keep_actor, artifact_directory=str(destination.resolve()),
         host_contract_verified=True, actor_api_key_absent=True, inputs=digests(inputs), artifacts=digests(artifacts),
         operating_margins_pct={row["company"]: row["operating_margin_pct"] for row in verified["rows"]})
@@ -123,8 +131,13 @@ def parse_args(argv=None):
 
 def main():
     args = parse_args()
-    with LocalExecutionServer() if args.backend == "local" else nullcontext(None) as local:
-        print(json.dumps(asyncio.run(run(args, local)), indent=2))
+    configure_tracing()
+    try:
+        with LocalExecutionServer() if args.backend == "local" else nullcontext(None) as local:
+            print(json.dumps(asyncio.run(run(args, local)), indent=2))
+    finally:
+        # The workflow context (including Actor cleanup) has closed before export.
+        flush_traces()
 
 
 if __name__ == "__main__":

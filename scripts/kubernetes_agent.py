@@ -171,7 +171,7 @@ def make_job(image, template, model=None, secret_name=SECRET):
     container = job["spec"]["template"]["spec"]["containers"][0]
     container["image"] = image
     container["env"][0]["value"] = template
-    container["envFrom"][0]["secretRef"]["name"] = secret_name
+    next(item["secretRef"] for item in container["envFrom"] if "secretRef" in item)["name"] = secret_name
     job["spec"]["template"]["spec"]["volumes"][0]["secret"]["secretName"] = secret_name
     if model == "scripted":
         container["args"] = ["--test"]

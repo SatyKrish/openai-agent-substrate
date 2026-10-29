@@ -52,6 +52,9 @@ on command lines, or save a rendered Secret manifest. The pod's configuration is
 
 ```yaml
 envFrom:
+  - configMapRef:
+      name: openai-agent-tracing
+      optional: true
   - secretRef:
       name: openai-agent-env
 volumeMounts:
@@ -126,3 +129,10 @@ This follows the standard Kubernetes mechanisms for
 The dedicated harness namespace carries `ate.dev/api-access=true`, as required by
 Substrate's existing API ingress policy. Secret refresh preserves this label;
 no control-plane NetworkPolicy is relaxed to enable the direct API connection.
+
+## Jaeger tracing
+
+Run `./scripts/local-kubernetes.sh tracing-setup` to configure SDK tracing for
+new agent Jobs. The optional ConfigMap supplies non-secret collector defaults;
+explicit values in the Secret take precedence. The exporter remains in the
+trusted harness. See [tracing setup, content and verification](../../docs/tracing.md).

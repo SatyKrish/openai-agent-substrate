@@ -20,7 +20,7 @@
           "name": "agent",
           "image": "REPLACED_BY_SETUP_WITH_IMAGE_DIGEST",
           "imagePullPolicy": "IfNotPresent",
-          "envFrom": [{"secretRef": {"name": "openai-agent-env"}}],
+          "envFrom": [{"configMapRef": {"name": "openai-agent-tracing", "optional": true}}, {"secretRef": {"name": "openai-agent-env"}}],
           "env": [{"name": "SUBSTRATE_TEMPLATE", "value": "REPLACED_WITH_PYTHON_ACTOR_TEMPLATE"}],
           "securityContext": {"allowPrivilegeEscalation": false, "readOnlyRootFilesystem": true, "capabilities": {"drop": ["ALL"]}},
           "resources": {"requests": {"cpu": "100m", "memory": "256Mi"}, "limits": {"cpu": "1", "memory": "1Gi"}},

@@ -10,7 +10,7 @@ import os
 from contextlib import nullcontext
 from pathlib import Path
 
-from agents import Runner
+from agents import Runner, flush_traces, trace
 from agents.run import RunConfig
 from agents.sandbox import Manifest, SandboxAgent, SandboxRunConfig
 from agents.sandbox.capabilities import Filesystem, Shell
@@ -20,6 +20,7 @@ from .lifecycle import KubectlActorControl
 from .testing.server import LocalExecutionServer
 from .provider import SubstrateSandboxClient, SubstrateSandboxOptions
 from .testing.model import ScriptedModel
+from .tracing import configure_tracing, current_trace_ids, tracing_enabled
 
 _FIRST_COMMAND = (
     "mkdir -p output && cat input.txt > output/report.txt && "
@@ -29,6 +30,11 @@ _FIRST_COMMAND = (
 
 
 async def run_demo(args, local=None):
+    with trace("Substrate reference workflow", disabled=not tracing_enabled()):
+        return await _run_demo(args, local)
+
+
+async def _run_demo(args, local=None):
     control = local.control if local else KubectlActorControl(context=args.context, endpoint=args.api_endpoint, kubeconfig=args.kubeconfig)
     client = SubstrateSandboxClient(
         router_url=local.url if local else args.router_url,
@@ -57,7 +63,7 @@ async def run_demo(args, local=None):
         async with session:
             result = await Runner.run(
                 agent, "Execute the task using the sandbox tools.", max_turns=10,
-                run_config=RunConfig(sandbox=SandboxRunConfig(session=session), tracing_disabled=True),
+                run_config=RunConfig(sandbox=SandboxRunConfig(session=session), tracing_disabled=not tracing_enabled(), trace_include_sensitive_data=False),
             )
             report = (await session.read(Path("output/report.txt"))).read().decode()
             input_after = (await session.read(Path("input.txt"))).read().decode()
@@ -77,13 +83,14 @@ async def run_demo(args, local=None):
             conversation.append({"role": "user", "content": "Print input.txt and output/report.txt to verify the resumed workspace."})
             await Runner.run(
                 agent, conversation, max_turns=10,
-                run_config=RunConfig(sandbox=SandboxRunConfig(session=session), tracing_disabled=True),
+                run_config=RunConfig(sandbox=SandboxRunConfig(session=session), tracing_disabled=not tracing_enabled(), trace_include_sensitive_data=False),
             )
         args.output_dir.mkdir(parents=True, exist_ok=True)
         (args.output_dir / "report.txt").write_text(report)
         summary = {
             "backend": "local protocol simulator (no sandbox isolation)" if local else "Agent Substrate",
             "model": args.model,
+            "tracing": current_trace_ids(),
             "actor": f"{session.state.atespace}/{session.state.actor_name}",
             "workspace_survived_resume": True,
             "initial_manifest_was_not_reapplied": True,
@@ -127,8 +134,12 @@ def parse_args(argv=None):
 def main():
     args = parse_args()
     local_context = LocalExecutionServer(upstream_binary=args.upstream_binary) if args.backend == "local" else nullcontext(None)
-    with local_context as local:
-        asyncio.run(run_demo(args, local))
+    configure_tracing()
+    try:
+        with local_context as local:
+            asyncio.run(run_demo(args, local))
+    finally:
+        flush_traces()
 
 
 if __name__ == "__main__":
