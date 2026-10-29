@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openai-agent-substrate"
+version = "0.1.0"
+description = "Proof of concept: OpenAI SandboxAgent execution on Agent Substrate"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["openai-agents==0.24.0"]
+
+[project.scripts]
+openai-agent-substrate = "openai_agent_substrate.demo:main"
+
+[dependency-groups]
+dev = ["pytest>=9.2,<10", "pytest-asyncio>=1.4,<2"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

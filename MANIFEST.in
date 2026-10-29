@@ -1,0 +1,4 @@
+include README.md VERIFICATION.md uv.lock
+recursive-include deploy *.md
+recursive-include tests *.py
+recursive-include third_party *.go *.md LICENSE
