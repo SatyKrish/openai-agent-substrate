@@ -57,7 +57,7 @@ therefore allows forwarding only to the router pod names discovered during
 setup. Namespace-wide pod listing remains necessary for the upstream router
 selector; direct pod reads and forwarding are restricted to the named routers.
 The local run helpers refresh this allowlist before each Job. Direct helper users
-should run `scripts/kubernetes_agent.py resources` after router rollouts.
+should run `python -m deploy.kubernetes.base resources` after router rollouts.
 
 ## Domain skills and code execution
 

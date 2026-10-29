@@ -91,4 +91,4 @@ model, and optional organization/project settings into a Kubernetes Secret.
 `agent-setup` builds the dedicated harness image and its resources. Use
 `agent-test` for an execution test without inference, `agent-run` for live model
 execution using `.env`, and `agent-artifacts` to download reports from the PVC.
-See [the complete configuration guide](../deploy/kubernetes/README.md).
+See [the complete configuration guide](../examples/document_intelligence/deploy/README.md).

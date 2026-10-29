@@ -67,7 +67,7 @@ cp .env.example .env
 ./scripts/local-kubernetes.sh agent-artifacts  # download reports from the PVC
 ```
 
-See the [Kubernetes agent setup guide](deploy/kubernetes/README.md) for configuration
+See the [Kubernetes agent setup guide](examples/document_intelligence/deploy/README.md) for configuration
 semantics, Secret mounting, permissions, and artifact retention. `agent-run`
 refreshes the Secret and starts a fresh Job, applying endpoint and model changes.
 
@@ -112,8 +112,8 @@ examples/                   Domain workflows with skills and sandbox execution
 tests/                      Unit and integration tests
 docs/                       Architecture, deployment, usage, and development guides
   assets/                   Documentation images
-scripts/                    Local setup, Secret import, agent Jobs, and tests
-deploy/kubernetes/          Trusted harness image, Job, RBAC, and setup guide
+scripts/                    Local Kind bootstrap and CLI dispatch
+deploy/kubernetes/base/     Reusable permissions, connection settings, and PVC
 third_party/                Pinned upstream execution server and its license
 .github/                    CI, dependency updates, and contribution templates
 ```

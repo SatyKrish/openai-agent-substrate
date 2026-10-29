@@ -11,7 +11,8 @@ import time
 import urllib.error
 import urllib.request
 
-from scripts import kubernetes_agent as agent
+from deploy.kubernetes.base import resources as base
+from . import cli as agent
 
 
 def verify_trace(payload, summary):
@@ -95,7 +96,7 @@ def main():
     if args.action in {"setup", "ui"} and (not args.context or not args.kubeconfig):
         parser.error("setup/ui require explicit --context and --kubeconfig")
     if args.action == "setup":
-        agent.apply(args, agent.namespace_resource())
+        agent.apply(args, base.namespace_resource())
         agent.apply(args, json.loads((agent.MANIFESTS / "jaeger-all-in-one.json").read_text()))
         agent.kubectl(args, "rollout", "status", "deployment/jaeger-all-in-one", "-n", agent.NAMESPACE, "--timeout=180s")
         print("Jaeger is ready. New agent Jobs receive the OTLP configuration.")

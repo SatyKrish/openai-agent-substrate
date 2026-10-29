@@ -43,7 +43,7 @@ The domain example adds an opt-in test after its Python image is deployed:
 ```
 
 This command builds the image, registers the immutable template, runs the domain
-workflow, and runs `tests/kubernetes/test_document_intelligence.py`. It uses the
+workflow, and runs `examples/document_intelligence/evals/kubernetes/test_document_intelligence.py`. It uses the
 same dedicated local context and kubeconfig as the provider tests.
 
 The optional harness-pod test uses a temporary dummy-key Secret with an invalid
@@ -56,7 +56,7 @@ SUBSTRATE_RUN_AGENT_POD_TESTS=1 \
 SUBSTRATE_KUBE_CONTEXT=kind-openai-agent-substrate \
 SUBSTRATE_KUBECONFIG="$PWD/artifacts/local/kubeconfig" \
 SUBSTRATE_DOCUMENT_TEMPLATE=YOUR_PYTHON_TEMPLATE \
-uv run pytest -q tests/kubernetes/test_agent_configuration.py
+uv run pytest -q examples/document_intelligence/evals/kubernetes/test_agent_configuration.py
 ```
 
 It deletes its temporary Job and Secret after the check; artifacts remain on the
@@ -72,7 +72,7 @@ SUBSTRATE_RUN_JAEGER_TESTS=1 \
 SUBSTRATE_KUBE_CONTEXT=kind-openai-agent-substrate \
 SUBSTRATE_KUBECONFIG="$PWD/artifacts/local/kubeconfig" \
 SUBSTRATE_DOCUMENT_TEMPLATE=YOUR_PYTHON_TEMPLATE \
-uv run --locked pytest -q tests/kubernetes/test_jaeger_tracing.py
+uv run --locked pytest -q examples/document_intelligence/evals/kubernetes/test_jaeger_tracing.py
 ```
 
 This uses a temporary dummy-key Secret and explicit scripted evaluation. It
@@ -119,5 +119,5 @@ but has not been executed on GitHub in this session.
 
 The executable Substrate revision is centralized in `.substrate-revision`.
 Kubectl's version and architecture hashes are committed in
-`deploy/kubernetes/kubectl-checksums.json`; updates must replace those pins along
+`examples/document_intelligence/deploy/kubectl-checksums.json`; updates must replace those pins along
 with validation of the new binaries.

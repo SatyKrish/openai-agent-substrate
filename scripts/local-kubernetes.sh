@@ -61,7 +61,7 @@ case "${1:-help}" in
     (cd "$SOURCE_DIR" && go run ./cmd/ate-setup --no-dev-env --rollout-timeout 300s deploy demo sandbox) 2>&1 | tee "$LOCAL_DIR/sandbox-setup.log"
     uv sync --locked
     if [[ -f "$PROJECT_ROOT/.env" ]]; then
-      uv run --locked python scripts/kubernetes_agent.py secret --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG"
+      uv run --locked python -m examples.document_intelligence.deploy secret --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG"
     else
       echo "No .env found. Copy .env.example to .env to configure the Kubernetes agent."
     fi
@@ -72,33 +72,33 @@ case "${1:-help}" in
     ;;
   document-intelligence)
     configure_docker
-    uv run --locked python -m examples.document_intelligence.deploy --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG" --image localhost:5501/openai-agent-substrate-document-intelligence:local
+    uv run --locked python -m examples.document_intelligence.deploy sandbox --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG" --image localhost:5501/openai-agent-substrate-document-intelligence:local
     DOCUMENT_TEMPLATE="$(uv run --locked python -c 'import json; print(json.load(open("artifacts/examples/document_intelligence/deployment/deployment.json"))["template"])')"
     uv run --locked python -m examples.document_intelligence --test --backend substrate --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG" --template "$DOCUMENT_TEMPLATE" --output-dir "$LOCAL_DIR/document-intelligence"
-    SUBSTRATE_RUN_KUBERNETES_TESTS=1 SUBSTRATE_KUBE_CONTEXT="kind-$CLUSTER" SUBSTRATE_KUBECONFIG="$KUBECONFIG" SUBSTRATE_DOCUMENT_TEMPLATE="$DOCUMENT_TEMPLATE" uv run --locked pytest -q tests/kubernetes/test_document_intelligence.py
+    SUBSTRATE_RUN_KUBERNETES_TESTS=1 SUBSTRATE_KUBE_CONTEXT="kind-$CLUSTER" SUBSTRATE_KUBECONFIG="$KUBECONFIG" SUBSTRATE_DOCUMENT_TEMPLATE="$DOCUMENT_TEMPLATE" uv run --locked pytest -q examples/document_intelligence/evals/kubernetes/test_document_intelligence.py
     ;;
   agent-setup)
     configure_docker
     prepare_source
-    uv run --locked python scripts/kubernetes_agent.py secret --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG"
-    uv run --locked python -m examples.document_intelligence.deploy --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG" --image localhost:5501/openai-agent-substrate-document-intelligence:local
-    uv run --locked python scripts/kubernetes_agent.py build --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG" --source-dir "$SOURCE_DIR"
+    uv run --locked python -m examples.document_intelligence.deploy secret --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG"
+    uv run --locked python -m examples.document_intelligence.deploy sandbox --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG" --image localhost:5501/openai-agent-substrate-document-intelligence:local
+    uv run --locked python -m examples.document_intelligence.deploy build --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG" --source-dir "$SOURCE_DIR"
     ;;
   agent-run|agent-test)
-    uv run --locked python scripts/kubernetes_agent.py resources --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG"
-    uv run --locked python scripts/kubernetes_agent.py secret --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG"
+    uv run --locked python -m deploy.kubernetes.base resources --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG"
+    uv run --locked python -m examples.document_intelligence.deploy secret --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG"
     DOCUMENT_TEMPLATE="$(uv run --locked python -c 'import json; print(json.load(open("artifacts/examples/document_intelligence/deployment/deployment.json"))["template"])')"
-    AGENT_COMMAND=(uv run --locked python scripts/kubernetes_agent.py run --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG" --template "$DOCUMENT_TEMPLATE" --wait)
+    AGENT_COMMAND=(uv run --locked python -m examples.document_intelligence.deploy run --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG" --template "$DOCUMENT_TEMPLATE" --wait)
     if [[ "$1" == agent-test ]]; then AGENT_COMMAND+=(--model scripted); fi
     "${AGENT_COMMAND[@]}"
     ;;
   tracing-setup|tracing-ui)
     TRACING_ACTION=setup
     if [[ "$1" == tracing-ui ]]; then TRACING_ACTION=ui; fi
-    uv run --locked python -m scripts.jaeger "$TRACING_ACTION" --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG"
+    uv run --locked python -m examples.document_intelligence.deploy.jaeger "$TRACING_ACTION" --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG"
     ;;
   agent-artifacts)
-    uv run --locked python scripts/kubernetes_agent.py collect --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG"
+    uv run --locked python -m examples.document_intelligence.deploy collect --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG"
     ;;
   status)
     kubectl --context "kind-$CLUSTER" get nodes

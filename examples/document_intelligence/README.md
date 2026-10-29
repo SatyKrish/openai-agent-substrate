@@ -29,7 +29,6 @@ examples/document_intelligence/
     lib/                           Trusted configuration and artifact verification
     sandbox/
       sandbox.py                   Provider and workspace manifest
-      Dockerfile                   Python execution image
       PROVENANCE.json              Synthetic input provenance
       workspace/inputs/            Reports, KPI table, and MIT license
   evals/
@@ -38,7 +37,7 @@ examples/document_intelligence/
     test_workflow.py               Execution and output contract checks
     test_configuration.py          Live defaults and explicit test-mode checks
   main.py                          Host CLI and workflow orchestration
-  deploy.py                        Image build and ActorTemplate deployment
+  deploy/                          Example images, entrypoint, Job, and CLI
 ```
 
 The factory reads `instructions.md`, registers capabilities from `tools/`, and
@@ -58,7 +57,7 @@ scripted model. For the Kubernetes harness, configure `.env` and run:
 ./scripts/local-kubernetes.sh agent-run
 ```
 
-The [agent setup guide](../../deploy/kubernetes/README.md) describes API key,
+The [agent setup guide](deploy/README.md) describes API key,
 endpoint, model, optional account settings, and Secret mounting. `OPENAI_MODEL`
 selects the model; `OPENAI_BASE_URL` selects the endpoint. The live model chooses
 tools and writes analysis code. These commands can incur model API usage.
@@ -140,13 +139,13 @@ uv run python -m examples.document_intelligence.deploy \
   --context YOUR_KUBERNETES_CONTEXT \
   --image YOUR_REGISTRY/document-intelligence:example
 
-# Use the template name printed by deploy.py.
+# Use the template name printed by the sandbox deployment action.
 uv run python -m examples.document_intelligence --backend substrate \
   --context YOUR_KUBERNETES_CONTEXT \
   --template document-intelligence-CONFIG_DIGEST --model YOUR_OPENAI_MODEL_ID
 ```
 
-Pass `--kubeconfig PATH` to both commands when needed. `deploy.py` also accepts
+Pass `--kubeconfig PATH` to both commands when needed. the deployment CLI also accepts
 `--docker-context NAME` and `--atespace NAME`. The existing `ate-demo-sandbox`
 atespace and `workload=sandbox` worker pool must exist. The upstream
 `sandbox-template` has no Python interpreter and cannot run this example.
@@ -160,7 +159,7 @@ scripted tests do not validate live model behavior. Use explicit `--test` to run
 a deterministic evaluation. `OPENAI_MODEL=scripted` alone is rejected.
 
 To load endpoint, model, and credentials from `.env` into a Kubernetes-hosted
-agent harness instead, use the [Secret-backed agent setup](../../deploy/kubernetes/README.md).
+agent harness instead, use the [Secret-backed agent setup](deploy/README.md).
 
 ## Artifacts and retained workspaces
 

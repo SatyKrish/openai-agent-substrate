@@ -9,7 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from scripts import kubernetes_agent as agent
+from deploy.kubernetes.base import resources as base
+from examples.document_intelligence.deploy import cli as agent
 
 pytestmark = pytest.mark.skipif(
     os.getenv("SUBSTRATE_RUN_AGENT_POD_TESTS") != "1",
@@ -31,7 +32,7 @@ def test_env_secret_mount_and_endpoint_model_configuration(tmp_path):
         template=os.environ["SUBSTRATE_DOCUMENT_TEMPLATE"], model="scripted", wait=False)
     name = None
     try:
-        agent.import_secret(args)
+        base.import_secret(args)
         name = agent.run_job(args)
         agent.wait_for_job(args, name)
         logs = agent.kubectl(args, "logs", "job/" + name, "-n", agent.NAMESPACE, capture_output=True).stdout.decode()

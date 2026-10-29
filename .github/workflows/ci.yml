@@ -107,7 +107,7 @@ jobs:
         run: |
           export PATH="$PWD/artifacts/local/bin:$PATH"
           export SUBSTRATE_DOCUMENT_TEMPLATE="$(uv run --locked python -c 'import json; print(json.load(open("artifacts/examples/document_intelligence/deployment/deployment.json"))["template"])')"
-          uv run --locked pytest -q tests/kubernetes/test_agent_configuration.py tests/kubernetes/test_document_intelligence.py
+          uv run --locked pytest -q examples/document_intelligence/evals/kubernetes/test_agent_configuration.py examples/document_intelligence/evals/kubernetes/test_document_intelligence.py
         env:
           SUBSTRATE_RUN_AGENT_POD_TESTS: "1"
           SUBSTRATE_RUN_KUBERNETES_TESTS: "1"
@@ -120,7 +120,7 @@ jobs:
           jaeger_forward_pid=$!
           trap 'kill "$jaeger_forward_pid"' EXIT
           export SUBSTRATE_DOCUMENT_TEMPLATE="$(uv run --locked python -c 'import json; print(json.load(open("artifacts/examples/document_intelligence/deployment/deployment.json"))["template"])')"
-          uv run --locked pytest -q tests/kubernetes/test_jaeger_tracing.py
+          uv run --locked pytest -q examples/document_intelligence/evals/kubernetes/test_jaeger_tracing.py
         env:
           SUBSTRATE_RUN_JAEGER_TESTS: "1"
           SUBSTRATE_KUBE_CONTEXT: kind-openai-agent-substrate

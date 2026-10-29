@@ -1,7 +1,6 @@
-#!/usr/bin/env python3
 # Copyright 2026 openai-agent-substrate contributors
 # SPDX-License-Identifier: Apache-2.0
-"""Import .env, build the trusted harness, and run Secret-backed Kubernetes Jobs."""
+"""Document Intelligence image builds, configuration and harness Jobs."""
 
 from __future__ import annotations
 
@@ -9,62 +8,26 @@ import argparse
 import hashlib
 import json
 import os
+from pathlib import Path
 import shutil
-import subprocess
 import time
 import urllib.request
 import uuid
 from contextlib import suppress
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-MANIFESTS = ROOT / "deploy/kubernetes"
-NAMESPACE = "openai-agent-substrate"
+from deploy.kubernetes.base import resources as base
+from . import sandbox
+from .job import make_job, make_reader_pod
+
+ROOT = Path(__file__).resolve().parents[3]
+MANIFESTS = Path(__file__).parent
+NAMESPACE = base.NAMESPACE
 SECRET = "openai-agent-env"
 PIN = (ROOT / ".substrate-revision").read_text().strip()
 KUBECTL_RELEASE = json.loads((MANIFESTS / "kubectl-checksums.json").read_text())
-
-
-def checked(command, **kwargs):
-    return subprocess.run(command, check=True, **kwargs)
-
-
-def kubectl(args, *command, **kwargs):
-    return checked(["kubectl", "--context", args.context, "--kubeconfig", str(args.kubeconfig), *command], **kwargs)
-
-
-def apply(args, resource):
-    # Use stdin, never command-line secret values or a persisted Secret manifest.
-    return kubectl(args, "apply", "--server-side", "--field-manager=openai-agent-substrate", "-f", "-", "-o", "name",
-                   input=json.dumps(resource).encode(), capture_output=True)
-
-
-def namespace_resource():
-    resources = json.loads((MANIFESTS / "resources.json").read_text())
-    return next(item for item in resources["items"] if item["kind"] == "Namespace")
-
-
-def import_secret(args):
-    if not args.env_file.is_file():
-        raise ValueError("No .env file found. Copy .env.example to .env and fill in the configuration.")
-    # kubectl parses plain KEY=VALUE lines; .env is never executed as a shell script.
-    try:
-        result = kubectl(args, "create", "secret", "generic", args.secret_name, "-n", NAMESPACE,
-                         "--from-env-file=" + str(args.env_file), "--dry-run=client", "-o", "json", capture_output=True)
-        resource = json.loads(result.stdout)
-    except subprocess.CalledProcessError:
-        # Parser errors can contain the offending line. Do not expose it.
-        raise ValueError("Cannot parse .env; use plain KEY=VALUE lines without export statements") from None
-    if not resource.get("data"):
-        raise ValueError("The environment file contains no configuration entries")
-    # Preserve the label required by Substrate API ingress on every Secret refresh.
-    apply(args, namespace_resource())
-    resource["metadata"]["labels"] = {"app.kubernetes.io/managed-by": "openai-agent-substrate"}
-    try:
-        apply(args, resource)
-    except subprocess.CalledProcessError:
-        raise RuntimeError("Could not apply the agent configuration Secret; values were not logged") from None
-    print(f"Imported configuration into {NAMESPACE}/{args.secret_name}; values omitted.")
+checked = base.checked
+kubectl = base.kubectl
+apply = base.apply
 
 
 def download_kubectl(destination, architecture):
@@ -96,29 +59,6 @@ def resolve_image_digest(image, digests):
     return digest
 
 
-def prepare_resources(args):
-    service = json.loads(kubectl(args, "get", "service", "atenet-router", "-n", "ate-system", "-o", "json", capture_output=True).stdout)
-    selector = service["spec"].get("selector", {})
-    if not selector:
-        raise RuntimeError("The router service has no selector; refusing an unrestricted forwarding grant")
-    labels = ",".join(f"{key}={value}" for key, value in sorted(selector.items()))
-    pods = json.loads(kubectl(args, "get", "pods", "-n", "ate-system", "-l", labels, "-o", "json", capture_output=True).stdout)
-    names = sorted(pod["metadata"]["name"] for pod in pods["items"] if not pod["metadata"].get("deletionTimestamp"))
-    if not names:
-        raise RuntimeError("No router pods found; refusing an unrestricted forwarding grant")
-    resources = json.loads((MANIFESTS / "resources.json").read_text())
-    role = next(item for item in resources["items"] if item["kind"] == "Role")
-    for rule in role["rules"]:
-        if set(rule["resources"]) & {"pods", "pods/portforward"} and "resourceNames" in rule:
-            rule["resourceNames"] = names
-    return resources
-
-
-def configure_resources(args):
-    apply(args, prepare_resources(args))
-    print("Configured harness resources with forwarding restricted to current router pods.")
-
-
 def build(args):
     if checked(["git", "-C", str(args.source_dir), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip() != PIN:
         raise ValueError(f"Substrate source must be checked out at {PIN}")
@@ -136,7 +76,7 @@ def build(args):
     binaries.mkdir(parents=True, exist_ok=True)
     # Allowlist the build context. Local .env and kubeconfig never enter the image.
     for name in ["pyproject.toml", "uv.lock", "README.md", "LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md",
-                 "third_party/substrate-sandbox/LICENSE", "deploy/kubernetes/run_agent.py"]:
+                 "third_party/substrate-sandbox/LICENSE"]:
         target = context / name
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(ROOT / name, target)
@@ -145,7 +85,7 @@ def build(args):
         if target.exists():
             shutil.rmtree(target)
         shutil.copytree(ROOT / name, target, ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.egg-info", ".env", ".env.*"))
-    shutil.copyfile(MANIFESTS / "Dockerfile", context / "Dockerfile")
+    shutil.copyfile(MANIFESTS / "harness.Dockerfile", context / "Dockerfile")
     shutil.copyfile(args.source_dir / "LICENSE", context / "substrate-LICENSE")
     print(f"Building Linux/{architecture} kubectl-ate from pinned Substrate source.", flush=True)
     checked(["go", "build", "-trimpath", "-ldflags=-s -w", "-o", str(binaries / "kubectl-ate"), "./cmd/kubectl-ate"],
@@ -159,25 +99,10 @@ def build(args):
     checked([*docker, "push", args.image])
     digests = json.loads(checked([*docker, "image", "inspect", args.image, "--format", "{{json .RepoDigests}}"], capture_output=True).stdout)
     image = resolve_image_digest(args.image, digests)
-    configure_resources(args)
+    base.configure_resources(args)
     args.state_file.parent.mkdir(parents=True, exist_ok=True)
     args.state_file.write_text(json.dumps(dict(image=image, context=args.context), indent=2) + "\n")
     print("Trusted harness image and Kubernetes resources are ready; no model call was made.")
-
-
-def make_job(image, template, model=None, secret_name=SECRET):
-    job = json.loads((MANIFESTS / "agent-job.json").read_text())
-    job["metadata"]["name"] = "openai-agent-" + uuid.uuid4().hex[:12]
-    container = job["spec"]["template"]["spec"]["containers"][0]
-    container["image"] = image
-    container["env"][0]["value"] = template
-    next(item["secretRef"] for item in container["envFrom"] if "secretRef" in item)["name"] = secret_name
-    job["spec"]["template"]["spec"]["volumes"][0]["secret"]["secretName"] = secret_name
-    if model == "scripted":
-        container["args"] = ["--test"]
-    elif model:
-        container["args"] = ["--model", model]
-    return job
 
 
 def run_job(args):
@@ -209,16 +134,6 @@ def wait_for_job(args, name):
     raise TimeoutError(f"Timed out waiting for Agent Job {name}")
 
 
-def make_reader_pod(image, name):
-    return dict(apiVersion="v1", kind="Pod", metadata=dict(name=name, namespace=NAMESPACE), spec=dict(
-        automountServiceAccountToken=False, restartPolicy="Never",
-        securityContext=dict(runAsNonRoot=True, runAsUser=10001, runAsGroup=10001, fsGroup=10001, seccompProfile=dict(type="RuntimeDefault")),
-        containers=[dict(name="reader", image=image, command=["python", "-c", "import time; time.sleep(600)"],
-            securityContext=dict(allowPrivilegeEscalation=False, readOnlyRootFilesystem=True, capabilities=dict(drop=["ALL"])),
-            volumeMounts=[dict(name="artifacts", mountPath="/artifacts", readOnly=True)])],
-        volumes=[dict(name="artifacts", persistentVolumeClaim=dict(claimName="openai-agent-artifacts", readOnly=True))]))
-
-
 def collect(args):
     state = json.loads(args.state_file.read_text())
     if state["context"] != args.context:
@@ -237,23 +152,30 @@ def collect(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["secret", "build", "resources", "run", "collect"])
+    parser.add_argument("action", choices=["secret", "sandbox", "build", "run", "collect"])
     parser.add_argument("--context", required=True)
-    parser.add_argument("--kubeconfig", type=Path, required=True)
+    parser.add_argument("--kubeconfig", type=Path)
     parser.add_argument("--env-file", type=Path, default=ROOT / ".env")
     parser.add_argument("--secret-name", default=SECRET)
     parser.add_argument("--source-dir", type=Path, default=ROOT / "artifacts/local/substrate")
-    parser.add_argument("--image", default="localhost:5501/openai-agent-substrate-harness:local")
+    parser.add_argument("--image", help="Registry/repository:tag; defaults depend on the selected image build")
     parser.add_argument("--docker-context")
     parser.add_argument("--state-file", type=Path, default=ROOT / "artifacts/local/agent-deployment.json")
+    parser.add_argument("--atespace", default="ate-demo-sandbox")
     parser.add_argument("--template", help="Python-capable ActorTemplate; required for run")
     parser.add_argument("--model", help="Override the mounted OPENAI_MODEL; scripted performs no model inference")
     parser.add_argument("--wait", action="store_true")
-    parser.add_argument("--output-dir", type=Path, default=ROOT / "artifacts/local/agent-results")
+    parser.add_argument("--output-dir", type=Path, help="Artifact collection or sandbox deployment output directory")
     args = parser.parse_args()
+    if args.action != "sandbox" and not args.kubeconfig:
+        parser.error("this action requires --kubeconfig")
     if args.action == "run" and not args.template:
         parser.error("run requires --template")
-    {"secret": import_secret, "build": build, "resources": configure_resources, "run": run_job, "collect": collect}[args.action](args)
+    args.output_dir = args.output_dir or (ROOT / "artifacts/examples/document_intelligence/deployment"
+                                         if args.action == "sandbox" else ROOT / "artifacts/local/agent-results")
+    args.image = args.image or ("localhost:5501/openai-agent-substrate-document-intelligence:local"
+                                if args.action == "sandbox" else "localhost:5501/openai-agent-substrate-harness:local")
+    {"secret": base.import_secret, "sandbox": sandbox.deploy, "build": build, "run": run_job, "collect": collect}[args.action](args)
 
 
 if __name__ == "__main__":

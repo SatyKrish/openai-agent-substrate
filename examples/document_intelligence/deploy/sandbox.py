@@ -1,34 +1,17 @@
 # Copyright 2026 openai-agent-substrate contributors
 # SPDX-License-Identifier: Apache-2.0
-"""Build a Python sandbox image and register an immutable Substrate ActorTemplate."""
+"""Build the Actor image and register an immutable Document Intelligence template."""
 
-import argparse
 import hashlib
 import json
-import subprocess
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
+from deploy.kubernetes.base.resources import checked
+
+ROOT = Path(__file__).resolve().parents[3]
 
 
-def checked(command, **kwargs):
-    try:
-        return subprocess.run(command, check=True, text=True, **kwargs)
-    except subprocess.CalledProcessError as error:
-        if error.stderr:
-            print(error.stderr, end="")
-        raise
-
-
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--context", required=True)
-    parser.add_argument("--kubeconfig", type=Path)
-    parser.add_argument("--docker-context", help="Docker daemon used to build and push")
-    parser.add_argument("--image", required=True, help="Registry/repository:tag reachable by the sandbox workers")
-    parser.add_argument("--atespace", default="ate-demo-sandbox")
-    parser.add_argument("--output-dir", type=Path, default=ROOT / "artifacts/examples/document_intelligence/deployment")
-    args = parser.parse_args()
+def deploy(args):
     kubectl = ["kubectl", "ate", "--context", args.context]
     if args.kubeconfig:
         kubectl += ["--kubeconfig", str(args.kubeconfig)]
@@ -36,7 +19,7 @@ def main():
     existing = json.loads(checked([*kubectl, "get", "actor-templates", "--atespace", args.atespace, "-o", "json"],
                                    capture_output=True).stdout)
     docker = ["docker"] + (["--context", args.docker_context] if args.docker_context else [])
-    checked([*docker, "build", "--provenance=false", "-f", str(ROOT / "examples/document_intelligence/agent/sandbox/Dockerfile"),
+    checked([*docker, "build", "--provenance=false", "-f", str(ROOT / "examples/document_intelligence/deploy/sandbox.Dockerfile"),
              "-t", args.image, str(ROOT)])
     checked([*docker, "push", args.image])
     digests = json.loads(checked([*docker, "image", "inspect", args.image, "--format", "{{json .RepoDigests}}"],
@@ -62,7 +45,3 @@ def main():
                       manifest=str(manifest_path.resolve()))
     (args.output_dir / "deployment.json").write_text(json.dumps(deployment, indent=2) + "\n")
     print(json.dumps(deployment, indent=2))
-
-
-if __name__ == "__main__":
-    main()
