@@ -30,3 +30,9 @@ def test_repository_python_modules_do_not_import_shell_scripts():
     for directory in ("src", "deploy", "examples", "tests"):
         for path in (ROOT / directory).rglob("*.py"):
             assert "scripts" not in set(imports(path)), path
+
+
+def test_library_tests_have_no_application_dependencies():
+    for directory in ("unit", "integration", "kubernetes"):
+        for path in (ROOT / "tests" / directory).rglob("*.py"):
+            assert not {"examples", "deploy", "scripts"}.intersection(imports(path)), path

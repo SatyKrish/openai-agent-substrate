@@ -5,11 +5,11 @@ import sys
 
 import pytest
 
-from openai_agent_substrate import demo
+from examples.quickstart import main as demo
 
 
 def test_default_command_does_not_start_a_host_execution_server(monkeypatch):
-    monkeypatch.setattr(sys, "argv", ["openai-agent-substrate"])
+    monkeypatch.setattr(sys, "argv", ["quickstart"])
 
     def reject(**kwargs):
         pytest.fail("Host execution requires explicit --backend local")

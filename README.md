@@ -19,6 +19,10 @@ The Document Intelligence agent uses the configured OpenAI model for normal
 execution. `--test` and `agent-test` select deterministic execution evaluations.
 See [its agent layout and live run guide](examples/document_intelligence/README.md).
 
+The wheel installs the provider library and reusable testing helpers. Run the
+[quickstart](examples/quickstart/README.md) from a source checkout; the former
+`openai-agent-substrate` console command has been removed.
+
 ## Quick start
 
 Requires Python 3.11+, macOS or Linux, and [uv](https://docs.astral.sh/uv/).
@@ -27,7 +31,7 @@ Requires Python 3.11+, macOS or Linux, and [uv](https://docs.astral.sh/uv/).
 git clone https://github.com/SatyKrish/openai-agent-substrate.git
 cd openai-agent-substrate
 uv sync --locked
-uv run openai-agent-substrate --backend local
+uv run python -m examples.quickstart --backend local
 ```
 
 The key-free demo invokes the real SDK runner with a scripted model, writes a report, serializes the session, reconnects, and verifies that edits survived. Results appear in `artifacts/`.
@@ -41,7 +45,7 @@ For a complete local setup and test, run `./scripts/local-kubernetes.sh setup` f
 Prepare a Substrate cluster and its upstream `sandbox-template` using the [deployment guide](docs/deployment.md), then run:
 
 ```sh
-uv run openai-agent-substrate --backend substrate \
+uv run python -m examples.quickstart --backend substrate \
   --context YOUR_KUBERNETES_CONTEXT \
   --atespace ate-demo-sandbox --template sandbox-template
 ```
@@ -106,9 +110,9 @@ updating source. The exporter stays in the trusted harness.
 ## Repository layout
 
 ```text
-src/openai_agent_substrate/  SDK provider, transport, lifecycle, and CLI
+src/openai_agent_substrate/  Library: SDK provider, transport, lifecycle, tracing
   testing/                  Scripted model and loopback execution helpers
-examples/                   Domain workflows with skills and sandbox execution
+examples/                   Quickstart and domain workflows; not installed by the wheel
 tests/                      Unit and integration tests
 docs/                       Architecture, deployment, usage, and development guides
   assets/                   Documentation images

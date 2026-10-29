@@ -47,13 +47,13 @@ For a retained workspace:
 
 ```sh
 export PATH="$PWD/artifacts/local/bin:$PATH"
-uv run openai-agent-substrate --backend substrate \
+uv run python -m examples.quickstart --backend substrate \
   --context kind-openai-agent-substrate \
   --kubeconfig artifacts/local/kubeconfig \
   --output-dir artifacts/local/demo --keep-actor
 ```
 
-Use `scripts/resume_session.py` with the same context, kubeconfig, and `artifacts/local/demo/session.json` to inspect the retained Actor. Add `--delete` to delete that Actor when finished.
+Use `python -m examples.quickstart.resume` with the same context, kubeconfig, and `artifacts/local/demo/session.json` to inspect the retained Actor. Add `--delete` to delete that Actor when finished.
 
 ## Jaeger tracing
 
@@ -69,7 +69,7 @@ See [tracing and independent verification](tracing.md) for the complete workflow
 ./scripts/local-kubernetes.sh stop
 ```
 
-On macOS this stops only the dedicated Colima profile and preserves its disk. Restart that profile with `colima start --profile openai-agent-substrate --activate=false --ssh-config=false`, or rerun setup. The project-specific kubeconfig selects the cluster explicitly.
+On macOS this stops only the dedicated Colima profile and preserves its disk. Restart that profile with `colima start --profile python -m examples.quickstart --activate=false --ssh-config=false`, or rerun setup. The project-specific kubeconfig selects the cluster explicitly.
 
 ## Verified recovery scope
 

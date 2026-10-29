@@ -4,7 +4,10 @@
 import os
 
 import pytest
-from agents import set_tracing_disabled
+from agents import set_trace_processors, set_tracing_disabled
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+from openai_agent_substrate import tracing
 
 from openai_agent_substrate.testing.server import LocalExecutionServer
 from openai_agent_substrate.provider import SubstrateSandboxClient
@@ -24,3 +27,19 @@ def server():
 @pytest.fixture
 def client(server):
     return SubstrateSandboxClient(router_url=server.url, atespace="test-space", control=server.control)
+
+
+@pytest.fixture
+def trace_recorder(monkeypatch):
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:4318")
+    monkeypatch.delenv("OPENAI_AGENTS_DISABLE_TRACING", raising=False)
+    exporter = InMemorySpanExporter()
+    processor = tracing.OTLPTracingProcessor(exporter)
+    set_trace_processors([processor])
+    set_tracing_disabled(False)
+    try:
+        yield processor, exporter
+    finally:
+        processor.shutdown()
+        set_trace_processors([])
+        set_tracing_disabled(True)

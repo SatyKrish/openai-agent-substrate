@@ -1,39 +1,19 @@
-# Domain examples
+# Examples
 
-Each folder contains an agent project with `agent/` and sibling `evals/`, following
-[Eve’s organization](https://eve.dev/docs/concepts/project-structure). It contains
-an end-to-end domain workflow: inputs, agent, reusable
-skills, sandbox runtime requirements, and verified output artifacts. Run commands
-from the repository root after `uv sync --locked`.
+Run examples from the repository root after `uv sync --locked`. They are source
+applications and are not installed by the library wheel.
 
-| Domain | Workflow | Sandbox capabilities |
-| --- | --- | --- |
-| [Document Intelligence](document_intelligence/README.md) | Compare synthetic annual reports, reconcile source facts, calculate financial metrics, and create cited reports | Native SDK skill discovery, shell inspection, agent-written Python via `apply_patch`, code execution, artifact verification |
+| Example | Workflow |
+| --- | --- |
+| [Quickstart](quickstart/README.md) | Provider execution, suspension, session serialization and resume |
+| [Document Intelligence](document_intelligence/README.md) | Skill loading, source reconciliation, agent-written Python, sandbox execution and cited reports |
 
-```text
-examples/
-  document_intelligence/
-    agent/
-      agent.py
-      instructions.md
-      tools/
-      skills/document-analysis/
-      lib/
-      sandbox/
-        sandbox.py
-        Dockerfile
-        workspace/inputs/
-    evals/
-      scripted.py
-      fixtures/
-      test_workflow.py
-      test_configuration.py
-    main.py
-    deploy.py
-    README.md
-```
+Document Intelligence keeps authored behavior in `agent/`, evaluations in
+`evals/`, and application deployment in `deploy/`. It follows
+[Eve’s organization](https://eve.dev/docs/concepts/project-structure).
+Reusable Kubernetes permissions and connection settings live in
+[the base deployment](../deploy/kubernetes/base/README.md). `scripts/` contains
+only the shell bootstrap and dispatches to the Python module CLIs.
 
-Generic infrastructure utilities belong in `scripts/`. Use
-`scripts/resume_session.py` to inspect a retained Actor; see the
-[session guide](../docs/usage.md). The provider's small lifecycle smoke test
-remains available as `uv run openai-agent-substrate --backend local`.
+Use `python -m examples.quickstart.resume` to inspect a retained Actor. See the
+[session guide](../docs/usage.md) for state handling.

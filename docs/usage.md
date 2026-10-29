@@ -79,14 +79,14 @@ async with resumed:
     ...
 ```
 
-Keep SDK conversation history or `RunState` separately. Actor suspension preserves compute/workspace state, not the external SDK harness. `demo.py` shows carrying `result.to_input_list()` into the next run.
+Keep SDK conversation history or `RunState` separately. Actor suspension preserves compute/workspace state, not the external SDK harness. `examples/quickstart/main.py` shows carrying `result.to_input_list()` into the next run.
 
 For complete runnable examples, see [examples/README.md](../examples/README.md).
 
-The generic retained-session utility is `scripts/resume_session.py`:
+The generic retained-session utility is `python -m examples.quickstart.resume`:
 
 ```sh
-uv run python scripts/resume_session.py --context YOUR_KUBERNETES_CONTEXT --state-file artifacts/session.json
+uv run python -m examples.quickstart.resume --context YOUR_KUBERNETES_CONTEXT --state-file artifacts/session.json
 ```
 
 Pass the same `--kubeconfig` and `--atespace` used for creation when applicable.

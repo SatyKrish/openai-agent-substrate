@@ -67,7 +67,7 @@ case "${1:-help}" in
     fi
     ;;
   test)
-    uv run --locked openai-agent-substrate --backend substrate --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG" --output-dir "$LOCAL_DIR/results"
+    uv run --locked python -m examples.quickstart --backend substrate --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG" --output-dir "$LOCAL_DIR/results"
     SUBSTRATE_RUN_KUBERNETES_TESTS=1 SUBSTRATE_KUBE_CONTEXT="kind-$CLUSTER" SUBSTRATE_KUBECONFIG="$KUBECONFIG" uv run --locked pytest -q tests/kubernetes
     ;;
   document-intelligence)

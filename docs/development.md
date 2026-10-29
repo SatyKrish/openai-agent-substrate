@@ -14,7 +14,7 @@ The default tests and demo use a deterministic model and temporary local workspa
 uv run ruff check src scripts deploy examples tests conftest.py
 uv run mypy
 uv run pytest -q
-uv run openai-agent-substrate --backend local --output-dir artifacts/local
+uv run python -m examples.quickstart --backend local --output-dir artifacts/local
 ```
 
 Tests cover native skill loading, domain code execution, exact citations and artifact reconciliation, the actual SDK tool loop, filesystem patching, binary/chunked files, shell output/exit codes, routing headers, state serialization and resume, lost Actors, unsupported manifest options, file limits, and non-replay of failed executions.
@@ -25,7 +25,7 @@ For wire compatibility with the actual upstream Go execution server:
 mkdir -p artifacts
 go build -o artifacts/upstream-sandbox-server third_party/substrate-sandbox/main.go
 SUBSTRATE_DEMO_BINARY="$PWD/artifacts/upstream-sandbox-server" uv run pytest -q
-uv run openai-agent-substrate --backend local \
+uv run python -m examples.quickstart --backend local \
   --upstream-binary "$PWD/artifacts/upstream-sandbox-server" \
   --output-dir artifacts/upstream
 ```
@@ -87,7 +87,7 @@ uv build --no-sources
 uv run --locked twine check dist/*
 ```
 
-The wheel contains the SDK adapter, CLI, testing helpers, and license notices. The source distribution also contains the guides, examples, tests, diagram, and upstream execution server.
+The wheel contains the SDK adapter, tracing, testing helpers, and license notices. It installs no console command or example application. The source distribution also contains the guides, examples, tests, diagram, and upstream execution server.
 
 ## Working on the provider
 

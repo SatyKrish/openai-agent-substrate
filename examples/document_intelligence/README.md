@@ -145,7 +145,7 @@ uv run python -m examples.document_intelligence --backend substrate \
   --template document-intelligence-CONFIG_DIGEST --model YOUR_OPENAI_MODEL_ID
 ```
 
-Pass `--kubeconfig PATH` to both commands when needed. the deployment CLI also accepts
+Pass `--kubeconfig PATH` to both commands when needed. The deployment CLI also accepts
 `--docker-context NAME` and `--atespace NAME`. The existing `ate-demo-sandbox`
 atespace and `workload=sandbox` worker pool must exist. The upstream
 `sandbox-template` has no Python interpreter and cannot run this example.
@@ -180,7 +180,7 @@ and revenue gap **USD 117.8 billion**. EBITDA is unavailable.
 
 Actors are deleted by default. Add `--keep-actor` on Substrate to suspend the
 workspace and save `session.json`. Inspect it with
-`uv run python scripts/resume_session.py --context CONTEXT --state-file PATH`,
+`uv run python -m examples.quickstart.resume --context CONTEXT --state-file PATH`,
 including the same kubeconfig and atespace when applicable. Do not publish
 credentials or session state from real document workflows.
 

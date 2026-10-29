@@ -9,7 +9,7 @@ Fork the repository, clone your fork, and create a branch for your change. Use P
 ```sh
 uv sync --locked
 uv run pytest -q
-uv run openai-agent-substrate --backend local
+uv run python -m examples.quickstart --backend local
 ```
 
 The default tests and scripted demo use loopback HTTP and temporary local workspaces. They require no API key or cluster. Detailed checks, including the actual upstream execution server, are in the [development guide](docs/development.md).

@@ -3,7 +3,6 @@
 
 import asyncio
 import json
-from types import SimpleNamespace
 
 import pytest
 from agents import custom_span, function_span, set_trace_processors, set_tracing_disabled, trace
@@ -12,28 +11,13 @@ from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.trace import StatusCode
 
-from examples.document_intelligence.main import run
 from openai_agent_substrate import tracing
 
 
-@pytest.fixture
-def recorder(monkeypatch):
-    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:4318")
-    monkeypatch.delenv("OPENAI_AGENTS_DISABLE_TRACING", raising=False)
-    exporter = InMemorySpanExporter()
-    processor = tracing.OTLPTracingProcessor(exporter)
-    set_trace_processors([processor])
-    set_tracing_disabled(False)
-    try:
-        yield processor, exporter
-    finally:
-        processor.shutdown()
-        set_trace_processors([])
-        set_tracing_disabled(True)
 
 
-def test_sdk_parentage_timing_and_sensitive_payloads_are_excluded(recorder):
-    processor, exporter = recorder
+def test_sdk_parentage_timing_and_sensitive_payloads_are_excluded(trace_recorder):
+    processor, exporter = trace_recorder
     canary = "sensitive-prompt-tool-output-key"
     with trace(canary, metadata={"key": canary}) as workflow:
         with function_span("exec_command", input=canary, output=canary) as tool:
@@ -62,21 +46,6 @@ def test_sdk_parentage_timing_and_sensitive_payloads_are_excluded(recorder):
     assert canary not in json.dumps([span.to_json() for span in spans])
 
 
-async def test_real_sdk_tools_link_provider_operations(recorder, server, tmp_path):
-    processor, exporter = recorder
-    args = SimpleNamespace(atespace="test-space", template="document-intelligence", model="scripted",
-                           keep_actor=False, output_dir=tmp_path)
-    summary = await run(args, server)
-    processor.force_flush()
-    spans = exporter.get_finished_spans()
-    by_id = {span.context.span_id: span for span in spans}
-    names = {span.name for span in spans}
-    assert {"tool.load_skill", "tool.exec_command", "tool.apply_patch", "sandbox.create", "sandbox.exec",
-            "sandbox.resume", "sandbox.suspend", "sandbox.delete", "document_intelligence.verify"} <= names
-    assert summary["tracing"]["enabled"] is True
-    assert any(span.name == "sandbox.exec" and span.parent is not None
-               and by_id[span.parent.span_id].name == "tool.exec_command" for span in spans)
-    assert all(span.parent is None or span.parent.span_id in by_id for span in spans)
 
 
 def test_explicit_disable_overrides_endpoint(monkeypatch):
@@ -113,8 +82,8 @@ def test_invalid_protocol_is_actionable(monkeypatch):
         tracing.configure_tracing()
 
 
-def test_invalid_span_is_dropped_without_exception_details(recorder, caplog):
-    processor, exporter = recorder
+def test_invalid_span_is_dropped_without_exception_details(trace_recorder, caplog):
+    processor, exporter = trace_recorder
     class Poison:
         @property
         def span_data(self):
@@ -126,8 +95,8 @@ def test_invalid_span_is_dropped_without_exception_details(recorder, caplog):
     assert "sensitive-secret" not in caplog.text
 
 
-async def test_concurrent_traces_keep_separate_parent_trees(recorder):
-    processor, exporter = recorder
+async def test_concurrent_traces_keep_separate_parent_trees(trace_recorder):
+    processor, exporter = trace_recorder
     async def execute():
         with trace("workflow"):
             with tracing.operation("sandbox.exec"):
