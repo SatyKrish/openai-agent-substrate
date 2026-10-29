@@ -1,3 +1,6 @@
+# Copyright 2026 openai-agent-substrate contributors
+# SPDX-License-Identifier: Apache-2.0
+
 import pytest
 
 from openai_agent_substrate.lifecycle import KubectlActorControl

@@ -1,6 +1,6 @@
 # Connect to a Substrate cluster
 
-The POC reuses the upstream `sandbox-template` ActorTemplate and its `/process` server. No changes to the Substrate core are needed.
+The reference implementation reuses the upstream `sandbox-template` ActorTemplate and its `/process` server. No changes to the Substrate core are needed.
 
 ## Prerequisites
 
@@ -36,6 +36,6 @@ uv run openai-agent-substrate --backend substrate \
   --atespace ate-demo-sandbox --template sandbox-template
 ```
 
-The control-plane CLI uses the explicit context and its own authentication/connection logic. If you already have a control API tunnel, optionally pass `--api-endpoint HOST:PORT`; the POC does not disable TLS verification or read tokens itself.
+The control-plane CLI uses the explicit context and its own authentication/connection logic. If you already have a control API tunnel, optionally pass `--api-endpoint HOST:PORT`; the reference implementation does not disable TLS verification or read tokens itself.
 
 An application gateway can replace the kubectl lifecycle implementation by implementing the four async methods in `ActorControl`. Keep tenant authorization and credential handling in that trusted gateway.

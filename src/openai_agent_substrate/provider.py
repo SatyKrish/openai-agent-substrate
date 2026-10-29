@@ -1,3 +1,6 @@
+# Copyright 2026 openai-agent-substrate contributors
+# SPDX-License-Identifier: Apache-2.0
+
 """Pinned SDK adapter: real SandboxSession wrapping an Actor-backed BaseSandboxSession."""
 
 from __future__ import annotations
@@ -53,11 +56,11 @@ def validate_manifest(manifest: Manifest) -> None:
     if not root.is_absolute() or str(root) == "/" or ".." in root.parts:
         raise ValueError("Use an absolute workspace root below /, without '..'")
     if manifest.users or manifest.groups or manifest.extra_path_grants or manifest.environment.value:
-        raise NotImplementedError("This POC supports files/directories, without accounts, environment, or path grants")
+        raise NotImplementedError("This reference implementation supports files/directories, without accounts, environment, or path grants")
 
     def validate(entry: BaseEntry) -> None:
         if not isinstance(entry, (File, Dir, LocalFile, LocalDir)) or entry.group is not None:
-            raise NotImplementedError("This POC supports File, Dir, LocalFile, and LocalDir without ownership changes")
+            raise NotImplementedError("This reference implementation supports File, Dir, LocalFile, and LocalDir without ownership changes")
         if isinstance(entry, Dir):
             for child in entry.children.values():
                 validate(child)
@@ -190,7 +193,7 @@ class _SubstrateSession(BaseSandboxSession):
 
     async def _read_bounded(self, path: Path, *, max_bytes: int) -> bytes:
         if max_bytes > MAX_FILE_BYTES:
-            raise ValueError("Bounded read exceeds the POC's 1 MiB file limit")
+            raise ValueError("Bounded read exceeds the reference implementation's 1 MiB file limit")
         return await self._read_file(path, max_bytes, require_complete=False)
 
     async def _read_file(self, path: Path, limit: int, *, user: str | User | None = None,
@@ -209,7 +212,7 @@ class _SubstrateSession(BaseSandboxSession):
             raise ExecNonZeroError(result, command=("read", target))
         data = base64.b64decode(b"".join(result.stdout.split()), validate=True)
         if require_complete and len(data) > MAX_FILE_BYTES:
-            raise ValueError("File exceeds the POC's 1 MiB file limit")
+            raise ValueError("File exceeds the reference implementation's 1 MiB file limit")
         return data
 
     async def write(self, path: Path, data: io.IOBase, *, user: str | User | None = None) -> None:
@@ -219,7 +222,7 @@ class _SubstrateSession(BaseSandboxSession):
         value = data.read(MAX_FILE_BYTES + 1)
         payload = value.encode() if isinstance(value, str) else bytes(value)
         if len(payload) > MAX_FILE_BYTES:
-            raise ValueError("File exceeds the POC's 1 MiB file limit")
+            raise ValueError("File exceeds the reference implementation's 1 MiB file limit")
         temporary = target.parent / f".oas-upload-{uuid.uuid4().hex}"
         await self._checked("mkdir", "-p", str(target.parent))
         await self._checked("sh", "-c", 'umask 077; set -C; : > "$1"', "sh", str(temporary))

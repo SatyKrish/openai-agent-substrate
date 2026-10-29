@@ -5,16 +5,31 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "openai-agent-substrate"
 version = "0.1.0"
-description = "Proof of concept: OpenAI SandboxAgent execution on Agent Substrate"
+description = "Reference implementation of a Kubernetes sandbox provider for the OpenAI Agents SDK using Agent Substrate"
 readme = "README.md"
 requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md", "third_party/substrate-sandbox/LICENSE"]
+keywords = ["openai", "agents", "kubernetes", "sandbox", "agent-substrate"]
+classifiers = [
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Operating System :: POSIX",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
 dependencies = ["openai-agents==0.24.0"]
+
+[project.urls]
+Homepage = "https://github.com/SatyKrish/openai-agent-substrate"
+Documentation = "https://github.com/SatyKrish/openai-agent-substrate/tree/main/docs"
+Repository = "https://github.com/SatyKrish/openai-agent-substrate"
+Issues = "https://github.com/SatyKrish/openai-agent-substrate/issues"
 
 [project.scripts]
 openai-agent-substrate = "openai_agent_substrate.demo:main"
 
 [dependency-groups]
-dev = ["pytest>=9.2,<10", "pytest-asyncio>=1.4,<2"]
+dev = ["pytest>=9.2,<10", "pytest-asyncio>=1.4,<2", "twine>=6,<7"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

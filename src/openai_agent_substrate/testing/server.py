@@ -1,3 +1,6 @@
+# Copyright 2026 openai-agent-substrate contributors
+# SPDX-License-Identifier: Apache-2.0
+
 """Loopback protocol simulator for the scripted demo and tests. NOT a sandbox.
 
 Commands execute on the host. Never connect an untrusted model to this helper.

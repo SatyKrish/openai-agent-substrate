@@ -1,3 +1,6 @@
+# Copyright 2026 openai-agent-substrate contributors
+# SPDX-License-Identifier: Apache-2.0
+
 """A deterministic Model that drives the real SDK tool loop without an API key."""
 
 from __future__ import annotations

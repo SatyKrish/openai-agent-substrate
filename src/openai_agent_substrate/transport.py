@@ -1,3 +1,6 @@
+# Copyright 2026 openai-agent-substrate contributors
+# SPDX-License-Identifier: Apache-2.0
+
 """The exact /process wire contract exposed by Substrate's upstream sandbox demo."""
 
 from __future__ import annotations

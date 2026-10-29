@@ -1,3 +1,6 @@
+# Copyright 2026 openai-agent-substrate contributors
+# SPDX-License-Identifier: Apache-2.0
+
 """Host-side Actor lifecycle. No kubeconfig or control credentials enter the Actor."""
 
 from __future__ import annotations

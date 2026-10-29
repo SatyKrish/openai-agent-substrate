@@ -1,9 +1,12 @@
+# Copyright 2026 openai-agent-substrate contributors
+# SPDX-License-Identifier: Apache-2.0
+
 import os
 
 import pytest
 from agents import set_tracing_disabled
 
-from openai_agent_substrate.local_testing import LocalExecutionServer
+from openai_agent_substrate.testing.server import LocalExecutionServer
 from openai_agent_substrate.provider import SubstrateSandboxClient
 
 

@@ -1,3 +1,6 @@
+# Copyright 2026 openai-agent-substrate contributors
+# SPDX-License-Identifier: Apache-2.0
+
 import io
 import json
 from pathlib import Path
@@ -13,7 +16,7 @@ from agents.sandbox.manifest import Environment
 from agents.sandbox.snapshot import NoopSnapshot
 
 from openai_agent_substrate.provider import MAX_FILE_BYTES, SubstrateSandboxClient, SubstrateSandboxOptions
-from openai_agent_substrate.scripted_model import ScriptedModel
+from openai_agent_substrate.testing.model import ScriptedModel
 
 
 def options():

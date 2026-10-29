@@ -1,3 +1,6 @@
+# Copyright 2026 openai-agent-substrate contributors
+# SPDX-License-Identifier: Apache-2.0
+
 from __future__ import annotations
 
 import argparse
@@ -14,9 +17,9 @@ from agents.sandbox.capabilities import Filesystem, Shell
 from agents.sandbox.entries import Dir, File
 
 from .lifecycle import KubectlActorControl
-from .local_testing import LocalExecutionServer
+from .testing.server import LocalExecutionServer
 from .provider import SubstrateSandboxClient, SubstrateSandboxOptions
-from .scripted_model import ScriptedModel
+from .testing.model import ScriptedModel
 
 _FIRST_COMMAND = (
     "mkdir -p output && cat input.txt > output/report.txt && "
@@ -41,7 +44,7 @@ async def run_demo(args, local=None):
     )
     try:
         agent = SandboxAgent(
-            name="Substrate proof of concept",
+            name="Substrate reference implementation",
             model=ScriptedModel(_FIRST_COMMAND, expected_output="Executed in the Actor workspace.")
             if args.model == "scripted" else args.model,
             instructions=(
@@ -97,7 +100,7 @@ async def run_demo(args, local=None):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="OpenAI SandboxAgent + Agent Substrate proof of concept")
+    parser = argparse.ArgumentParser(description="OpenAI SandboxAgent + Agent Substrate reference implementation")
     parser.add_argument("--backend", choices=["local", "substrate"], default="local")
     parser.add_argument("--router-url", default="http://127.0.0.1:8000")
     parser.add_argument("--atespace", default="ate-demo-sandbox")
