@@ -30,11 +30,11 @@ def client(server):
 
 
 @pytest.fixture
-def trace_recorder(monkeypatch):
+def trace_recorder(monkeypatch, request):
     monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:4318")
     monkeypatch.delenv("OPENAI_AGENTS_DISABLE_TRACING", raising=False)
     exporter = InMemorySpanExporter()
-    processor = tracing.OTLPTracingProcessor(exporter)
+    processor = tracing.OTLPTracingProcessor(exporter, operation_names=getattr(request, "param", ()))
     set_trace_processors([processor])
     set_tracing_disabled(False)
     try:

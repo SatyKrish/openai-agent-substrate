@@ -14,8 +14,6 @@ from opentelemetry.trace import StatusCode
 from openai_agent_substrate import tracing
 
 
-
-
 def test_sdk_parentage_timing_and_sensitive_payloads_are_excluded(trace_recorder):
     processor, exporter = trace_recorder
     canary = "sensitive-prompt-tool-output-key"
@@ -46,8 +44,6 @@ def test_sdk_parentage_timing_and_sensitive_payloads_are_excluded(trace_recorder
     assert canary not in json.dumps([span.to_json() for span in spans])
 
 
-
-
 def test_explicit_disable_overrides_endpoint(monkeypatch):
     monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://jaeger:4318")
     monkeypatch.setenv("OPENAI_AGENTS_DISABLE_TRACING", "1")
@@ -69,7 +65,8 @@ def test_otlp_configuration_replaces_hosted_exporter(monkeypatch):
     installed, exporter = [], InMemorySpanExporter()
     monkeypatch.setattr(tracing, "OTLPSpanExporter", lambda **kwargs: exporter)
     monkeypatch.setattr(tracing, "set_trace_processors", installed.append)
-    processor = tracing.configure_tracing()
+    processor = tracing.configure_tracing(operation_names=("invoice.extract",))
+    assert "invoice.extract" in processor.operation_names
     assert installed == [[processor]]
     processor.shutdown()
 
@@ -128,3 +125,15 @@ def test_export_failure_does_not_replace_workflow_failure(monkeypatch):
         processor.shutdown()
         set_trace_processors([])
         set_tracing_disabled(True)
+
+
+@pytest.mark.parametrize("trace_recorder,expected", [((), "agents.custom"), (("invoice.extract",), "invoice.extract")], indirect=["trace_recorder"])
+def test_application_operations_require_explicit_configuration(trace_recorder, expected):
+    processor, exporter = trace_recorder
+    with trace("workflow"):
+        with custom_span("invoice.extract", data={"document": "private content"}):
+            pass
+    processor.force_flush()
+    spans = exporter.get_finished_spans()
+    assert expected in {span.name for span in spans}
+    assert "private content" not in json.dumps([span.to_json() for span in spans])

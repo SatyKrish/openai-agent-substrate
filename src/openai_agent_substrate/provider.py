@@ -25,7 +25,7 @@ from agents.sandbox.types import ExecResult, User
 
 from .lifecycle import ActorControl, resource_name
 from .transport import ProcessTransport, ProcessTransportError
-from .tracing import operation, traced_operation
+from .instrumentation import operation, traced_operation
 
 MAX_FILE_BYTES = 1024 * 1024
 _WRITE_CHUNK_BYTES = 48 * 1024

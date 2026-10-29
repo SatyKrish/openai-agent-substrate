@@ -11,13 +11,11 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
-from contextlib import contextmanager
 from datetime import datetime
-from functools import wraps
 from threading import Lock
 from time import time_ns
 
-from agents import custom_span, get_current_trace, set_trace_processors
+from agents import get_current_trace, set_trace_processors
 from agents.tracing import TracingProcessor
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.resources import Resource
@@ -26,11 +24,13 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.sdk.util.instrumentation import InstrumentationScope
 from opentelemetry.trace import SpanContext, SpanKind, Status, StatusCode, TraceFlags
 
+from .instrumentation import operation as operation, traced_operation as traced_operation
+
 logger = logging.getLogger(__name__)
 _TYPES = {"agent", "task", "turn", "generation", "response", "function", "custom", "handoff", "guardrail"}
 _TOOLS = {"load_skill", "exec_command", "apply_patch"}
 _OPERATIONS = {"sandbox.create", "sandbox.resume", "sandbox.suspend", "sandbox.delete",
-               "sandbox.proxy", "sandbox.exec", "document_intelligence.verify", "document_intelligence.run"}
+               "sandbox.proxy", "sandbox.exec"}
 
 
 def tracing_enabled() -> bool:
@@ -58,11 +58,13 @@ class OTLPTracingProcessor(TracingProcessor):
 
     Callbacks enqueue already-sanitized ReadableSpans; network I/O runs on the
     OTel batch worker. The bounded queue drops spans under sustained overload.
+    Application operation names must be explicitly supplied as trusted constants.
     Unknown names, all metadata, errors, inputs, outputs, commands and paths are
     excluded. Only span type, known tool/operation names and numeric metrics pass.
     """
 
-    def __init__(self, exporter, *, service_name="openai-agent-substrate"):
+    def __init__(self, exporter, *, service_name="openai-agent-substrate", operation_names=()):
+        self.operation_names = frozenset(_OPERATIONS) | frozenset(operation_names)
         self.resource = Resource({"service.name": service_name})
         self.processor = BatchSpanProcessor(exporter, schedule_delay_millis=1000,
                                             max_queue_size=4096, max_export_batch_size=512)
@@ -92,7 +94,7 @@ class OTLPTracingProcessor(TracingProcessor):
             if kind == "function" and data.name in _TOOLS:
                 name = "tool." + data.name
                 attributes["gen_ai.tool.name"] = data.name
-            if kind == "custom" and data.name in _OPERATIONS:
+            if kind == "custom" and data.name in self.operation_names:
                 name = data.name
                 for key in ("exit_code", "stdout_bytes", "stderr_bytes"):
                     value = data.data.get(key)
@@ -128,7 +130,7 @@ class OTLPTracingProcessor(TracingProcessor):
         self.processor.shutdown()
 
 
-def configure_tracing():
+def configure_tracing(*, operation_names=()):
     """Install the OTLP processor, or disable export when no endpoint is set.
 
     OTEL_EXPORTER_OTLP_TRACES_ENDPOINT is the full URL. The generic endpoint gets
@@ -141,7 +143,8 @@ def configure_tracing():
     if protocol != "http/protobuf":
         raise ValueError("Tracing supports OTLP http/protobuf; use Jaeger port 4318")
     exporter = OTLPSpanExporter(timeout=5)
-    processor = OTLPTracingProcessor(exporter, service_name=os.getenv("OTEL_SERVICE_NAME", "openai-agent-substrate"))
+    processor = OTLPTracingProcessor(exporter, service_name=os.getenv("OTEL_SERVICE_NAME", "openai-agent-substrate"),
+                                     operation_names=operation_names)
     set_trace_processors([processor])
     return processor
 
@@ -151,28 +154,3 @@ def current_trace_ids():
     if not tracing_enabled() or current is None or current.trace_id == "no-op":
         return {"enabled": False}
     return {"enabled": True, "sdk_trace_id": current.trace_id, "otel_trace_id": otel_trace_id(current.trace_id)}
-
-
-@contextmanager
-def operation(name):
-    """A payload-free SDK custom span nested under the current SDK tool span."""
-    current = get_current_trace()
-    if current is None or current.trace_id == "no-op":
-        yield None
-        return
-    with custom_span(name) as span:
-        try:
-            yield span
-        except BaseException:
-            span.set_error({"message": "Operation failed", "data": {}})
-            raise
-
-
-def traced_operation(name):
-    def decorate(function):
-        @wraps(function)
-        async def wrapped(*args, **kwargs):
-            with operation(name):
-                return await function(*args, **kwargs)
-        return wrapped
-    return decorate

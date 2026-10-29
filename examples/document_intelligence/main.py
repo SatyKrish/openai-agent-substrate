@@ -26,6 +26,8 @@ from .agent.lib.configuration import select_model
 from .agent.lib.verify import OUTPUTS, verify_artifacts
 from .agent.sandbox.sandbox import build_client, build_manifest, stage_inputs
 
+TRACE_OPERATIONS = ("document_intelligence.run", "document_intelligence.verify")
+
 QUESTION = (
     "Use the document-analysis skill to compare ACME and BETA fiscal-2024 revenue "
     "and operating margins. Reconcile the KPI CSV, provide exact source citations, "
@@ -131,7 +133,7 @@ def parse_args(argv=None):
 
 def main():
     args = parse_args()
-    configure_tracing()
+    configure_tracing(operation_names=TRACE_OPERATIONS)
     try:
         with LocalExecutionServer() if args.backend == "local" else nullcontext(None) as local:
             print(json.dumps(asyncio.run(run(args, local)), indent=2))

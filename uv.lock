@@ -1088,6 +1088,10 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "openai-agents" },
+]
+
+[package.optional-dependencies]
+tracing = [
     { name = "opentelemetry-exporter-otlp-proto-http" },
     { name = "opentelemetry-sdk" },
 ]
@@ -1095,6 +1099,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "mypy" },
+    { name = "opentelemetry-exporter-otlp-proto-http" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "ruff" },
@@ -1104,13 +1109,15 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "openai-agents", specifier = "==0.24.0" },
-    { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.39,<2" },
-    { name = "opentelemetry-sdk", specifier = ">=1.39,<2" },
+    { name = "opentelemetry-exporter-otlp-proto-http", marker = "extra == 'tracing'", specifier = ">=1.39,<2" },
+    { name = "opentelemetry-sdk", marker = "extra == 'tracing'", specifier = ">=1.39,<2" },
 ]
+provides-extras = ["tracing"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "mypy", specifier = ">=2.4.1" },
+    { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.39,<2" },
     { name = "pytest", specifier = ">=9.2,<10" },
     { name = "pytest-asyncio", specifier = ">=1.4,<2" },
     { name = "ruff", specifier = ">=0.17.3" },

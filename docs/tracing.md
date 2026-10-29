@@ -6,6 +6,22 @@ processor replaces the SDK's default hosted exporter; enabling this integration
 sends traces to the configured collector. It does not also send them to OpenAI's
 Traces dashboard. Model inference still uses the configured OpenAI API endpoint.
 
+## Installation
+
+The OpenTelemetry SDK and OTLP exporter are optional dependencies:
+
+```sh
+# From the repository root
+pip install '.[tracing]'
+```
+
+The provider and its SDK-only instrumentation work without this extra. The
+Agents SDK currently brings `opentelemetry-api` transitively through MCP; the
+base installation does not require the OpenTelemetry SDK or OTLP exporter. Import
+`openai_agent_substrate.tracing` only when the tracing extra is installed. The
+repository's development dependencies include the exporter for tests and source
+examples; the harness image explicitly installs the tracing extra.
+
 ## Local Kubernetes workflow
 
 After [local Kubernetes setup](local-kubernetes.md), configure your `.env`, build
@@ -72,6 +88,11 @@ Applications embedding the provider should call `configure_tracing()` once at
 startup, wrap the workflow in an SDK `trace(...)`, use
 `RunConfig(trace_include_sensitive_data=False)`, and call `flush_traces()` after
 the trace closes. The reference CLIs already do this, including on failure.
+An application can pass trusted custom span names through
+`configure_tracing(operation_names=("invoice.extract",))` or the processor's
+`operation_names` constructor argument. Only `sandbox.*` operations are built
+in. Unregistered custom names export as `agents.custom`, with their data omitted.
+Document Intelligence supplies its own operation names in the example.
 
 ## Span hierarchy and content
 

@@ -10,7 +10,7 @@ COPY pyproject.toml uv.lock README.md LICENSE NOTICE THIRD_PARTY_NOTICES.md ./
 COPY src/ src/
 COPY examples/ examples/
 COPY third_party/substrate-sandbox/LICENSE third_party/substrate-sandbox/LICENSE
-RUN uv sync --frozen --no-dev --no-editable --no-cache
+RUN uv sync --frozen --extra tracing --no-dev --no-editable --no-cache
 COPY kubectl kubectl-ate /usr/local/bin/
 COPY substrate-LICENSE /usr/share/licenses/substrate/LICENSE
 ENV PATH=/app/.venv/bin:$PATH PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 HOME=/tmp

@@ -73,6 +73,11 @@ jobs:
         run: uv sync --locked
       - name: Build wheel and source distribution
         run: uv build --no-sources
+      - name: Verify base wheel without tracing dependencies
+        run: |
+          uv venv /tmp/provider-core-env
+          uv pip install --python /tmp/provider-core-env/bin/python dist/*.whl
+          /tmp/provider-core-env/bin/python -I tests/packaging/core_smoke.py
       - name: Validate distribution metadata
         run: uv run --locked twine check dist/*
 

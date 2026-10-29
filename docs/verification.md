@@ -16,7 +16,7 @@ Date: 2026-10-29.
 
 | Check | Result |
 | --- | --- |
-| Default unit/integration suite | 85 passed; five real-cluster checks are opt-in |
+| Default unit/integration suite | 89 passed; five real-cluster checks are opt-in |
 | Unit/integration suite using the actual upstream Go execution server (before tracing change) | 63 passed; four real-cluster tests skipped |
 | Opt-in Kubernetes integration test | Passed against a fresh real Actor |
 | SDK scripted workflow on Kubernetes | Passed: shell tool execution, report creation, serialized session resume, and preserved edits |
@@ -26,7 +26,7 @@ Date: 2026-10-29.
 | Domain artifact rejection tests | Passed: altered citations, calculations, CSV, missing report evidence/limitations, staged digest mismatches, and source-table disagreements are rejected |
 | Secret-backed Kubernetes agent pod | Passed: five OpenAI settings match mounted files and environment, an explicit evaluation override is required, and real document analysis runs with no harness credential in the Actor |
 | Live OpenAI Document Intelligence on Kubernetes | Passed with `gpt-6.1-terra`: seven API responses, native skill/shell/patch tools, model-authored Python, independent artifact validation, and Actor cleanup |
-| Full suite with all local Kubernetes and Jaeger checks enabled | 90 passed, no skips; includes the Secret-backed harness and Jaeger query API |
+| Full suite with all local Kubernetes and Jaeger checks enabled | 94 passed, no skips; includes the Secret-backed harness and Jaeger query API |
 | Source distribution and wheel | Built successfully; `twine check` passed |
 
 The Kubernetes path uses owned loopback `kubectl ate proxy actor` processes and authenticated Substrate ingress. The scripted infrastructure tests exercise the real SDK runner and actual sandbox execution without model calls. The separate live OpenAI run is recorded below.
@@ -189,6 +189,28 @@ a temporary directory because macOS blocks the SDK's directory-descriptor
 traversal into Documents; the SDK file checks were preserved. Ruff and the
 focused mypy targets pass. These refactor checks used explicit scripted models;
 the earlier live OpenAI and Jaeger evidence remains recorded above.
+
+## Tracing review follow-up
+
+Application-specific operation names are now supplied by the example through the
+processor constructor and configuration helper. The library's built-in operation
+names cover only sandbox lifecycle and execution. Regression tests verify that
+unregistered names and custom payloads stay out of exported traces.
+
+The OpenTelemetry SDK and OTLP exporter moved to the optional `tracing` extra.
+A fresh environment installed the base wheel without those distributions and
+successfully imported the provider and executed a command through its local
+protocol simulator. The Agents SDK currently still brings `opentelemetry-api`
+through MCP. Lightweight SDK span helpers are independent of the OTLP module.
+The harness image explicitly installs the extra; development dependencies include
+the exporter for tests and source examples.
+
+The rebuilt harness passed the full local Kubernetes/Jaeger suite: 94 passed,
+with no skips. The local and extracted source-distribution suites passed 89 tests
+with five cluster checks skipped. The selected upstream Go-server suite passed
+40 tests. Ruff, focused mypy and distribution metadata checks passed. The usage
+command, tracing description, package description and source manifest patterns
+were corrected. These checks made no new model API calls.
 
 ## Limits of this verification
 

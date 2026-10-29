@@ -19,7 +19,9 @@ The Document Intelligence agent uses the configured OpenAI model for normal
 execution. `--test` and `agent-test` select deterministic execution evaluations.
 See [its agent layout and live run guide](examples/document_intelligence/README.md).
 
-The wheel installs the provider library and reusable testing helpers. Run the
+The wheel installs the provider library and reusable testing helpers.
+From a checkout, `pip install .` installs the provider without the OpenTelemetry
+SDK or OTLP exporter; use `pip install '.[tracing]'` for OTLP export. Run the
 [quickstart](examples/quickstart/README.md) from a source checkout; the former
 `openai-agent-substrate` console command has been removed.
 

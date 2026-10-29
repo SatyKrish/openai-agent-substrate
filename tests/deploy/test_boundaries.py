@@ -36,3 +36,8 @@ def test_library_tests_have_no_application_dependencies():
     for directory in ("unit", "integration", "kubernetes"):
         for path in (ROOT / "tests" / directory).rglob("*.py"):
             assert not {"examples", "deploy", "scripts"}.intersection(imports(path)), path
+
+
+def test_library_contains_no_document_intelligence_operation_names():
+    for path in (ROOT / "src").rglob("*.py"):
+        assert "document_intelligence." not in path.read_text(), path

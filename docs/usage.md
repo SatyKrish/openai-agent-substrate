@@ -5,7 +5,7 @@
 Use a cluster with Substrate installed and the upstream sandbox demo's `sandbox-template` prepared. See [deployment guide](deployment.md) for prerequisites and router access.
 
 ```sh
-uv run openai-agent-substrate \
+uv run python -m examples.quickstart \
   --backend substrate \
   --context YOUR_KUBERNETES_CONTEXT \
   --atespace ate-demo-sandbox \
@@ -16,7 +16,7 @@ The provider manages an authenticated loopback Actor proxy automatically. Use `-
 
 This uses the scripted model, so it verifies execution and suspend/resume against a real cluster without making OpenAI API calls. It creates a uniquely named Actor and deletes it on exit by default.
 
-For a live model, set `OPENAI_API_KEY` in the **host** environment and add `--model YOUR_OPENAI_MODEL_ID`. The key is used by the SDK harness and is never put in the manifest or execution request. Hosted tracing is disabled in this demo.
+For a live model, set `OPENAI_API_KEY` in the **host** environment and add `--model YOUR_OPENAI_MODEL_ID`. The key is used by the SDK harness and is never put in the manifest or execution request. The quickstart exports traces when an OTLP endpoint is configured; see the [tracing guide](tracing.md). Without an endpoint, export is disabled.
 
 To retain the workspace, add `--keep-actor`. Closing the session requests `kubectl ate suspend actor --mode sync`; after the second suspension, the demo saves `artifacts/session.json`. This retains the Actor and its storage until you explicitly delete it:
 

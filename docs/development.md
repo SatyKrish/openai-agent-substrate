@@ -89,6 +89,12 @@ uv run --locked twine check dist/*
 
 The wheel contains the SDK adapter, tracing, testing helpers, and license notices. It installs no console command or example application. The source distribution also contains the guides, examples, tests, diagram, and upstream execution server.
 
+The package CI also installs the base wheel in a fresh environment and runs
+`tests/packaging/core_smoke.py`. It verifies provider import and sandbox execution
+without the OpenTelemetry SDK or OTLP exporter; the upstream SDK may still bring
+the OpenTelemetry API through MCP. Development dependencies include the exporter
+for tracing tests and source examples.
+
 ## Dependency boundaries and manifest contracts
 
 `tests/deploy/` checks reusable base resources and dependency direction. Library

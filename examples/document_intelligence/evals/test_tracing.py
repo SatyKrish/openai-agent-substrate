@@ -2,9 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 from types import SimpleNamespace
 
-from examples.document_intelligence.main import run
+import pytest
+
+from examples.document_intelligence.main import TRACE_OPERATIONS, run
 
 
+@pytest.mark.parametrize("trace_recorder", [TRACE_OPERATIONS], indirect=True)
 async def test_real_sdk_tools_link_provider_operations(trace_recorder, server, tmp_path):
     processor, exporter = trace_recorder
     args = SimpleNamespace(atespace="test-space", template="document-intelligence", model="scripted",
