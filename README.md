@@ -46,16 +46,56 @@ This creates a uniquely named Actor, exercises shell execution and suspend/resum
 
 The provider is pinned to `openai-agents==0.24.0`. Real Actor execution, authenticated routing, suspend/resume, and external snapshot recovery have been verified on local ARM64 Kind with gVisor. Live OpenAI model calls and production isolation properties remain unverified. See the [verification record](docs/verification.md).
 
+## OpenAI configuration in a Kubernetes agent pod
+
+Copy `.env.example` to `.env` and set `OPENAI_API_KEY`, `OPENAI_BASE_URL`, and
+`OPENAI_MODEL`, with optional organization/project IDs. During setup, `.env` is
+imported into a Kubernetes Secret. The dedicated agent harness pod receives it as
+environment variables and read-only files; sandbox Actors receive no credentials.
+
+```sh
+cp .env.example .env
+# Edit .env locally.
+./scripts/local-kubernetes.sh setup
+./scripts/local-kubernetes.sh agent-setup
+./scripts/local-kubernetes.sh agent-test       # scripted; no model API calls
+./scripts/local-kubernetes.sh agent-run        # live model from .env
+./scripts/local-kubernetes.sh agent-artifacts  # download reports from the PVC
+```
+
+See the [Kubernetes agent setup guide](deploy/kubernetes/README.md) for configuration
+semantics, Secret mounting, permissions, and artifact retention. `agent-run`
+refreshes the Secret and starts a fresh Job, applying endpoint and model changes.
+
+## Document Intelligence example
+
+The [Document Intelligence example](examples/document_intelligence/README.md) loads
+an SDK skill, inspects synthetic annual reports, writes and executes Python in the
+sandbox, and generates cited Markdown, CSV, and JSON artifacts. Independent host
+checks reconcile the downloaded results with original inputs.
+
+```sh
+# Key-free execution test on the host protocol simulator (no isolation)
+uv run python -m examples.document_intelligence
+
+# After local Kubernetes setup: build the Python Actor image, deploy, and test
+./scripts/local-kubernetes.sh document-intelligence
+```
+
+Both commands use fixed model decisions with real SDK tool execution. Select a
+live OpenAI model on Kubernetes using the example's documented `--model` option.
+
 ## Repository layout
 
 ```text
 src/openai_agent_substrate/  SDK provider, transport, lifecycle, and CLI
   testing/                  Scripted model and loopback execution helpers
-examples/                   Runnable SDK and retained-session examples
+examples/                   Domain workflows with skills and sandbox execution
 tests/                      Unit and integration tests
 docs/                       Architecture, deployment, usage, and development guides
   assets/                   Documentation images
-scripts/                    Repeatable local Kubernetes setup and tests
+scripts/                    Local setup, Secret import, agent Jobs, and tests
+deploy/kubernetes/          Trusted harness image, Job, RBAC, and setup guide
 third_party/                Pinned upstream execution server and its license
 .github/                    CI, dependency updates, and contribution templates
 ```

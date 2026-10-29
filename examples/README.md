@@ -1,36 +1,31 @@
-# Examples
+# Domain examples
 
-Run these commands from the repository root after `uv sync --locked`. Prepare the cluster and router connection using the [deployment guide](../docs/deployment.md).
+Each folder contains an end-to-end domain workflow: inputs, agent, reusable
+skills, sandbox runtime requirements, and verified output artifacts. Run commands
+from the repository root after `uv sync --locked`.
 
-## Live SDK agent
+| Domain | Workflow | Sandbox capabilities |
+| --- | --- | --- |
+| [Document Intelligence](document_intelligence/README.md) | Compare synthetic annual reports, reconcile source facts, calculate financial metrics, and create cited reports | Native SDK skill discovery, shell inspection, agent-written Python via `apply_patch`, code execution, artifact verification |
 
-[`run_agent.py`](run_agent.py) stages a task file, runs a live SandboxAgent, copies its report to the host, and deletes the fresh Actor. Set `OPENAI_API_KEY` in the host environment, then choose a model available to your account:
-
-```sh
-uv run python examples/run_agent.py \
-  --context YOUR_KUBERNETES_CONTEXT \
-  --model YOUR_OPENAI_MODEL_ID
+```text
+examples/
+  document_intelligence/
+    main.py                  SDK harness and trusted artifact checks
+    scripted.py              Key-free tool decisions for execution testing
+    scripted_analysis.py     Code fixture emitted by the scripted model
+    verify.py                Host-side source reconciliation
+    fixtures/                MIT-licensed synthetic reports and KPI table
+    skills/document-analysis/
+      SKILL.md
+      scripts/documents.py   Sandbox extraction and verification
+      references/            Output contract
+    Dockerfile               Python-capable Actor image
+    deploy.py                Image build, push, and immutable ActorTemplate
+    README.md
 ```
 
-The API key remains in the trusted application; it is not staged into the Actor. This example makes billable model calls and requires a Substrate-enabled cluster.
-
-## Retained workspace
-
-First run the scripted cluster demo with `--keep-actor` to create `artifacts/session.json`:
-
-```sh
-uv run openai-agent-substrate --backend substrate \
-  --context YOUR_KUBERNETES_CONTEXT --keep-actor
-```
-
-Then inspect the saved workspace without calling a model:
-
-```sh
-uv run python examples/resume_session.py \
-  --context YOUR_KUBERNETES_CONTEXT \
-  --state-file artifacts/session.json
-```
-
-The Actor is suspended again on exit. Add `--delete` to permanently remove it after inspection. Use session JSON from your trusted application, and connect through the same atespace and intended cluster.
-
-For a key-free local walkthrough, run `uv run openai-agent-substrate`. Local mode uses a protocol simulator and provides no sandbox isolation.
+Generic infrastructure utilities belong in `scripts/`. Use
+`scripts/resume_session.py` to inspect a retained Actor; see the
+[session guide](../docs/usage.md). The provider's small lifecycle smoke test
+remains available as `uv run openai-agent-substrate`.

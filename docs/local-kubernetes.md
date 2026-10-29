@@ -53,7 +53,7 @@ uv run openai-agent-substrate --backend substrate \
   --output-dir artifacts/local/demo --keep-actor
 ```
 
-Use `examples/resume_session.py` with the same context, kubeconfig, and `artifacts/local/demo/session.json` to inspect the retained Actor. Add `--delete` to delete that Actor when finished.
+Use `scripts/resume_session.py` with the same context, kubeconfig, and `artifacts/local/demo/session.json` to inspect the retained Actor. Add `--delete` to delete that Actor when finished.
 
 ## Stop and restart
 
@@ -66,3 +66,21 @@ On macOS this stops only the dedicated Colima profile and preserves its disk. Re
 ## Verified recovery scope
 
 The [verification record](verification.md) includes a real restore after replacing both sandbox worker pods and removing the Actor's node-local snapshot reference. The edited input and report were recovered from a completed external snapshot. This is a local functional check, not a production availability or isolation assessment.
+
+## Document Intelligence skill workflow
+
+After setup, run `./scripts/local-kubernetes.sh document-intelligence` to build and
+push a Python-capable sandbox image, register its immutable ActorTemplate, run the
+skill-driven SDK workflow, and execute its opt-in Kubernetes test. Reports and
+tool traces are saved under `artifacts/local/document-intelligence/`. See the
+[domain guide](../examples/document_intelligence/README.md) for the workflow,
+fixture attribution, live-model options, and contract-checking limits.
+
+## Secret-backed agent harness pod
+
+Create `.env` from `.env.example` before setup to import the OpenAI key, endpoint,
+model, and optional organization/project settings into a Kubernetes Secret.
+`agent-setup` builds the dedicated harness image and its resources. Use
+`agent-test` for an execution test without inference, `agent-run` for live model
+execution using `.env`, and `agent-artifacts` to download reports from the PVC.
+See [the complete configuration guide](../deploy/kubernetes/README.md).

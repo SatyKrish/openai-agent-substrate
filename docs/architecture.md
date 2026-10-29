@@ -30,6 +30,7 @@ The upstream demo has no application authorization and buffers command output in
 | Supported by this reference implementation | Explicit limit |
 | --- | --- |
 | Real SDK `SandboxSession`, `Shell()`, and `Filesystem()` | SDK pinned to `openai-agents==0.24.0`; uses provider base-class APIs |
+| Native SDK `Skills` with eager or lazy local skill files | Skills materialize as workspace files; Git-backed sources and external mounts remain unsupported |
 | `File`, `Dir`, `LocalFile`, and `LocalDir` manifests | No cloud mounts, GitRepo materialization, custom users/groups, manifest environment, or extra path grants |
 | Binary file reads/writes over base64 | 1 MiB per file; 4 MiB execution response; writes are chunked |
 | Existing Actor suspension/resumption | Substrate owns snapshots; no portable SDK tar export/import or replacement Actor recovery |
@@ -37,6 +38,27 @@ The upstream demo has no application authorization and buffers command output in
 | One application owns a session at a time | Do not concurrently resume, run, or delete the same Actor from multiple workers |
 
 Cancelling the Python coroutine does not guarantee cancellation of an in-flight HTTP request; the remote command has its own deadline. The demo server's Go `CommandContext` does not provide process-group management for shell grandchildren. File operations validate SDK workspace paths, but the shell intentionally has Actor-level access; workspace path validation is not an OS isolation boundary.
+
+## Kubernetes-hosted harness
+
+The trusted application may itself run in a Kubernetes pod. The
+[agent Job](../deploy/kubernetes/README.md) receives `.env` configuration through
+`envFrom.secretRef` and a read-only Secret volume. The SDK model connection,
+Kubernetes ServiceAccount, and Substrate CLI remain in that harness pod. The
+untrusted execution Actor is a separate workload with its own image and workspace.
+A preflight check confirms the Actor has neither the harness API key nor its
+Secret mount before document processing begins.
+
+## Domain skills and code execution
+
+The [Document Intelligence example](../examples/document_intelligence/README.md)
+keeps orchestration and original-input checks in the harness. The native SDK
+`Skills` capability discovers a local `document-analysis` bundle and materializes
+it in the Actor on `load_skill`. Shell tools read its instructions and run its
+extractor. The agent writes `work/analyze.py` with `apply_patch`, executes Python
+inside the Actor, and produces reports for independent host verification. Its
+Python-capable image is built separately from the harness; model credentials stay
+with the harness. Scripted mode exercises the same SDK tools without inference.
 
 ## Sources and compatibility
 

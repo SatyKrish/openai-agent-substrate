@@ -1,0 +1,11 @@
+{
+  "source": "https://github.com/SatyKrish/bedrock-document-intelligence-agent",
+  "commit": "7eb1dfbba95f87512aa20dc3444111983f0f3b3e",
+  "license": "MIT",
+  "modifications": "none",
+  "files": {
+    "acme-2024.md": "d515087155a98a120b17955643bc1f33c10d470a1ed8b9d066d9a3ecd36d593b",
+    "beta-2024.md": "9f5fc1c10213387ce7b575a783d370f174b9b710824002e2fd937b5403d69029",
+    "kpis-2024.csv": "eab30c2d3b7c038d7b9b65e3eadbb5497b292c714f9c84cdbb9b03b96c346fc9"
+  }
+}

@@ -8,4 +8,5 @@
 | [Usage](usage.md) | Run on Kubernetes, integrate the SDK, and resume sessions |
 | [Development](development.md) | Run tests, verify the upstream server, and build distributions |
 | [Verification record](verification.md) | Tested versions, results, and unverified infrastructure properties |
-| [Examples](../examples/README.md) | Runnable application and retained-session examples |
+| [Kubernetes agent configuration](../deploy/kubernetes/README.md) | .env import, Secret mounting, endpoint/model settings, and agent Jobs |
+| [Examples](../examples/README.md) | Domain workflows with skills and sandbox code execution |

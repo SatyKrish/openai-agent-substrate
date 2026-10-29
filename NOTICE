@@ -10,3 +10,7 @@ third_party/substrate-sandbox/README.md and its LICENSE for source provenance.
 The OpenAI architecture diagram is third-party documentation artwork and is
 excluded from this project's Apache-2.0 license grant. See
 THIRD_PARTY_NOTICES.md for attribution and the original source.
+
+The Document Intelligence example includes synthetic fixtures under the MIT
+License, Copyright (c) 2026 SatyKrish and contributors. See
+examples/document_intelligence/fixtures/LICENSE and PROVENANCE.json.
