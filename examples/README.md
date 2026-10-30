@@ -1,7 +1,8 @@
 # Examples
 
-Run examples from the repository root after `uv sync --locked`; the agent UIs
-also need `--group ui`, which installs the shared harness. They are source
+Run examples from the repository root after `uv sync --locked`; the agents'
+terminal chats and UIs also need `--group ui`, which installs the shared
+harness (the `local-kubernetes.sh` commands pass it for you). They are source
 applications and are not installed by the library wheel.
 
 | Example | Workflow |

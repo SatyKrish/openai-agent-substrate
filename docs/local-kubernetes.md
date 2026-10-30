@@ -31,7 +31,7 @@ State, kubeconfig, tool binaries, setup logs, and test results stay under the ig
 ./scripts/local-kubernetes.sh status
 ```
 
-The test command first runs the real SDK demo, then the opt-in Kubernetes test. It verifies shell tool execution, binary file reads/writes, SDK patching, nonzero exit codes, and session serialization/resume. Each test creates and deletes its own Actor. No OpenAI API key or paid model call is required.
+The test command first runs the provider check, then the opt-in Kubernetes test. It verifies shell tool execution, binary file reads/writes, SDK patching, nonzero exit codes, and session serialization/resume. Each test creates and deletes its own Actor. No OpenAI API key or paid model call is required.
 
 The default unit/integration suite remains key-free and skips Kubernetes tests unless explicitly enabled. To invoke the live test directly:
 
@@ -73,7 +73,7 @@ For multi-turn testing, `./scripts/local-kubernetes.sh ui` serves the
 conversation. Each conversation gets its own Actor and workspace volume, and
 accepts `.pdf`, `.md`, `.txt` and `.csv` uploads. `sre-setup` then `sre-ui`
 serve the [SRE agent](../examples/sre/README.md) on <http://localhost:8001>
-against a demo namespace with two broken workloads. Both UIs run on the
+against a demo namespace with two broken workloads. All three agents run on the
 [shared agent harness](agent-harness.md) and use the live model from `.env`.
 
 ## Stop and restart

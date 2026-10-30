@@ -48,9 +48,16 @@ uv run python -m examples.document_intelligence.deploy sandbox \
   --context YOUR_KUBERNETES_CONTEXT --image YOUR_REGISTRY/document-intelligence:example
 uv run python -m examples.sre.deploy sandbox \
   --context YOUR_KUBERNETES_CONTEXT --image YOUR_REGISTRY/sre:example
+uv run python -m examples.starter.deploy sandbox \
+  --context YOUR_KUBERNETES_CONTEXT --image YOUR_REGISTRY/starter:example
 ```
 
-Both templates limit an Actor to 0.5 CPU and 480 MiB (`deploy/kubernetes/sandbox.py`).
+The launchers find the template from that record. Run them from the same
+checkout with `uv run --locked --group ui python -m examples.starter` (the
+terminal chat) or `-m examples.starter.ui`, passing `--context` and, if needed,
+`--kubeconfig`.
+
+Each template limits an Actor to 0.5 CPU and 480 MiB by default (`deploy/kubernetes/sandbox.py`).
 A worker runs as many Actors as its reported CPU and memory hold; on local Kind
 each worker reports 2,000 millicores and 1,984 MiB, so it runs four. When every
 worker is full, the harness waits for room instead of failing the turn.

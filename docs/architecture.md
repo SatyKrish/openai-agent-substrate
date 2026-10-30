@@ -55,7 +55,7 @@ Cancelling the Python coroutine does not guarantee cancellation of an in-flight 
 
 ## Kubernetes-hosted harness
 
-The agent UIs run their harness on the operator's host. The Document
+The agents' terminal chats and UIs run their harness on the operator's host. The Document
 Intelligence command-line workflow can also run as a Kubernetes Job, with the
 harness in a pod:
 

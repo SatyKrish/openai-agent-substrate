@@ -3,7 +3,8 @@
 The trusted side of [harness separate from compute](../docs/agent-harness.md):
 it runs an agent's loop with the OpenAI Agents SDK and gives each conversation
 its own Agent Substrate sandbox for tool execution. Agent examples supply a
-`SandboxAgent` and an `AgentSpec`, and keep their own UI. The harness has no page.
+`SandboxAgent` and an `AgentSpec`, and keep their own front ends: a UI, the
+harness's terminal chat, or both. The harness has no page.
 
 It is its own package in the repository's uv workspace
 (`openai-agent-substrate-harness`, imported as `harness`), depending on the

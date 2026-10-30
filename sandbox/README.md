@@ -59,7 +59,7 @@ helpers: a scripted model and a local protocol simulator. It is pinned to
 `openai-agents==0.24.0`.
 
 The [repository](https://github.com/SatyKrish/openai-agent-substrate) also holds
-a shared agent harness, two agents built on it, local Kind setup and the
+a shared agent harness, three agents built on it (including a starter to copy), local Kind setup and the
 verification record. Start with:
 
 - [Architecture and limits](https://github.com/SatyKrish/openai-agent-substrate/blob/main/docs/architecture.md)

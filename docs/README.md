@@ -15,4 +15,5 @@
 | [Document Intelligence deployment](../examples/document_intelligence/deploy/README.md) | .env import, Secret mounting, endpoint/model settings, the sandbox template and agent Jobs |
 | [Document Intelligence UI](../examples/document_intelligence/ui/README.md) | ChatKit conversations with uploads, per-turn files and Jaeger traces |
 | [SRE agent](../examples/sre/README.md) | Read-only Kubernetes investigation with evidence-checked findings |
+| [Starter agent](../examples/starter/README.md) | The quick start's agent: run it from the terminal, then copy it to build your own |
 | [Examples](../examples/README.md) | The starter agent, the other agents, and the provider check |

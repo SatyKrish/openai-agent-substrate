@@ -81,7 +81,7 @@ async with resumed:
 
 Keep SDK conversation history or `RunState` separately. Actor suspension preserves compute/workspace state, not the external SDK harness. `examples/provider_check/main.py` shows carrying `result.to_input_list()` into the next run.
 
-For a chat application, keep one Actor per conversation: create it on the first message, store the serialized state with the conversation and its history in an SDK session (or `result.to_input_list()`), resume the Actor for each later message, and delete it when the conversation is deleted. Serialize turns within one conversation; separate conversations can run concurrently. The [shared agent harness](agent-harness.md) implements this with ChatKit for two example agents, and [architecture](architecture.md#workspace-persistence-and-conversations) covers the workspace volume that makes it durable.
+For a chat application, keep one Actor per conversation: create it on the first message, store the serialized state with the conversation and its history in an SDK session (or `result.to_input_list()`), resume the Actor for each later message, and delete it when the conversation is deleted. Serialize turns within one conversation; separate conversations can run concurrently. The [shared agent harness](agent-harness.md) implements this with ChatKit for the example agents; the [starter agent](../examples/starter/README.md) is the smallest one, and [architecture](architecture.md#workspace-persistence-and-conversations) covers the workspace volume that makes it durable.
 
 For complete runnable examples, see [examples/README.md](../examples/README.md).
 

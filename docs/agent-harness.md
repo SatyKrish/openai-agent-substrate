@@ -11,14 +11,15 @@ writing the agent, not another harness.
 
 | Part | Owns | Code |
 | --- | --- | --- |
-| **Agent example** | Instructions, skills, tools, the starting workspace, the sandbox image and size, host checks of its outputs, and its own UI | `examples/document_intelligence/`, `examples/sre/` |
-| **Harness** | The SDK agent loop and history; one sandbox session per conversation; locking, waiting for sandbox capacity, turn records, uploads, collecting outputs, recording tool evidence, running the agent's checks, tracing; the ChatKit protocol and HTTP helpers that agent UIs build on | `harness/` (the `openai-agent-substrate-harness` package) |
+| **Agent example** | Instructions, skills, tools, the starting workspace, the sandbox image and size, host checks of its outputs, and its front ends: a terminal chat, a UI, or both | `examples/starter/`, `examples/document_intelligence/`, `examples/sre/` |
+| **Harness** | The SDK agent loop and history; one sandbox session per conversation; locking, waiting for sandbox capacity, turn records, uploads, collecting outputs, recording tool evidence, running the agent's checks, tracing; the ChatKit protocol, the HTTP helpers that agent UIs build on, and a terminal chat | `harness/` (the `openai-agent-substrate-harness` package) |
 | **Sandbox** | The SDK sandbox client for Agent Substrate, Actor lifecycle, and registering an agent's image and size as an ActorTemplate | `sandbox/` (the `openai-agent-substrate` package), `deploy/kubernetes/sandbox.py` |
 
 ```mermaid
 flowchart LR
     Browser --> UI["Agent UI (per example)"]
     UI --> Harness
+    Terminal["Terminal chat"] --> Harness
     subgraph Harness["Harness (trusted)"]
         Loop["SDK Runner: agent loop"]
         Conv["Conversation runtime"]
@@ -34,7 +35,10 @@ flowchart LR
 Each agent example keeps its UI: the page, its HTTP routes and its launcher.
 The harness has no page of its own. It does provide a terminal chat
 (`harness.terminal`), which drives the same server in-process, so a terminal
-conversation is an ordinary thread that the agent's UI also lists.
+conversation is an ordinary thread that the agent's UI also lists. The starter
+agent uses the terminal chat as the quick start's last step and keeps its UI
+optional. A conversation should be driven from one process at a time: each
+process locks a conversation only for itself.
 
 ## Standards, not a new agent format
 

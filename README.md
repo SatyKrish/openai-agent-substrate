@@ -116,12 +116,12 @@ uv run python -m examples.provider_check --backend local
 
 ## Verification
 
-The provider is pinned to `openai-agents==0.24.0`. Real Actor execution, authenticated routing, suspend/resume, and external snapshot recovery have been verified on local ARM64 Kind with gVisor. A live Document Intelligence run with `gpt-6.1-terra` also passed through a Secret-backed Kubernetes harness and Substrate Actor. On the shared agent harness, nine live conversations started together all passed their checks, the one beyond the cluster's capacity waited for a sandbox worker instead of failing, and the SRE agent's findings matched the evidence it read. Production isolation properties remain unverified. See the [verification record](docs/verification.md).
+The provider is pinned to `openai-agents==0.24.0`. Real Actor execution, authenticated routing, suspend/resume, and external snapshot recovery have been verified on local ARM64 Kind with gVisor. A live Document Intelligence run with `gpt-6.1-terra` also passed through a Secret-backed Kubernetes harness and Substrate Actor. On the shared agent harness, nine live conversations started together all passed their checks, the one beyond the cluster's capacity waited for a sandbox worker instead of failing, and the SRE agent's findings matched the evidence it read. The quick start's golden path, from `starter-setup` to a two-turn terminal conversation, ran end to end on the same cluster. Production isolation properties remain unverified. See the [verification record](docs/verification.md).
 
 ## Tracing
 
-`./scripts/local-kubernetes.sh tracing-setup` deploys Jaeger. The agent UIs
-then link each turn to its trace, which holds the SDK's model and tool spans
+`./scripts/local-kubernetes.sh tracing-setup` deploys Jaeger. The terminal
+chats and agent UIs then link each turn to its trace, which holds the SDK's model and tool spans
 and the sandbox's execution and lifecycle spans; `tracing-ui` opens Jaeger on
 <http://127.0.0.1:16686>. The [tracing guide](docs/tracing.md) covers
 configuration, span content and verification. The exporter stays in the

@@ -41,9 +41,10 @@ by digest in `examples/document_intelligence/deploy/jaeger.py`. It runs in names
 no harness Secret mount or service-account token. Traces disappear when the
 Jaeger pod restarts; this deployment is for local development.
 
-The agent UIs on the [shared harness](agent-harness.md) (`ui` for Document
-Intelligence, `sre-ui` for the SRE agent) record one trace per conversation turn
-and show it beside the chat, live while the turn runs.
+The agents on the [shared harness](agent-harness.md) record one trace per
+conversation turn. `starter-chat` prints each turn's Jaeger link in the
+terminal; the UIs (`starter-ui`, `ui` for Document Intelligence, `sre-ui` for
+the SRE agent) show the trace beside the chat, live while the turn runs.
 
 In another terminal, expose the query UI on loopback:
 

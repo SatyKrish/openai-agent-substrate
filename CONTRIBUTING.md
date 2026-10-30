@@ -15,10 +15,10 @@ uv run python -m examples.provider_check --backend local
 The repository is a uv workspace. Provider changes go in `sandbox/` (the
 `openai-agent-substrate` package), agent-runtime changes in `harness/`, and
 agents in `examples/`; boundary tests reject imports that cross the layers the
-wrong way. The `ui` group installs the harness, so its tests and the agents'
+wrong way. A new agent starts as a copy of `examples/starter`. The `ui` group installs the harness, so its tests and the agents'
 UI tests run instead of being skipped.
 
-The default tests and scripted demo use loopback HTTP and temporary local workspaces. They require no API key or cluster. Detailed checks, including the actual upstream execution server, are in the [development guide](docs/development.md).
+The default tests and the provider check use loopback HTTP and temporary local workspaces. They require no API key or cluster. Detailed checks, including the actual upstream execution server, are in the [development guide](docs/development.md).
 
 ## Propose a change
 
@@ -28,7 +28,7 @@ Keep changes focused, add tests for behavior changes, and update the relevant gu
 
 ## Open a pull request
 
-Explain the problem, resulting behavior, and how you verified the change. The CI workflow checks supported Python versions, the SDK/provider tests, the scripted demo, upstream execution-server compatibility, and package builds.
+Explain the problem, resulting behavior, and how you verified the change. The CI workflow checks supported Python versions, the SDK/provider tests, the provider check, upstream execution-server compatibility, and package builds.
 
 Before submitting packaging changes, run:
 

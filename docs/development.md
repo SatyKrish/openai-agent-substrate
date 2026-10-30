@@ -8,7 +8,7 @@ with two packages: the provider in `sandbox/` and the shared agent harness in
 uv sync --locked
 ```
 
-The harness, both agent UIs and their tests need the `ui` dependency group,
+The harness, the agents' terminal chats and UIs, and their tests need the `ui` dependency group,
 which installs the harness package with ChatKit, Starlette and uvicorn. CI
 installs it. Without it, those tests are skipped:
 
@@ -16,7 +16,7 @@ installs it. Without it, those tests are skipped:
 uv sync --locked --group ui
 ```
 
-The default tests and demo use a deterministic model and temporary local workspaces. They require no OpenAI API key or Kubernetes cluster. Loopback sockets must be allowed in your development environment.
+The default tests and the provider check use a deterministic model and temporary local workspaces. They require no OpenAI API key or Kubernetes cluster. Loopback sockets must be allowed in your development environment.
 
 ## Tests and execution checks
 
@@ -31,7 +31,10 @@ Tests cover native skill loading, domain code execution, exact citations and art
 
 The harness tests (`harness/tests/`) cover two messages sent to one conversation
 at once, waiting for and timing out on a full worker pool, history after a
-failed turn, and evidence from parallel harness tools. The SRE agent's tests
+failed turn, evidence from parallel harness tools, and the terminal chat (one
+question, an interactive session, and stripped control characters). The starter
+agent's tests run a turn end to end, check its host check and sandbox profile,
+and confirm its terminal chat and UI share a conversation. The SRE agent's tests
 cover its tool allowlists, the reader's Role, the evidence check, and an
 investigation end to end with a fake cluster. Agents' tests build on
 `harness.testing`.

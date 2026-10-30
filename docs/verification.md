@@ -16,7 +16,7 @@ Date: 2026-10-29.
 
 | Check | Result |
 | --- | --- |
-| Default unit/integration suite, with the `ui` group | 133 passed; six opt-in or poppler-gated checks skipped |
+| Default unit/integration suite, with the `ui` group | 142 passed; six opt-in or poppler-gated checks skipped |
 | Unit/integration suite using the actual upstream Go execution server (before tracing change) | 63 passed; four real-cluster tests skipped |
 | Opt-in Kubernetes integration test | Passed against a fresh real Actor |
 | SDK scripted workflow on Kubernetes | Passed: shell tool execution, report creation, serialized session resume, and preserved edits |
