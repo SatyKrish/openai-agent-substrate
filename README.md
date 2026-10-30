@@ -154,7 +154,7 @@ sandbox/                    The provider library (openai-agent-substrate), the o
   src/openai_agent_substrate/  SDK provider, transport, lifecycle, tracing
     testing/                Scripted model and loopback execution helpers
 harness/                    Shared agent harness package: the agent loop, one sandbox per conversation
-  src/harness/              ChatKit runtime, uploads, evidence, checks, routes, test helpers
+  src/openai_harness/       ChatKit runtime, uploads, evidence, checks, routes, test helpers
 examples/                   The starter agent, the other agents, and the provider check
 tests/                      Provider unit and integration tests, deployment and boundary checks
 docs/                       Architecture, deployment, usage, and development guides

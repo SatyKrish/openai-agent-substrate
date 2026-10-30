@@ -11,8 +11,8 @@ from starlette.responses import FileResponse, JSONResponse
 from starlette.routing import Mount
 from starlette.staticfiles import StaticFiles
 
-from harness import http
-from harness.chat import HarnessChatServer
+from openai_harness import http
+from openai_harness.chat import HarnessChatServer
 
 from ..agent.lib import pdf
 

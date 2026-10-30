@@ -10,10 +10,10 @@ import pytest
 
 pytest.importorskip("chatkit", reason="install the ui dependency group: uv sync --group ui")
 
-from harness.chat import HarnessChatServer  # noqa: E402
-from harness.spec import Conversation  # noqa: E402
-from harness.store import SQLiteStore  # noqa: E402
-from harness.testing import Calls, events, message, shell  # noqa: E402
+from openai_harness.chat import HarnessChatServer  # noqa: E402
+from openai_harness.spec import Conversation  # noqa: E402
+from openai_harness.store import SQLiteStore  # noqa: E402
+from openai_harness.testing import Calls, events, message, shell  # noqa: E402
 from examples.sre.agent.lib import findings  # noqa: E402
 from examples.sre.agent.spec import REPORT, make_spec  # noqa: E402
 from examples.sre.agent.tools import cluster  # noqa: E402

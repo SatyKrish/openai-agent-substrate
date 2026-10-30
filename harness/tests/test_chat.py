@@ -15,10 +15,10 @@ from agents.sandbox.capabilities import Shell  # noqa: E402
 from agents.sandbox.entries import Dir  # noqa: E402
 from chatkit.types import ThreadMetadata  # noqa: E402
 
-from harness.chat import HarnessChatServer  # noqa: E402
-from harness.spec import AgentSpec, Conversation, TurnContext  # noqa: E402
-from harness.store import SQLiteStore  # noqa: E402
-from harness.testing import Calls, events, message, shell, titles  # noqa: E402
+from openai_harness.chat import HarnessChatServer  # noqa: E402
+from openai_harness.spec import AgentSpec, Conversation, TurnContext  # noqa: E402
+from openai_harness.store import SQLiteStore  # noqa: E402
+from openai_harness.testing import Calls, events, message, shell, titles  # noqa: E402
 from openai_agent_substrate import ActorCapacityError, SubstrateSandboxClient, SubstrateSandboxOptions  # noqa: E402
 
 

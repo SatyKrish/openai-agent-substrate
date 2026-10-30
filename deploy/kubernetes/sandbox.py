@@ -16,7 +16,7 @@ from .base.resources import checked
 
 ROOT = Path(__file__).resolve().parents[2]
 # The ActorTemplate mounts a per-Actor durableDir volume here, so the workspace lives as long as the Actor.
-# The harness uses the same root (harness.spec.WORKSPACE_ROOT).
+# The harness uses the same root (openai_harness.spec.WORKSPACE_ROOT).
 WORKSPACE_ROOT = "/workspace"
 MIB = 1024 * 1024
 

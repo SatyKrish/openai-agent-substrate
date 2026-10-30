@@ -5,7 +5,7 @@
 from agents.sandbox import Manifest
 from agents.sandbox.entries import Dir
 
-from harness.spec import AgentSpec
+from openai_harness.spec import AgentSpec
 
 from .agent import build_agent
 from .check import check
@@ -21,5 +21,5 @@ SPEC = AgentSpec(
     build_agent=build_agent,
     start=start,
     check=check,
-    # Optional: instructions=..., tools=..., uploads=Uploads(...); see harness/src/harness/spec.py.
+    # Optional: instructions=..., tools=..., uploads=Uploads(...); see harness/src/openai_harness/spec.py.
 )

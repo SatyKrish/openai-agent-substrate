@@ -9,8 +9,8 @@ from pathlib import Path
 from starlette.routing import Mount
 from starlette.staticfiles import StaticFiles
 
-from harness import http
-from harness.chat import HarnessChatServer
+from openai_harness import http
+from openai_harness.chat import HarnessChatServer
 
 STATIC = Path(__file__).resolve().parent / "static"
 

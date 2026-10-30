@@ -8,7 +8,7 @@ import argparse
 import json
 from pathlib import Path
 
-from harness.settings import live_model, load_env_file
+from openai_harness.settings import live_model, load_env_file
 
 ROOT = Path(__file__).resolve().parents[3]
 DEPLOYMENT = ROOT / "artifacts/examples/document_intelligence/deployment/deployment.json"
@@ -51,8 +51,8 @@ def main(argv=None):
     import uvicorn
     from agents import flush_traces
 
-    from harness.chat import HarnessChatServer
-    from harness.store import SQLiteStore
+    from openai_harness.chat import HarnessChatServer
+    from openai_harness.store import SQLiteStore
     from openai_agent_substrate import KubectlActorControl, SubstrateSandboxClient
     from openai_agent_substrate.tracing import configure_tracing, tracing_enabled
 

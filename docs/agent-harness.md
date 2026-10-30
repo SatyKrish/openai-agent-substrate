@@ -12,7 +12,7 @@ writing the agent, not another harness.
 | Part | Owns | Code |
 | --- | --- | --- |
 | **Agent example** | Instructions, skills, tools, the starting workspace, the sandbox image and size, host checks of its outputs, and its front ends: a terminal chat, a UI, or both | `examples/starter/`, `examples/document_intelligence/`, `examples/sre/` |
-| **Harness** | The SDK agent loop and history; one sandbox session per conversation; locking, waiting for sandbox capacity, turn records, uploads, collecting outputs, recording tool evidence, running the agent's checks, tracing; the ChatKit protocol, the HTTP helpers that agent UIs build on, and a terminal chat | `harness/` (the `openai-agent-substrate-harness` package) |
+| **Harness** | The SDK agent loop and history; one sandbox session per conversation; locking, waiting for sandbox capacity, turn records, uploads, collecting outputs, recording tool evidence, running the agent's checks, tracing; the ChatKit protocol, the HTTP helpers that agent UIs build on, and a terminal chat | `harness/` (the `openai-harness` package) |
 | **Sandbox** | The SDK sandbox client for Agent Substrate, Actor lifecycle, and registering an agent's image and size as an ActorTemplate | `sandbox/` (the `openai-agent-substrate` package), `deploy/kubernetes/sandbox.py` |
 
 ```mermaid
@@ -34,7 +34,7 @@ flowchart LR
 
 Each agent example keeps its UI: the page, its HTTP routes and its launcher.
 The harness has no page of its own. It does provide a terminal chat
-(`harness.terminal`), which drives the same server in-process, so a terminal
+(`openai_harness.terminal`), which drives the same server in-process, so a terminal
 conversation is an ordinary thread that the agent's UI also lists. The starter
 agent uses the terminal chat as the quick start's last step and keeps its UI
 optional. A conversation should be driven from one process at a time: each
@@ -122,7 +122,7 @@ and a demo namespace with a crash-looping and an unpullable workload.
 ```text
 pyproject.toml                uv workspace root
 sandbox/                      Provider package: src/openai_agent_substrate (ActorCapacityError added)
-harness/                      Harness package (no UI pages): src/harness/
+harness/                      Harness package openai-harness (no UI pages): src/openai_harness/
   spec.py                     AgentSpec, Conversation, TurnContext
   chat.py                     ChatKit adapter and conversation runtime
   uploads.py, steps.py        Upload staging; tool calls as workflow steps

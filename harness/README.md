@@ -7,7 +7,7 @@ its own Agent Substrate sandbox for tool execution. Agent examples supply a
 harness's terminal chat, or both. The harness has no page.
 
 It is its own package in the repository's uv workspace
-(`openai-agent-substrate-harness`, imported as `harness`), depending on the
+(`openai-harness`, imported as `openai_harness`), depending on the
 provider in `../sandbox/`. `uv sync --group ui` installs it. It is not published:
 it listens on loopback only, has no sign-in, and keeps conversations in SQLite;
 the [design](../docs/agent-harness.md) lists what it needs first.
@@ -52,7 +52,7 @@ Start by copying the [starter agent](../examples/starter/README.md), the
 smallest complete agent on the harness. Its spec looks like this:
 
 ```python
-from harness.spec import AgentSpec
+from openai_harness.spec import AgentSpec
 
 SPEC = AgentSpec(
     name="my_agent",
@@ -66,7 +66,7 @@ SPEC = AgentSpec(
 Then give the agent a sandbox profile and a UI: a Dockerfile registered through
 `deploy/kubernetes/sandbox.py`, a launcher that builds `HarnessChatServer(SPEC, ...)`,
 an `app.py` that composes `http.chat_routes`, and a page. Its tests can use
-`harness.testing`: a scripted streaming model and ChatKit request helpers. See [Document Intelligence](../examples/document_intelligence/README.md) and the
+`openai_harness.testing`: a scripted streaming model and ChatKit request helpers. See [Document Intelligence](../examples/document_intelligence/README.md) and the
 [SRE agent](../examples/sre/README.md).
 
 ## Tests

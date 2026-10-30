@@ -16,9 +16,9 @@ from examples.starter.agent.spec import SPEC  # noqa: E402
 from examples.starter.deploy.__main__ import PROFILE  # noqa: E402
 from examples.starter.ui.app import create_app  # noqa: E402
 from examples.starter.card import check_rows  # noqa: E402
-from harness.chat import HarnessChatServer  # noqa: E402
-from harness.store import SQLiteStore  # noqa: E402
-from harness.testing import Calls, events, message, shell  # noqa: E402
+from openai_harness.chat import HarnessChatServer  # noqa: E402
+from openai_harness.store import SQLiteStore  # noqa: E402
+from openai_harness.testing import Calls, events, message, shell  # noqa: E402
 from openai_agent_substrate import SubstrateSandboxClient  # noqa: E402
 
 PRIMES = "import csv; w = csv.writer(open('output/primes.csv', 'w')); w.writerow(['prime']); " \
@@ -66,7 +66,7 @@ async def test_a_turn_runs_code_in_the_sandbox_and_the_ui_serves_its_files(serve
 
 
 async def test_the_terminal_chat_and_the_ui_share_conversations(server, tmp_path):
-    from harness.terminal import TerminalChat
+    from openai_harness.terminal import TerminalChat
 
     model = Calls([shell(f'{sys.executable} -c "{PRIMES}"')], answer="Saved output/primes.csv.")
     client = SubstrateSandboxClient(router_url=server.url, atespace="test-space", control=server.control)

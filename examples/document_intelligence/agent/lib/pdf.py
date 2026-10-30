@@ -16,8 +16,8 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from harness.spec import Processor
-from harness.uploads import UploadRejected
+from openai_harness.spec import Processor
+from openai_harness.uploads import UploadRejected
 
 MAX_PDF_PAGES = 30
 RENDER_DPI = 100

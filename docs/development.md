@@ -37,7 +37,7 @@ agent's tests run a turn end to end, check its host check and sandbox profile,
 and confirm its terminal chat and UI share a conversation. The SRE agent's tests
 cover its tool allowlists, the reader's Role, the evidence check, and an
 investigation end to end with a fake cluster. Agents' tests build on
-`harness.testing`.
+`openai_harness.testing`.
 
 For wire compatibility with the actual upstream Go execution server:
 
@@ -109,7 +109,7 @@ uv run --locked twine check dist/*
 
 The repository is a uv workspace with two packages: the provider library in
 `sandbox/` (`openai-agent-substrate`) and the shared agent harness in `harness/`
-(`openai-agent-substrate-harness`). Only the provider is meant for publishing.
+(`openai-harness`). Only the provider is meant for publishing.
 Its wheel and source distribution contain the SDK adapter, tracing, testing
 helpers, and license notices; they install no console command, harness or
 example application. Guides, examples, tests and the upstream execution server
@@ -140,10 +140,10 @@ workspace root with its environment.
 ## Working on the provider
 
 - Keep Actor lifecycle and credentials in the trusted application.
-- Implement backend behavior in `sandbox/src/openai_agent_substrate/`, and agent-runtime behavior in `harness/src/harness/`.
+- Implement backend behavior in `sandbox/src/openai_agent_substrate/`, and agent-runtime behavior in `harness/src/openai_harness/`.
 - Keep domain agent definitions and skills under `examples/DOMAIN/agent/` and their evaluations under sibling `evals/`.
 - Keep runnable session utilities under `examples/provider_check/` and shared Kubernetes setup under `deploy/kubernetes/base/`. `scripts/` contains only the shell bootstrap.
-- Keep provider scripted models and loopback emulation under `sandbox/src/openai_agent_substrate/testing/`, and agent test helpers in `harness.testing`.
+- Keep provider scripted models and loopback emulation under `sandbox/src/openai_agent_substrate/testing/`, and agent test helpers in `openai_harness.testing`.
 - Put pure lifecycle tests in `tests/unit/` and HTTP/SDK contract tests in `tests/integration/`.
 - Keep unsupported capabilities explicit and preserve saved-session compatibility.
 - Update [architecture and limits](architecture.md) when behavior changes.

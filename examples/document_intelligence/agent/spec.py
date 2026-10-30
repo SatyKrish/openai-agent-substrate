@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import uuid
 
-from harness.spec import MIB, AgentSpec, Uploads
+from openai_harness.spec import MIB, AgentSpec, Uploads
 
 from .agent import AGENT_ROOT, build_agent
 from .lib import citations, pdf

@@ -20,7 +20,7 @@ def imports(path):
 
 def test_library_has_no_repository_application_dependencies():
     for path in LIBRARY.rglob("*.py"):
-        assert not {"deploy", "examples", "scripts", "harness"}.intersection(imports(path)), path
+        assert not {"deploy", "examples", "scripts", "openai_harness"}.intersection(imports(path)), path
 
 
 def test_harness_depends_on_the_library_but_not_on_agents_or_deployment():
@@ -34,7 +34,7 @@ def test_harness_and_templates_agree_on_the_workspace_root():
         return next(node.value.value for node in tree.body if isinstance(node, ast.Assign)
                     and any(getattr(target, "id", None) == "WORKSPACE_ROOT" for target in node.targets))
 
-    assert constant(HARNESS / "harness/spec.py") == constant(ROOT / "deploy/kubernetes/sandbox.py") == "/workspace"
+    assert constant(HARNESS / "openai_harness/spec.py") == constant(ROOT / "deploy/kubernetes/sandbox.py") == "/workspace"
 
 
 def test_kubernetes_base_is_independent_of_applications_and_sdk():

@@ -5,7 +5,7 @@ members = ["sandbox", "harness"]
 
 [tool.uv.sources]
 openai-agent-substrate = { workspace = true }
-openai-agent-substrate-harness = { workspace = true }
+openai-harness = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -18,7 +18,7 @@ dev = [
 ]
 # The harness and its ChatKit UI dependencies, for the agent UIs and their tests.
 ui = [
-    "openai-agent-substrate-harness",
+    "openai-harness",
 ]
 
 [tool.pytest.ini_options]

@@ -3,7 +3,7 @@ requires = ["setuptools>=80"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "openai-agent-substrate-harness"
+name = "openai-harness"
 version = "0.1.0"
 description = "Runs OpenAI Agents SDK SandboxAgents with one Agent Substrate sandbox per ChatKit conversation"
 readme = "README.md"

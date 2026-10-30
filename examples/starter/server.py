@@ -11,7 +11,7 @@ import argparse
 from pathlib import Path
 
 from deploy.kubernetes.sandbox import deployed_template
-from harness.settings import live_model, load_env_file
+from openai_harness.settings import live_model, load_env_file
 
 ROOT = Path(__file__).resolve().parents[2]
 DEPLOYMENT_DIR = ROOT / "artifacts/examples/starter/deployment"
@@ -41,8 +41,8 @@ def resolve(parser: argparse.ArgumentParser, args) -> None:
 
 def build(args, *, base_url: str = "http://localhost"):
     """The harness server for the starter agent: Substrate client, ChatKit store and the agent's spec."""
-    from harness.chat import HarnessChatServer
-    from harness.store import SQLiteStore
+    from openai_harness.chat import HarnessChatServer
+    from openai_harness.store import SQLiteStore
     from openai_agent_substrate import KubectlActorControl, SubstrateSandboxClient
     from openai_agent_substrate.tracing import configure_tracing, tracing_enabled
 

@@ -20,7 +20,7 @@ def main(argv=None):
 
     from agents import flush_traces
 
-    from harness.terminal import TerminalChat
+    from openai_harness.terminal import TerminalChat
 
     server = starter.build(args)
     print(f"Starter agent · model {args.model} · template {args.template}", flush=True)

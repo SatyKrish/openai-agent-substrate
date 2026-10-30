@@ -27,11 +27,11 @@ from examples.document_intelligence.evals.scripted import DocumentWorkflowModel 
 from examples.document_intelligence.main import QUESTION  # noqa: E402
 from examples.document_intelligence.ui.app import create_app  # noqa: E402
 from examples.document_intelligence.ui.card import check_rows  # noqa: E402
-from harness.chat import HarnessChatServer  # noqa: E402
-from harness.steps import describe_output, fenced  # noqa: E402
-from harness.store import SQLiteStore  # noqa: E402
-from harness.traces import summarize  # noqa: E402
-from harness.uploads import UploadRejected, upload_name  # noqa: E402
+from openai_harness.chat import HarnessChatServer  # noqa: E402
+from openai_harness.steps import describe_output, fenced  # noqa: E402
+from openai_harness.store import SQLiteStore  # noqa: E402
+from openai_harness.traces import summarize  # noqa: E402
+from openai_harness.uploads import UploadRejected, upload_name  # noqa: E402
 from openai_agent_substrate import SubstrateSandboxClient  # noqa: E402
 
 

@@ -7,7 +7,7 @@ from __future__ import annotations
 from agents.sandbox import Manifest
 from agents.sandbox.entries import Dir
 
-from harness.spec import AgentSpec
+from openai_harness.spec import AgentSpec
 
 from .agent import build_agent
 from .lib import findings
