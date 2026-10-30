@@ -35,4 +35,4 @@ select = ["E9", "F"]
 [tool.mypy]
 python_version = "3.11"
 follow_imports = "silent"
-files = ["sandbox/src/openai_agent_substrate/transport.py", "sandbox/src/openai_agent_substrate/proxy.py", "sandbox/src/openai_agent_substrate/lifecycle.py"]
+files = ["sandbox/src/agent_substrate/transport.py", "sandbox/src/agent_substrate/proxy.py", "sandbox/src/agent_substrate/lifecycle.py"]

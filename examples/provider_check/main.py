@@ -16,11 +16,11 @@ from agents.sandbox import Manifest, SandboxAgent, SandboxRunConfig
 from agents.sandbox.capabilities import Filesystem, Shell
 from agents.sandbox.entries import Dir, File
 
-from openai_agent_substrate.lifecycle import KubectlActorControl
-from openai_agent_substrate.testing.server import LocalExecutionServer
-from openai_agent_substrate.provider import SubstrateSandboxClient, SubstrateSandboxOptions
-from openai_agent_substrate.testing.model import ScriptedModel
-from openai_agent_substrate.tracing import configure_tracing, current_trace_ids, tracing_enabled
+from agent_substrate.lifecycle import KubectlActorControl
+from agent_substrate.testing.server import LocalExecutionServer
+from agent_substrate.provider import SubstrateSandboxClient, SubstrateSandboxOptions
+from agent_substrate.testing.model import ScriptedModel
+from agent_substrate.tracing import configure_tracing, current_trace_ids, tracing_enabled
 
 _FIRST_COMMAND = (
     "mkdir -p output && cat input.txt > output/report.txt && "

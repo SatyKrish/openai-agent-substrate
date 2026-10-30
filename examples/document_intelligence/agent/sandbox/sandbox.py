@@ -8,7 +8,7 @@ from pathlib import Path
 from agents.sandbox import Manifest
 from agents.sandbox.entries import Dir, File
 
-from openai_agent_substrate import KubectlActorControl, SubstrateSandboxClient
+from agent_substrate import KubectlActorControl, SubstrateSandboxClient
 
 from ..lib.artifacts import digests
 

@@ -1,8 +1,9 @@
 # Development
 
 Use Python 3.11 or later on macOS or Linux. The repository is a uv workspace
-with two packages: the provider in `sandbox/` and the shared agent harness in
-`harness/`. Install the provider and the development tools with:
+with two packages: the provider in `sandbox/` (`openai-agent-substrate`, imported
+as `agent_substrate`) and the shared agent harness in `harness/` (`openai-harness`,
+imported as `openai_harness`). Install the provider and the development tools with:
 
 ```sh
 uv sync --locked
@@ -140,10 +141,10 @@ workspace root with its environment.
 ## Working on the provider
 
 - Keep Actor lifecycle and credentials in the trusted application.
-- Implement backend behavior in `sandbox/src/openai_agent_substrate/`, and agent-runtime behavior in `harness/src/openai_harness/`.
+- Implement backend behavior in `sandbox/src/agent_substrate/`, and agent-runtime behavior in `harness/src/openai_harness/`.
 - Keep domain agent definitions and skills under `examples/DOMAIN/agent/` and their evaluations under sibling `evals/`.
 - Keep runnable session utilities under `examples/provider_check/` and shared Kubernetes setup under `deploy/kubernetes/base/`. `scripts/` contains only the shell bootstrap.
-- Keep provider scripted models and loopback emulation under `sandbox/src/openai_agent_substrate/testing/`, and agent test helpers in `openai_harness.testing`.
+- Keep provider scripted models and loopback emulation under `sandbox/src/agent_substrate/testing/`, and agent test helpers in `openai_harness.testing`.
 - Put pure lifecycle tests in `sandbox/tests/unit/` and HTTP/SDK contract tests in `sandbox/tests/integration/`; harness tests go in `harness/tests/`, and repository-wide checks (deployment resources, layer boundaries) in `tests/`.
 - Keep unsupported capabilities explicit and preserve saved-session compatibility.
 - Update [architecture and limits](architecture.md) when behavior changes.

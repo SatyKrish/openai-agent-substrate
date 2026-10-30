@@ -8,7 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from openai_agent_substrate.transport import ProcessTransport, ProcessTransportError
+from agent_substrate.transport import ProcessTransport, ProcessTransportError
 
 
 @contextmanager

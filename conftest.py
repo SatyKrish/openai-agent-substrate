@@ -7,10 +7,10 @@ import pytest
 from agents import set_trace_processors, set_tracing_disabled
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
-from openai_agent_substrate import tracing
+from agent_substrate import tracing
 
-from openai_agent_substrate.testing.server import LocalExecutionServer
-from openai_agent_substrate.provider import SubstrateSandboxClient
+from agent_substrate.testing.server import LocalExecutionServer
+from agent_substrate.provider import SubstrateSandboxClient
 
 
 @pytest.fixture(autouse=True)

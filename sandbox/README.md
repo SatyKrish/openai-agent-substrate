@@ -11,7 +11,8 @@ pip install openai-agent-substrate            # provider only
 pip install 'openai-agent-substrate[tracing]' # with the OTLP exporter
 ```
 
-From a checkout of the repository, install `./sandbox` instead.
+From a checkout of the repository, install `./sandbox` instead. The package
+installs as `openai-agent-substrate` and is imported as `agent_substrate`.
 
 ```python
 from agents import Runner
@@ -19,7 +20,7 @@ from agents.run import RunConfig
 from agents.sandbox import Manifest, SandboxAgent, SandboxRunConfig
 from agents.sandbox.capabilities import Filesystem, Shell
 from agents.sandbox.entries import File
-from openai_agent_substrate import (
+from agent_substrate import (
     KubectlActorControl, SubstrateSandboxClient, SubstrateSandboxOptions,
 )
 

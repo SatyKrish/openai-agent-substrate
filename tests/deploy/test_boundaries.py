@@ -39,7 +39,7 @@ def test_harness_and_templates_agree_on_the_workspace_root():
 
 def test_kubernetes_base_is_independent_of_applications_and_sdk():
     for path in (ROOT / "deploy/kubernetes/base").glob("*.py"):
-        assert not {"examples", "scripts", "agents", "openai_agent_substrate"}.intersection(imports(path)), path
+        assert not {"examples", "scripts", "agents", "agent_substrate"}.intersection(imports(path)), path
 
 
 def test_repository_python_modules_do_not_import_shell_scripts():

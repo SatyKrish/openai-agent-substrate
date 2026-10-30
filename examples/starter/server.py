@@ -43,8 +43,8 @@ def build(args, *, base_url: str = "http://localhost"):
     """The harness server for the starter agent: Substrate client, ChatKit store and the agent's spec."""
     from openai_harness.chat import HarnessChatServer
     from openai_harness.store import SQLiteStore
-    from openai_agent_substrate import KubectlActorControl, SubstrateSandboxClient
-    from openai_agent_substrate.tracing import configure_tracing, tracing_enabled
+    from agent_substrate import KubectlActorControl, SubstrateSandboxClient
+    from agent_substrate.tracing import configure_tracing, tracing_enabled
 
     from .agent.spec import SPEC
     from .card import check_rows

@@ -5,7 +5,7 @@ import asyncio
 
 import pytest
 
-from openai_agent_substrate.lifecycle import ActorCapacityError, KubectlActorControl
+from agent_substrate.lifecycle import ActorCapacityError, KubectlActorControl
 
 
 async def test_upstream_cli_lifecycle_contract(monkeypatch):
@@ -56,7 +56,7 @@ def test_explicit_cluster_context_is_required():
 
 
 def test_authenticated_proxy_is_the_default_transport():
-    from openai_agent_substrate.provider import SubstrateSandboxClient
+    from agent_substrate.provider import SubstrateSandboxClient
 
     client = SubstrateSandboxClient(
         atespace="test-space", control=KubectlActorControl(context="explicit-test-context"),
@@ -65,7 +65,7 @@ def test_authenticated_proxy_is_the_default_transport():
 
 
 async def test_proxy_cli_uses_ephemeral_loopback_port_and_explicit_kubeconfig(monkeypatch):
-    from openai_agent_substrate.proxy import ActorProxy
+    from agent_substrate.proxy import ActorProxy
 
     commands = []
 

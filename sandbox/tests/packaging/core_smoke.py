@@ -9,8 +9,8 @@ import sys
 from agents import set_tracing_disabled
 from agents.sandbox import Manifest
 
-from openai_agent_substrate import SubstrateSandboxClient, SubstrateSandboxOptions
-from openai_agent_substrate.testing.server import LocalExecutionServer
+from agent_substrate import SubstrateSandboxClient, SubstrateSandboxOptions
+from agent_substrate.testing.server import LocalExecutionServer
 
 
 async def main():

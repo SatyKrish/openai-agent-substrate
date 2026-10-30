@@ -115,7 +115,7 @@ turn, and the [design](docs/agent-harness.md) explains the split.
 
 ## Use the provider in your own application
 
-The provider is the `openai-agent-substrate` package in `sandbox/`. From a
+The provider is the `openai-agent-substrate` package in `sandbox/`, imported as `agent_substrate`. From a
 checkout, `pip install ./sandbox` installs it without the OpenTelemetry SDK or
 OTLP exporter; use `pip install './sandbox[tracing]'` for OTLP export. See
 [SDK integration and session resume](docs/usage.md) and, for a cluster you
@@ -151,7 +151,7 @@ trusted harness.
 ```text
 pyproject.toml              uv workspace root: dev tools and test settings, no package
 sandbox/                    The provider library (openai-agent-substrate), the only published wheel
-  src/openai_agent_substrate/  SDK provider, transport, lifecycle, tracing
+  src/agent_substrate/      SDK provider, transport, lifecycle, tracing
     testing/                Scripted model and loopback execution helpers
   tests/                    Provider unit, integration, Kubernetes and packaging tests
 harness/                    Shared agent harness package: the agent loop, one sandbox per conversation

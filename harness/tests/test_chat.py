@@ -19,7 +19,7 @@ from openai_harness.chat import HarnessChatServer  # noqa: E402
 from openai_harness.spec import AgentSpec, Conversation, TurnContext  # noqa: E402
 from openai_harness.store import SQLiteStore  # noqa: E402
 from openai_harness.testing import Calls, events, message, shell, titles  # noqa: E402
-from openai_agent_substrate import ActorCapacityError, SubstrateSandboxClient, SubstrateSandboxOptions  # noqa: E402
+from agent_substrate import ActorCapacityError, SubstrateSandboxClient, SubstrateSandboxOptions  # noqa: E402
 
 
 def build_agent(manifest, model):

@@ -10,7 +10,7 @@ import asyncio
 import json
 from pathlib import Path
 
-from openai_agent_substrate import KubectlActorControl, SubstrateSandboxClient
+from agent_substrate import KubectlActorControl, SubstrateSandboxClient
 
 
 async def run(args):

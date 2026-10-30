@@ -53,8 +53,8 @@ def main(argv=None):
 
     from openai_harness.chat import HarnessChatServer
     from openai_harness.store import SQLiteStore
-    from openai_agent_substrate import KubectlActorControl, SubstrateSandboxClient
-    from openai_agent_substrate.tracing import configure_tracing, tracing_enabled
+    from agent_substrate import KubectlActorControl, SubstrateSandboxClient
+    from agent_substrate.tracing import configure_tracing, tracing_enabled
 
     from ..agent.spec import REPORT, SPEC
     from ..main import QUESTION

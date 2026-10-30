@@ -16,9 +16,9 @@ from agents import Runner, flush_traces, trace as workflow_trace
 from agents.run import RunConfig
 from agents.sandbox import SandboxRunConfig
 
-from openai_agent_substrate import SubstrateSandboxOptions
-from openai_agent_substrate.testing.server import LocalExecutionServer
-from openai_agent_substrate.tracing import configure_tracing, current_trace_ids, operation, tracing_enabled
+from agent_substrate import SubstrateSandboxOptions
+from agent_substrate.testing.server import LocalExecutionServer
+from agent_substrate.tracing import configure_tracing, current_trace_ids, operation, tracing_enabled
 
 from .agent.agent import build_agent
 from .agent.lib.artifacts import digests

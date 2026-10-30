@@ -19,7 +19,7 @@ from examples.starter.card import check_rows  # noqa: E402
 from openai_harness.chat import HarnessChatServer  # noqa: E402
 from openai_harness.store import SQLiteStore  # noqa: E402
 from openai_harness.testing import Calls, events, message, shell  # noqa: E402
-from openai_agent_substrate import SubstrateSandboxClient  # noqa: E402
+from agent_substrate import SubstrateSandboxClient  # noqa: E402
 
 PRIMES = "import csv; w = csv.writer(open('output/primes.csv', 'w')); w.writerow(['prime']); " \
          "[w.writerow([n]) for n in range(2, 30) if all(n % d for d in range(2, n))]"

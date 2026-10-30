@@ -11,7 +11,7 @@ from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.trace import StatusCode
 
-from openai_agent_substrate import tracing
+from agent_substrate import tracing
 
 
 def test_sdk_parentage_timing_and_sensitive_payloads_are_excluded(trace_recorder):

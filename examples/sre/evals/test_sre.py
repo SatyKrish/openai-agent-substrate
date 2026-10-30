@@ -19,7 +19,7 @@ from examples.sre.agent.spec import REPORT, make_spec  # noqa: E402
 from examples.sre.agent.tools import cluster  # noqa: E402
 from examples.sre.deploy import access, demo  # noqa: E402
 from examples.sre.ui.card import check_rows  # noqa: E402
-from openai_agent_substrate import SubstrateSandboxClient  # noqa: E402
+from agent_substrate import SubstrateSandboxClient  # noqa: E402
 
 TRIAGE = Path(__file__).resolve().parents[1] / "agent/skills/kubernetes-triage/scripts/triage.py"
 PODS = """NAME                        READY   STATUS             RESTARTS      AGE   IP            NODE

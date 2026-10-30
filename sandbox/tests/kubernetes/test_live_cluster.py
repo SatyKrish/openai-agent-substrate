@@ -15,8 +15,8 @@ from agents.sandbox import Manifest, SandboxAgent, SandboxRunConfig
 from agents.sandbox.capabilities import Filesystem, Shell
 from agents.sandbox.entries import File
 
-from openai_agent_substrate import KubectlActorControl, SubstrateSandboxClient, SubstrateSandboxOptions
-from openai_agent_substrate.testing.model import ScriptedModel
+from agent_substrate import KubectlActorControl, SubstrateSandboxClient, SubstrateSandboxOptions
+from agent_substrate.testing.model import ScriptedModel
 
 pytestmark = pytest.mark.skipif(
     os.getenv("SUBSTRATE_RUN_KUBERNETES_TESTS") != "1",

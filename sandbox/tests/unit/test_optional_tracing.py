@@ -16,8 +16,8 @@ class NoOpenTelemetry(importlib.abc.MetaPathFinder):
         if fullname in {'opentelemetry.sdk', 'opentelemetry.exporter'} or fullname.startswith(('opentelemetry.sdk.', 'opentelemetry.exporter.')):
             raise ModuleNotFoundError('OpenTelemetry is not installed', name=fullname)
 sys.meta_path.insert(0, NoOpenTelemetry())
-from openai_agent_substrate import SubstrateSandboxClient
-from openai_agent_substrate.testing.server import LocalExecutionServer
+from agent_substrate import SubstrateSandboxClient
+from agent_substrate.testing.server import LocalExecutionServer
 assert not any(name.startswith(('opentelemetry.sdk', 'opentelemetry.exporter')) for name in sys.modules)
 """
     subprocess.run([sys.executable, "-I", "-c", code, str(source)], check=True, capture_output=True)

@@ -32,7 +32,7 @@ from openai_harness.steps import describe_output, fenced  # noqa: E402
 from openai_harness.store import SQLiteStore  # noqa: E402
 from openai_harness.traces import summarize  # noqa: E402
 from openai_harness.uploads import UploadRejected, upload_name  # noqa: E402
-from openai_agent_substrate import SubstrateSandboxClient  # noqa: E402
+from agent_substrate import SubstrateSandboxClient  # noqa: E402
 
 
 class FollowUpModel(Model):

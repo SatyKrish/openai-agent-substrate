@@ -39,9 +39,9 @@ from chatkit.types import (
 )
 from chatkit.widgets import DynamicWidgetRoot
 
-from openai_agent_substrate import ActorCapacityError, SubstrateSandboxOptions
-from openai_agent_substrate.instrumentation import operation
-from openai_agent_substrate.tracing import otel_trace_id, tracing_enabled
+from agent_substrate import ActorCapacityError, SubstrateSandboxOptions
+from agent_substrate.instrumentation import operation
+from agent_substrate.tracing import otel_trace_id, tracing_enabled
 
 from .spec import WORKSPACE_ROOT, AgentSpec, Conversation, TurnContext
 from .steps import ToolSteps, fenced, user_text

@@ -18,7 +18,7 @@ pip install './sandbox[tracing]'
 The provider and its SDK-only instrumentation work without this extra. The
 Agents SDK currently brings `opentelemetry-api` transitively through MCP; the
 base installation does not require the OpenTelemetry SDK or OTLP exporter. Import
-`openai_agent_substrate.tracing` only when the tracing extra is installed. The
+`agent_substrate.tracing` only when the tracing extra is installed. The
 repository's development dependencies include the exporter for tests and source
 examples; the harness image explicitly installs the tracing extra.
 

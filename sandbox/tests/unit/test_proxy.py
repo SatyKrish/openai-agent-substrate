@@ -6,7 +6,7 @@ import sys
 
 import pytest
 
-from openai_agent_substrate.proxy import ActorProxy
+from agent_substrate.proxy import ActorProxy
 
 
 async def test_proxy_readiness_and_owned_process_cleanup():

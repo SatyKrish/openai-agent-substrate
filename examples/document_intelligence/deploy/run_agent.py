@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 
 from agents import flush_traces
-from openai_agent_substrate.tracing import configure_tracing
+from agent_substrate.tracing import configure_tracing
 
 from examples.document_intelligence.main import TRACE_OPERATIONS, run
 from examples.document_intelligence.agent.lib.configuration import select_model
