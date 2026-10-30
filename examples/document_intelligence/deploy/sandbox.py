@@ -22,7 +22,9 @@ def build_template(image, atespace):
         # A per-Actor durableDir: created with the Actor, kept across suspend and resume
         # by every snapshot, and deleted with the Actor.
         volumes=[dict(name="workspace", durableDir={})],
-        resources=dict(limits=dict(cpuMillicores=2000, memoryBytes=1073741824)),
+        # Half a core and 480 MiB: four Actors fit a local Kind worker (2 cores, 1,984 MiB reported).
+        # Turns mostly wait on the model; PDF processing peaks near 22 MiB.
+        resources=dict(limits=dict(cpuMillicores=500, memoryBytes=480 * 1024 * 1024)),
         snapshotConfig=dict(preferredFidelity="SNAPSHOT_FIDELITY_MEMORY"))
     suffix = hashlib.sha256(json.dumps(template, sort_keys=True).encode()).hexdigest()[:12]
     template["metadata"]["name"] = "document-intelligence-" + suffix

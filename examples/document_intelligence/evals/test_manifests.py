@@ -51,5 +51,6 @@ def test_sandbox_template_mounts_a_per_actor_volume_at_the_workspace_root():
     assert template["volumes"] == [{"name": "workspace", "durableDir": {}}]
     assert template["containers"][0]["volumeMounts"] == [{"name": "workspace", "mountPath": "/workspace"}]
     assert template["metadata"]["name"].startswith("document-intelligence-")
+    assert template["resources"] == {"limits": {"cpuMillicores": 500, "memoryBytes": 480 * 1024 * 1024}}
     # Templates are immutable: any content change, such as a new image digest, gets a new name.
     assert build_template("registry.example/sandbox@sha256:def", "ate-demo-sandbox")["metadata"]["name"] != template["metadata"]["name"]
