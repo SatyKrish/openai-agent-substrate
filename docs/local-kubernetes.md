@@ -69,7 +69,7 @@ See [tracing and independent verification](tracing.md) for the complete workflow
 ./scripts/local-kubernetes.sh stop
 ```
 
-On macOS this stops only the dedicated Colima profile and preserves its disk. Restart that profile with `colima start --profile python -m examples.quickstart --activate=false --ssh-config=false`, or rerun setup. The project-specific kubeconfig selects the cluster explicitly.
+On macOS this stops only the dedicated Colima profile and preserves its disk. Restart that profile with `colima start --profile openai-agent-substrate --activate=false --ssh-config=false`, or rerun setup. The project-specific kubeconfig selects the cluster explicitly.
 
 ## Verified recovery scope
 

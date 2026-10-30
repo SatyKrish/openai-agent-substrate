@@ -113,7 +113,8 @@ is required while its dependencies match the library.
 
 - Keep Actor lifecycle and credentials in the trusted application.
 - Implement backend behavior in `src/openai_agent_substrate/`.
-- Keep domain agent definitions and skills under `examples/DOMAIN/agent/` and their evaluations under sibling `evals/`; keep generic session utilities under `scripts/`.
+- Keep domain agent definitions and skills under `examples/DOMAIN/agent/` and their evaluations under sibling `evals/`.
+- Keep runnable session utilities under `examples/quickstart/` and shared Kubernetes setup under `deploy/kubernetes/base/`. `scripts/` contains only the shell bootstrap.
 - Keep provider scripted models and loopback emulation under `src/openai_agent_substrate/testing/`.
 - Put pure lifecycle tests in `tests/unit/` and HTTP/SDK contract tests in `tests/integration/`.
 - Keep unsupported capabilities explicit and preserve saved-session compatibility.

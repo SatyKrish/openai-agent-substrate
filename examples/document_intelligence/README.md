@@ -135,7 +135,7 @@ intermediate files, and artifacts execute inside the real Kubernetes Actor.
 To use an existing Substrate cluster and registry instead:
 
 ```sh
-uv run python -m examples.document_intelligence.deploy \
+uv run python -m examples.document_intelligence.deploy sandbox \
   --context YOUR_KUBERNETES_CONTEXT \
   --image YOUR_REGISTRY/document-intelligence:example
 
