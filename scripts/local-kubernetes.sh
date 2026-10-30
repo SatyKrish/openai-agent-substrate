@@ -100,11 +100,11 @@ case "${1:-help}" in
   agent-artifacts)
     uv run --locked python -m examples.document_intelligence.deploy collect --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG"
     ;;
-  ui)
+  ui|sre-ui)
     # The UI server is the trusted harness: it runs on this host with .env's OPENAI_* settings.
     UI_ENV=(OPENAI_AGENTS_DISABLE_TRACING=1)
     if kubectl --context "kind-$CLUSTER" -n openai-agent-substrate get service jaeger-all-in-one >/dev/null 2>&1; then
-      # Separate forwards: an already running tracing-ui keeps 16686 and only 4318 is added.
+      # Separate forwards: an already running tracing-ui or UI keeps its ports and the others are added.
       FORWARD_PIDS=()
       for PORT in 4318 16686; do
         kubectl --context "kind-$CLUSTER" -n openai-agent-substrate port-forward service/jaeger-all-in-one "$PORT:$PORT" \
@@ -116,8 +116,17 @@ case "${1:-help}" in
     else
       echo "Jaeger is not deployed; run tracing-setup for per-turn traces. Starting without tracing." >&2
     fi
-    env "${UI_ENV[@]}" uv run --locked --group ui python -m examples.document_intelligence.ui \
+    UI_MODULE=examples.document_intelligence.ui
+    if [[ "$1" == sre-ui ]]; then UI_MODULE=examples.sre.ui; fi
+    env "${UI_ENV[@]}" uv run --locked --group ui python -m "$UI_MODULE" \
       --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG" "${@:2}"
+    ;;
+  sre-setup)
+    # The SRE sandbox image and template, the demo namespace, then the reader's Roles in it.
+    configure_docker
+    uv run --locked python -m examples.sre.deploy sandbox --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG"
+    uv run --locked python -m examples.sre.deploy demo --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG"
+    uv run --locked python -m examples.sre.deploy access --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG" "${@:2}"
     ;;
   status)
     kubectl --context "kind-$CLUSTER" get nodes
@@ -129,7 +138,7 @@ case "${1:-help}" in
     colima stop --profile "$PROFILE"
     ;;
   *)
-    echo "Usage: $0 {setup|test|document-intelligence|agent-setup|agent-test|agent-run|agent-artifacts|tracing-setup|tracing-ui|ui|status|stop}"
+    echo "Usage: $0 {setup|test|document-intelligence|agent-setup|agent-test|agent-run|agent-artifacts|tracing-setup|tracing-ui|ui|sre-setup|sre-ui|status|stop}"
     echo "Uses an isolated Kind cluster and project-local kubeconfig. setup reuses an existing cluster."
     ;;
 esac

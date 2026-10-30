@@ -33,9 +33,11 @@ examples/document_intelligence/
   agent/
     agent.py                       SandboxAgent definition
     instructions.md                Standing agent behavior
+    follow-up.md, uploads-only.md  Added to each turn of a UI conversation
+    spec.py                        What the shared harness needs: workspace, uploads, check
     tools/capabilities.py          Native SDK shell, filesystem (patch, view_image), and skill registration
     skills/document-analysis/      Domain procedure, scripts, output contract
-    lib/                           Trusted configuration and artifact verification
+    lib/                           Trusted configuration, verification, PDF processing, citation checks
     sandbox/
       sandbox.py                   Provider and workspace manifest
       PROVENANCE.json              Synthetic input provenance
@@ -45,11 +47,10 @@ examples/document_intelligence/
     fixtures/analysis.py           Code fixture emitted through apply_patch
     test_workflow.py               Execution and output contract checks
     test_configuration.py          Live defaults and explicit test-mode checks
-    test_ui.py, test_pdf.py        ChatKit protocol, upload, and PDF checks
+    test_ui.py, test_pdf.py        ChatKit protocol, upload, and PDF checks on the shared harness
   ui/
-    server.py                      ChatKit server: one Actor per thread, uploads, host checks
-    pdf.py                         In-Actor PDF extraction and page-level quote matching
-    app.py, static/                HTTP routes and the artifact-panel page
+    app.py, card.py, static/       Routes, PDF page images, the turn card and the page
+    __main__.py                    Launcher on the shared harness
   main.py                          Host CLI and workflow orchestration
   deploy/                          Example images, entrypoint, Job, and CLI
 ```
@@ -87,7 +88,8 @@ run records both SDK and OpenTelemetry trace IDs in `verification.json`.
 ## Interactive UI
 
 `./scripts/local-kubernetes.sh ui` serves a ChatKit conversation with an artifact
-panel on <http://localhost:8000>. Each thread is one Actor that the server resumes
+panel on <http://localhost:8000>. It runs on the
+[shared harness](../../harness/README.md), like the [SRE agent](../sre/README.md). Each thread is one Actor that the server resumes
 for every message and suspends after it, so you can test multi-turn analyses and
 inspect each turn's files and Jaeger trace. Attach your own `.pdf`, `.md`, `.txt`
 or `.csv` documents (up to 10 MiB each): they go into the Actor's workspace volume,

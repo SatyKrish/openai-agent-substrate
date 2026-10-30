@@ -41,7 +41,7 @@ jobs:
       - name: Install poppler for the PDF upload test
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends poppler-utils
       - name: Lint Python sources
-        run: uv run --locked ruff check src scripts deploy examples tests conftest.py
+        run: uv run --locked ruff check src scripts deploy harness examples tests conftest.py
       - name: Type-check transport, proxy, and lifecycle contracts
         run: uv run --locked mypy
       - name: Run unit and integration tests
@@ -55,7 +55,7 @@ jobs:
       - name: Build the upstream execution server
         run: go build -o artifacts/upstream-sandbox-server third_party/substrate-sandbox/main.go
       - name: Verify upstream protocol compatibility
-        run: uv run --locked pytest -q tests/integration examples/document_intelligence/evals/test_workflow.py examples/document_intelligence/evals/test_ui.py examples/document_intelligence/evals/test_pdf.py
+        run: uv run --locked pytest -q tests/integration harness/tests examples/sre/evals examples/document_intelligence/evals/test_workflow.py examples/document_intelligence/evals/test_ui.py examples/document_intelligence/evals/test_pdf.py
         env:
           SUBSTRATE_DEMO_BINARY: ${{ github.workspace }}/artifacts/upstream-sandbox-server
 

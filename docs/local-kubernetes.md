@@ -67,7 +67,10 @@ For multi-turn testing, `./scripts/local-kubernetes.sh ui` serves the
 [Document Intelligence UI](../examples/document_intelligence/ui/README.md) on
 <http://localhost:8000> and shows each turn's files and trace beside the
 conversation. Each conversation gets its own Actor and workspace volume, and
-accepts `.md`, `.txt` and `.csv` uploads. The UI uses the live model from `.env`.
+accepts `.pdf`, `.md`, `.txt` and `.csv` uploads. `sre-setup` then `sre-ui`
+serve the [SRE agent](../examples/sre/README.md) on <http://localhost:8001>
+against a demo namespace with two broken workloads. Both UIs run on the
+[shared agent harness](agent-harness.md) and use the live model from `.env`.
 
 ## Stop and restart
 

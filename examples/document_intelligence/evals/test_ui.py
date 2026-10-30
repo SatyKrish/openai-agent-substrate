@@ -22,12 +22,16 @@ from openai.types.responses import (  # noqa: E402
 )
 from starlette.testclient import TestClient  # noqa: E402
 
+from examples.document_intelligence.agent.spec import REPORT, SPEC  # noqa: E402
 from examples.document_intelligence.evals.scripted import DocumentWorkflowModel  # noqa: E402
 from examples.document_intelligence.main import QUESTION  # noqa: E402
 from examples.document_intelligence.ui.app import create_app  # noqa: E402
-from examples.document_intelligence.ui.server import DocumentChatServer, UploadRejected, describe_output, fenced, upload_name  # noqa: E402
-from examples.document_intelligence.ui.store import SQLiteStore  # noqa: E402
-from examples.document_intelligence.ui.traces import summarize  # noqa: E402
+from examples.document_intelligence.ui.card import check_rows  # noqa: E402
+from harness.chat import HarnessChatServer  # noqa: E402
+from harness.steps import describe_output, fenced  # noqa: E402
+from harness.store import SQLiteStore  # noqa: E402
+from harness.traces import summarize  # noqa: E402
+from harness.uploads import UploadRejected, upload_name  # noqa: E402
 from openai_agent_substrate import SubstrateSandboxClient  # noqa: E402
 
 
@@ -154,13 +158,19 @@ def task_titles(stream):
     return titles
 
 
+def chat_server(server, tmp_path, model, control=None):
+    client = SubstrateSandboxClient(router_url=server.url, atespace="test-space", control=control or server.control)
+    store = SQLiteStore(tmp_path / "threads.sqlite3")
+    return HarnessChatServer(SPEC, store, client, model=model, template="document-intelligence",
+                             output_dir=tmp_path / "threads", workspace_root=str(server.root), model_label="scripted",
+                             card=check_rows, preferred_output=REPORT)
+
+
 @pytest.fixture
 def chat(server, tmp_path):
-    client = SubstrateSandboxClient(router_url=server.url, atespace="test-space", control=server.control)
-    store = SQLiteStore(tmp_path / "threads.sqlite3")
-    yield DocumentChatServer(store, client, model=StreamingScripted(), template="document-intelligence",
-                             output_dir=tmp_path / "threads", workspace_root=str(server.root), model_label="scripted")
-    store.close()
+    chat = chat_server(server, tmp_path, StreamingScripted())
+    yield chat
+    chat.store.close()
 
 
 async def test_two_turns_share_one_actor_and_the_thread_delete_removes_it(chat, server, tmp_path):
@@ -257,10 +267,7 @@ def test_untrusted_text_is_fenced_and_tool_output_is_trimmed():
 
 
 def upload_chat(server, tmp_path, model):
-    client = SubstrateSandboxClient(router_url=server.url, atespace="test-space", control=server.control)
-    store = SQLiteStore(tmp_path / "threads.sqlite3")
-    chat = DocumentChatServer(store, client, model=model, template="document-intelligence", output_dir=tmp_path / "threads",
-                              workspace_root=str(server.root), model_label="scripted")
+    chat = chat_server(server, tmp_path, model)
     return chat, create_app(chat, config={"model": "scripted", "prompts": []}, port=8000, jaeger_url=None)
 
 
@@ -307,10 +314,10 @@ async def test_a_quote_missing_from_the_upload_fails_the_check(server, tmp_path)
 
 async def test_uploads_are_validated_before_they_reach_a_workspace(server, tmp_path):
     chat, app = upload_chat(server, tmp_path, ShellSteps([]))
-    assert upload_name("../../etc/Q3 report (final).MD") == "Q3-report-final.md"
-    assert upload_name("Annual Report 2025.PDF") == "Annual-Report-2025.pdf"
+    assert upload_name("../../etc/Q3 report (final).MD", SPEC.uploads) == "Q3-report-final.md"
+    assert upload_name("Annual Report 2025.PDF", SPEC.uploads) == "Annual-Report-2025.pdf"
     with pytest.raises(UploadRejected):
-        upload_name("macro.docm")
+        upload_name("macro.docm", SPEC.uploads)
     with TestClient(app, base_url="http://localhost:8000") as http:
         rejected = http.post("/chatkit", content=json.dumps({"type": "attachments.create", "params": {
             "name": "big.pdf", "size": 11 * 1024 * 1024, "mime_type": "application/pdf"}}))

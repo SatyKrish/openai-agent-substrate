@@ -12,8 +12,12 @@ from __future__ import annotations
 import json
 import re
 import unicodedata
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
+
+from harness.spec import Processor
+from harness.uploads import UploadRejected
 
 MAX_PDF_PAGES = 30
 RENDER_DPI = 100
@@ -130,6 +134,37 @@ async def process(session, pdf_path: str, name: str, scratch: str) -> PdfPages:
         return parse(summary, blob)
     finally:
         await session.exec("rm", "-rf", scratch, shell=False)
+
+
+async def process_upload(session, conversation, entry: dict) -> dict:
+    """The harness runs this on every uploaded PDF before the model; the host keeps its own page copies."""
+    try:
+        pages = await process(session, entry["path"], entry["name"], f"work/.pdf-{uuid.uuid4().hex}")
+    except PdfRejected as error:
+        raise UploadRejected(str(error)) from None
+    base = conversation.turn_dir(entry["turn"])
+    for number, (text, image) in enumerate(zip(pages.texts, pages.images), 1):
+        text_path = base / page_file(entry["name"], number, "txt")
+        text_path.parent.mkdir(parents=True, exist_ok=True)
+        text_path.write_text(text, encoding="utf-8")
+        if image:
+            (base / page_file(entry["name"], number, "jpg")).write_bytes(image)
+    return {"pages": pages.pages, "processed": pages.processed, "text_pages": pages.text_pages,
+            "images": sum(1 for image in pages.images if image)}
+
+
+def summary(info: dict) -> str:
+    text = f"{info['pages']} page{'s' if info['pages'] != 1 else ''}, {len(info['text_pages'])} with text"
+    if info["processed"] < info["pages"]:
+        text += f", first {info['processed']} processed"
+    return text
+
+
+PROCESSOR = Processor(
+    key="pdf", run=process_upload,
+    describe=lambda info, entry: f"{summary(info)}, pages in {derived_dir(entry['name'])}/",
+    listing=lambda info, entry: {**info, "derived": derived_dir(entry["name"])},
+)
 
 
 def normalize(text: str) -> str:

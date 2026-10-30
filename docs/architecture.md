@@ -92,8 +92,8 @@ conversation. Different conversations run concurrently in separate Actors and
 cannot see each other's files; turns within one conversation must not overlap
 (see the table above). Files added later, such as user uploads, go through the
 provider's file API (10 MiB per file by default) into the same volume. The
-[Document Intelligence UI](../examples/document_intelligence/ui/README.md)
-implements this pattern with ChatKit threads.
+[shared agent harness](agent-harness.md) implements this pattern with ChatKit
+threads for both the Document Intelligence and SRE agents.
 
 ## Domain skills and code execution
 

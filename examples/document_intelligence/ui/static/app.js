@@ -293,7 +293,7 @@ function renderPanel() {
 
 function turnNotice(turn) {
   const check = turn.check;
-  if (turn.status === "failed") return el("div", { class: "notice err" }, `Turn ${turn.number} failed (${turn.error}). The workspace was suspended.`);
+  if (turn.status === "failed") return el("div", { class: "notice err" }, `Turn ${turn.number} failed (${turn.error}).`);
   if (!check) return null;
   if (check.status === "passed") return el("div", { class: "notice ok" }, "comparison.md, kpis.csv and result.json match the original documents (host check).");
   const fresh = turn.files.some((file) => file.path === "output/result.json" && file.changed);

@@ -5,3 +5,4 @@ recursive-include tests *.py *.json
 recursive-include third_party *.go *.md LICENSE
 recursive-include scripts *.sh
 recursive-include deploy *.py *.md
+recursive-include harness *.py *.md

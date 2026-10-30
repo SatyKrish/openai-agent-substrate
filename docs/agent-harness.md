@@ -1,0 +1,152 @@
+# Agent harness
+
+This project follows the [harness separate from compute](architecture.md)
+pattern: the agent loop runs in a trusted harness and tool execution runs in a
+sandbox. Until now the harness lived inside the Document Intelligence UI, mixed
+with that agent's behavior and with Substrate details. A second agent would have
+copied all of it. This design splits the code so that adding an agent means
+writing the agent, not another harness.
+
+## Three parts
+
+| Part | Owns | Code |
+| --- | --- | --- |
+| **Agent example** | Instructions, skills, tools, the starting workspace, the sandbox image and size, host checks of its outputs, and its own UI | `examples/document_intelligence/`, `examples/sre/` |
+| **Harness** | The SDK agent loop and history; one sandbox session per conversation; locking, waiting for sandbox capacity, turn records, uploads, collecting outputs, recording tool evidence, running the agent's checks, tracing; the ChatKit protocol and HTTP helpers that agent UIs build on | `harness/` at the repository root |
+| **Sandbox** | The SDK sandbox client for Agent Substrate, Actor lifecycle, and registering an agent's image and size as an ActorTemplate | `src/openai_agent_substrate/`, `harness/sandbox.py` |
+
+```mermaid
+flowchart LR
+    Browser --> UI["Agent UI (per example)"]
+    UI --> Harness
+    subgraph Harness["Harness (trusted)"]
+        Loop["SDK Runner: agent loop"]
+        Conv["Conversation runtime"]
+        HTools["Harness tools (scoped credentials)"]
+        Checks["Agent's host checks"]
+    end
+    Loop --> API["OpenAI Responses API"]
+    Conv --> Client[SubstrateSandboxClient]
+    Client --> Actor["Actor: shell, files, skills"]
+    HTools --> Cluster["Read-only Kubernetes API (SRE agent)"]
+```
+
+Each agent example keeps its UI: the page, its HTTP routes and its launcher.
+The harness has no page of its own.
+
+## Standards, not a new agent format
+
+An agent is a plain OpenAI Agents SDK
+[`SandboxAgent`](https://openai.github.io/openai-agents-python/sandbox/guide/):
+instructions, capabilities (shell, filesystem, skills) and a default manifest.
+Skills use the [Agent Skills](https://agentskills.io) `SKILL.md` folder format,
+which the SDK's `Skills` capability loads. The model API is the Responses API,
+which OpenAI has contributed to the Agentic AI Foundation as Open Responses.
+Conversation history is an SDK
+[session](https://openai.github.io/openai-agents-python/sessions/)
+(`SQLiteSession` now; `SQLAlchemySession` works with Postgres), while ChatKit's
+own store keeps threads and items, as the SDK documentation recommends for a
+ChatKit server. The UI protocol is ChatKit. Harness tools are SDK function
+tools; MCP servers are the natural next step for them.
+
+The harness adds one small description beside the agent, `AgentSpec`, for what
+the SDK does not cover:
+
+| Field | Purpose |
+| --- | --- |
+| `name` | Label for traces and logs |
+| `build_agent(manifest, model)` | Returns the `SandboxAgent` |
+| `start(conversation, has_uploads)` | The first turn's workspace manifest |
+| `instructions(conversation)` | Text added to every turn, such as how follow-up turns work |
+| `tools(turn)` | Harness tools for this turn; they run in the harness, never in the sandbox |
+| `uploads` | Accepted file types, size limits and per-type processors (PDF pages) |
+| `check(conversation, turn, files)` | The host check of this turn's outputs |
+| `collect` | Workspace folders copied to the host after each turn |
+
+## What the harness does on every turn
+
+1. **Lock, then reload.** Turns in one conversation never overlap: they share a
+   workspace. ChatKit loads the thread before the harness takes the
+   conversation's lock, so the harness reloads the thread after taking it.
+   Without that, a second message sent during a running turn overwrote the
+   first turn's record and history.
+2. **Create or resume the sandbox, waiting for capacity.** The provider raises
+   `ActorCapacityError` when Substrate has no worker with room. The harness shows
+   a waiting step, retries with backoff for up to five minutes, then fails with
+   a message that says the workers are busy. Every failure is logged on the
+   server; the browser sees only safe text.
+3. **Check the boundary** on a new workspace: no API key or Secret mount in the
+   sandbox.
+4. **Stage uploads** from the host's retained copies, then run the agent's
+   processors (PDF text and page images are produced inside the sandbox).
+5. **Run the agent loop** with the conversation's SDK session and this turn's
+   harness tools. Tool calls stream to ChatKit as workflow steps. If the turn
+   fails, the items it added to the session are removed, so a retry starts clean.
+6. **Record evidence.** A harness tool's output is saved on the host and written
+   into the workspace under `evidence/`, so code in the sandbox can analyze it.
+   Checks compare against the host copy, which the sandbox cannot edit.
+7. **Collect and check.** Files in the agent's `collect` folders are copied to
+   the host; the agent's check runs on them and on the host copies.
+8. **Suspend** the sandbox and save its session state with the thread.
+
+## The SRE agent
+
+The SRE agent investigates unhealthy workloads in Kubernetes namespaces it is
+allowed to read. It shows why some tools belong in the harness:
+
+- **Reads run in the harness** with a dedicated ServiceAccount
+  (`sre-agent-reader`) bound by a Role in each allowed namespace. It can read
+  pods, logs, events and workload objects. It cannot read Secrets or ConfigMaps,
+  and it cannot change anything. The harness mints a short-lived token for it
+  and also refuses namespaces outside its allowlist.
+- **Analysis runs in the sandbox.** Every read is saved under `evidence/`. The
+  agent loads its `kubernetes-triage` skill and uses the shell and Python on
+  those files. The sandbox holds no credentials.
+- **Findings are checked.** `output/findings.json` lists each finding with
+  quotes from evidence files; the host checks every quote against its own copy.
+- **No actions.** Fixes are proposals. Write actions would need SDK tool
+  approvals and are out of scope.
+
+On Kind, `sre-setup` deploys the sandbox template, the reader ServiceAccount
+and a demo namespace with a crash-looping and an unpullable workload.
+
+## Layout
+
+```text
+src/openai_agent_substrate/   Sandbox provider: ActorCapacityError added
+harness/                      Shared harness (no UI pages), outside the wheel like deploy/
+  spec.py                     AgentSpec, Conversation, TurnContext
+  chat.py                     ChatKit adapter and conversation runtime
+  uploads.py, steps.py        Upload staging; tool calls as workflow steps
+  store.py, traces.py         ChatKit's SQLite store; Jaeger trace summary
+  http.py                     Routes an agent UI composes
+  sandbox.py                  Sandbox profile to ActorTemplate
+  settings.py                 OPENAI_* settings for UI launchers
+  tests/                      Lock and reload, capacity waits, history, evidence
+examples/document_intelligence/
+  agent/                      SandboxAgent, skills, spec, PDF processor, citation checks
+  ui/                         Its page, routes, card and launcher (port 8000)
+examples/sre/
+  agent/                      SandboxAgent, triage skill, cluster tools, spec, evidence check
+  deploy/                     Sandbox image, reader RBAC, demo workloads
+  ui/                         Its page, routes, card and launcher (port 8001)
+```
+
+The harness sits at the repository root, beside `deploy/`, rather than under
+`examples/`: it is the platform the agents run on and will grow. It is not part
+of the installed library yet, because it listens on loopback only, has no
+sign-in and keeps conversations in SQLite. Once it runs in the cluster with
+sign-in and Postgres, it can ship as an optional extra
+(`openai-agent-substrate[harness]`).
+
+## Not in this change
+
+- **A shared one-shot runner.** The Document Intelligence command line and
+  Kubernetes Job still use their own runner.
+- **Running the harness in the cluster.** That needs Postgres instead of SQLite,
+  object storage for uploads, and sign-in before anyone else can reach it.
+- **MCP servers for harness tools, tool approvals, alert-triggered runs.**
+- **Older conversations** are not migrated: the UIs use new data folders.
+- **Shared UI code.** Each example's page is its own; the SRE page started as a
+  copy of the Document Intelligence page. A third UI would justify extracting
+  the common parts.

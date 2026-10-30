@@ -1,8 +1,10 @@
 # Document Intelligence UI
 
 A ChatKit conversation beside an artifact panel, for testing multi-turn
-analyses and their traces against Agent Substrate. Each ChatKit thread is one
-analysis backed by one Actor and its workspace volume:
+analyses and their traces against Agent Substrate. It runs on the
+[shared harness](../../../harness/README.md), which runs the agent loop and owns the
+sandbox lifecycle; this folder holds the page, its routes and the turn card.
+Each ChatKit thread is one analysis backed by one Actor and its workspace volume:
 
 | ChatKit | Provider and Substrate |
 | --- | --- |
@@ -10,11 +12,14 @@ analysis backed by one Actor and its workspace volume:
 | Every later message | `client.resume()` resumes the same Actor; it never creates a replacement |
 | Attached files | copied into the Actor's workspace volume at `inputs/uploads/`; PDF pages are extracted and rendered in the Actor |
 | End of each turn | the session closes, which suspends the Actor (`--mode sync`) |
-| Thread metadata | the serialized `SubstrateSessionState` and the SDK conversation history |
+| Thread metadata | the serialized `SubstrateSessionState`, uploads and turn records |
+| SDK session | the agent's conversation history (`SQLiteSession`, one per thread) |
 | Deleting the thread | `client.delete()` deletes the Actor and its volume; the server deletes its host copies |
 
-Threads are independent: two conversations can run at the same time, each in its
-own Actor, and neither can see the other's documents.
+Threads are independent: conversations run at the same time, each in its own
+Actor, and none can see another's documents. A message sent while the same
+conversation's turn runs waits for it. When every sandbox worker is busy, a turn
+shows "Waiting for a sandbox worker" and starts when one has room.
 
 The model is live: the server uses `OPENAI_MODEL` and `OPENAI_API_KEY`, so every
 message incurs model API usage.
@@ -124,17 +129,20 @@ counts it as a quote to review and the panel shows it beside its page.
 
 ## How it works
 
-- `server.py` subclasses ChatKit's `ChatKitServer`. Each turn resumes the Actor,
-  writes any uploads into it, runs `Runner.run_streamed`, converts the stream
-  with ChatKit's `stream_agent_response`, copies `output/` and `work/` to the host
-  (`artifacts/examples/document_intelligence/ui/threads/`), runs the host check,
-  and suspends the Actor. ChatKit does not render tool calls, so the server adds
-  them as workflow tasks. Turns in different threads run concurrently; turns in
-  one thread run one at a time.
-- `store.py` keeps threads in SQLite (`artifacts/examples/document_intelligence/ui/threads.sqlite3`),
-  so threads and their Actors survive a server restart.
-- `traces.py` reduces a Jaeger trace to the rows and totals the panel shows.
-  Each turn is one SDK trace with a known ID, grouped by the analysis ID.
+- The harness's `HarnessChatServer` runs each turn: it resumes the Actor,
+  writes any uploads into it, runs the agent with its SDK session, copies
+  `output/` and `work/` to the host
+  (`artifacts/examples/document_intelligence/conversations/threads/`), runs the
+  agent's host check, and suspends the Actor. See the
+  [design](../../../docs/agent-harness.md).
+- The agent's side lives in `../agent/`: `spec.py` (starting workspace, upload
+  types and the PDF processor, the check), `lib/pdf.py` and `lib/citations.py`.
+- `app.py` composes the harness's routes with this UI's PDF page route;
+  `card.py` adds the check's rows to the harness's turn card.
+- Threads are kept in SQLite (`conversations/threads.sqlite3`), so threads and
+  their Actors survive a server restart. Each turn is one SDK trace with a known
+  ID, grouped by the thread. Conversations from before the shared harness stay
+  in `artifacts/examples/document_intelligence/ui/` and are not loaded.
 - `static/` is plain HTML, CSS and JavaScript. ChatKit's web component loads from
   `cdn.platform.openai.com`; self-hosted mode uses `domainKey: "local-dev"`, which
   covers localhost, and the `two_phase` upload strategy.
@@ -158,8 +166,8 @@ and the Actor receives neither (the first turn checks this).
   shown as code or plain text, never as HTML. Files are served as `text/plain`,
   page images as `image/jpeg`, both with a sandbox CSP; an uploaded PDF is only
   offered as a download. Only paths the server recorded can be fetched.
-- Thread metadata (Actor state, conversation history) stays on the server;
-  ChatKit never sends it to the browser.
+- Thread metadata (Actor state) and the SDK session history stay on the
+  server; ChatKit never sends them to the browser.
 - Traces carry timing, tool names, exit codes and token counts only.
 
 ## Tests

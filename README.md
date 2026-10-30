@@ -104,6 +104,20 @@ trace. PDFs are extracted and rendered inside the Actor, and the agent's quotes
 are checked against the cited page. See the
 [UI guide](examples/document_intelligence/ui/README.md).
 
+## More agents on one harness
+
+The UI runs on a [shared agent harness](docs/agent-harness.md): the agent loop
+runs in the trusted harness and tools run in the agent's sandbox, so a new agent
+is a `SandboxAgent`, a small spec, a sandbox image and its own UI. The
+[SRE agent](examples/sre/README.md) is the second one. It reads the cluster
+through read-only harness tools, saves each read as evidence for its sandbox to
+analyze, and the host checks every quote in its findings against that evidence.
+
+```sh
+./scripts/local-kubernetes.sh sre-setup
+./scripts/local-kubernetes.sh sre-ui      # http://localhost:8001
+```
+
 ## Tracing
 
 Export SDK model/tool spans and sandbox execution/lifecycle spans to local Jaeger:
@@ -123,7 +137,8 @@ updating source. The exporter stays in the trusted harness.
 ```text
 src/openai_agent_substrate/  Library: SDK provider, transport, lifecycle, tracing
   testing/                  Scripted model and loopback execution helpers
-examples/                   Quickstart and domain workflows; not installed by the wheel
+harness/                    Shared agent harness: the agent loop and one sandbox per conversation
+examples/                   Quickstart and the agents that run on the harness; not installed by the wheel
 tests/                      Unit and integration tests
 docs/                       Architecture, deployment, usage, and development guides
   assets/                   Documentation images
@@ -135,7 +150,7 @@ third_party/                Pinned upstream execution server and its license
 
 ## Documentation
 
-- [Architecture and limits](docs/architecture.md)
+- [Architecture and limits](docs/architecture.md) and the [agent harness](docs/agent-harness.md)
 - [Local Kubernetes setup and tests](docs/local-kubernetes.md)
 - [Existing-cluster setup](docs/deployment.md)
 - [SDK integration and session resume](docs/usage.md)

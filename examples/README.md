@@ -8,6 +8,10 @@ applications and are not installed by the library wheel.
 | [Quickstart](quickstart/README.md) | Provider execution, suspension, session serialization and resume |
 | [Document Intelligence](document_intelligence/README.md) | Skill loading, source reconciliation, agent-written Python, sandbox execution and cited reports |
 | [Document Intelligence UI](document_intelligence/ui/README.md) | ChatKit conversations, one Actor and workspace volume each, with uploads, per-turn files and Jaeger traces |
+| [SRE agent](sre/README.md) | Kubernetes investigation: read-only cluster tools in the harness, analysis in the sandbox, findings checked against evidence |
+
+Both agents run on the [shared harness](../harness/README.md) at the repository
+root, which runs the agent loop and gives each conversation its own sandbox.
 
 Document Intelligence keeps authored behavior in `agent/`, evaluations in
 `evals/`, application deployment in `deploy/`, and its ChatKit UI in `ui/`. It follows

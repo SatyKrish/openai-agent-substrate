@@ -16,7 +16,7 @@ Date: 2026-10-29.
 
 | Check | Result |
 | --- | --- |
-| Default unit/integration suite, with the `ui` group | 114 passed; five real-cluster checks are opt-in |
+| Default unit/integration suite, with the `ui` group | 133 passed; six opt-in or poppler-gated checks skipped |
 | Unit/integration suite using the actual upstream Go execution server (before tracing change) | 63 passed; four real-cluster tests skipped |
 | Opt-in Kubernetes integration test | Passed against a fresh real Actor |
 | SDK scripted workflow on Kubernetes | Passed: shell tool execution, report creation, serialized session resume, and preserved edits |
@@ -33,6 +33,9 @@ Date: 2026-10-29.
 | Batched file transfer on Kubernetes | Passed: 1 MiB writes went from 10.4 s to 0.82 s, files up to 10 MiB round trip, sample staging went from 13.9 s to 5.9 s, and the real-cluster suite passed on the upstream and Document Intelligence images |
 | Uploads and parallel conversations | Passed with `gpt-6.1-terra`: two conversations with different uploaded documents ran concurrently in separate Actors, each saw only its own files, all quotes matched, and follow-ups resumed the right Actor |
 | PDF uploads on Kubernetes | Passed with `gpt-6.1-terra`: poppler in the Actor extracted and rendered a four-page PDF, the agent used `view_image` for a chart and a scanned page, page-level quotes were checked against the extracted text, image-read quotes were marked for review, a 9.8 MiB PDF went through, and an 11 MiB file and a fake PDF were refused |
+| Sandbox size on Kubernetes | Passed: at 0.5 CPU and 480 MiB per Actor, 8 Actors ran at once on two workers instead of 2; four live conversations started together all passed in 38–42 s |
+| Shared agent harness on Kubernetes | Passed with `gpt-6.1-terra`: nine conversations started together all completed and passed their checks, the one beyond capacity waited 41 s for a worker, and two messages sent to one conversation at once both kept their turn |
+| SRE agent on Kubernetes | Passed with `gpt-6.1-terra`: read-only cluster reads ran in the harness, analysis ran in the sandbox, and every quote in its findings matched the host's copy of the evidence |
 
 The Kubernetes path uses owned loopback `kubectl ate proxy actor` processes and authenticated Substrate ingress. The scripted infrastructure tests exercise the real SDK runner and actual sandbox execution without model calls. The separate live OpenAI run is recorded below.
 
@@ -356,12 +359,75 @@ poppler-gated tests skipped), and the CI protocol suite passed 69 tests against
 the upstream Go execution server. The end-to-end PDF test needs poppler on the
 host, so it runs in CI, which installs poppler-utils.
 
+## Shared agent harness and SRE agent
+
+Document Intelligence moved onto the [shared harness](agent-harness.md), and the
+SRE agent was added on it. Checked on local Kind with `gpt-6.1-terra`.
+
+**Sandbox size.** Each worker reports 2,000 millicores and 1,984 MiB. At 2 CPUs
+and 1 GiB per Actor, memory as well as CPU allowed one Actor per worker. A
+benchmark with both templates:
+
+| | 2 CPU, 1 GiB | 0.5 CPU, 480 MiB |
+| --- | --- | --- |
+| Actors running at once | 2 of 3 requested | 8 of 9 requested |
+| Fixed Python loop / two at once | 0.32 s / 0.34 s | 0.79 s / 1.51 s |
+| Processing the four-page PDF in the Actor | 0.3 s | 0.9 s |
+| Peak memory of PDF processing | 22 MiB | 22 MiB |
+| Resume / suspend | 2.7 s / 0.2 s | 2.7 s / 0.2 s |
+
+Both sandbox templates now use 0.5 CPU and 480 MiB. Turns mostly wait on the
+model, so the slower CPU did not lengthen them noticeably.
+
+**Concurrency on the harness.**
+
+- Nine conversations at once (two PDF, two Markdown and CSV, two Markdown, three
+  sample reports): all nine completed and passed their host checks. Eight ran
+  immediately; the ninth showed "Waiting for a sandbox worker" for 41 s, started
+  when one finished, and passed. Before the harness, turns beyond capacity
+  failed within 0.1 s with a generic error.
+- Two messages sent to one conversation at the same moment: both were answered,
+  the second starting when the first finished, and all three of the
+  conversation's turns were recorded with passing checks. Before, the second
+  message overwrote the first one's turn record and history.
+
+**SRE agent.** `sre-setup` deployed the SRE sandbox template, a demo namespace
+(a crash-looping `checkout`, an unpullable `catalog`, a healthy `frontend`) and
+the reader's Role. The reader's token could list pods and read logs in
+`sre-demo`, and was refused Secrets, `kube-system`, deletes and `exec`.
+
+- "Which workloads in sre-demo are unhealthy, and why?" took 54.7 s: 10 cluster
+  reads in the harness (2.4 s in all, saved as evidence), the triage skill and 6
+  commands in the sandbox, and 2 findings whose 9 quotes all matched the host's
+  copies. The diagnosis was right: the `catalog` image was not found, and the
+  `checkout` command exits 1 unconditionally after printing the database error.
+- A follow-up about `frontend` resumed the same Actor and answered from the
+  saved evidence in 12.3 s without reading the cluster again.
+
+**Defects found and fixed.**
+
+- The model ran harness tool calls in parallel, and evidence files from one
+  batch got the same number (`001-pods…`, `001-deployments…`). Two reads with
+  the same label would have overwritten each other. The number is now taken
+  before the first await; a rerun numbered its ten files 001 to 010.
+- The waiting time on the turn card counted every sandbox start longer than a
+  second (3–6 s for a normal start), not only waits for a worker. It now
+  records only waits after Substrate refuses for lack of room.
+
+After the fixes the full local suite passed 133 tests (six opt-in or
+poppler-gated tests skipped), and the protocol suite, now including the harness
+and SRE tests, passed 81 against the upstream Go execution server.
+
 ## Limits of this verification
 
 These checks establish local functional execution and snapshot recovery on a single-node Kind cluster. They do not establish production availability, multi-tenant authorization policy, resistance to sandbox escape, host/node-loss durability, or model quality beyond the documented live fixture workflow. The local installation uses upstream development identities; shared deployments need an operator-defined identity and authorization configuration.
 
-The UI checks drove ChatKit's uploader from a script rather than its file picker, used only localhost (ChatKit's `local-dev` domain key), and loaded ChatKit's unversioned script from OpenAI's CDN. Parallel isolation was shown for two conversations on one node, not under load.
+The UI checks drove ChatKit's uploader from a script rather than its file picker, used only localhost (ChatKit's `local-dev` domain key), and loaded ChatKit's unversioned script from OpenAI's CDN. Parallel isolation was shown for up to nine conversations on one node, not under sustained load.
 
 The PDF checks used generated PDFs, not a corpus of real-world files. Pages that rely on fonts outside the standard set and not embedded in the PDF (for example most CJK text) may still render without text. Text read from page images is not checked by the host; it is shown for review.
 
 The existing public CI also exercises the key-free paths on Python 3.11–3.14. See [local-kubernetes.md](local-kubernetes.md) to repeat the real-cluster checks.
+
+The SRE agent was checked against one demo namespace with two kinds of failure.
+Its reads go through `kubectl` with a token-only kubeconfig; `kubectl describe`
+can show literal values from pod specs, which the Role does not restrict.

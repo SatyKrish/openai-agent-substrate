@@ -13,8 +13,8 @@ pytest.importorskip("chatkit", reason="install the ui dependency group: uv sync 
 from chatkit.types import ThreadMetadata  # noqa: E402
 from starlette.testclient import TestClient  # noqa: E402
 
+from examples.document_intelligence.agent.lib import citations, pdf  # noqa: E402
 from examples.document_intelligence.evals.test_ui import ShellSteps, events, message, post_chatkit, upload_chat  # noqa: E402
-from examples.document_intelligence.ui import pdf  # noqa: E402
 
 JPEG = b"\xff\xd8\xff\xe0fake-jpeg"
 
@@ -89,8 +89,8 @@ def pdf_thread(chat, pages):
         "turns": [{"number": 1, "status": "completed", "files": files, "uploads": ["r.pdf"], "tools": [], "check": None}]})
 
 
-def check(chat, thread, *citations):
-    return chat._check_citations(thread, {"result.json": json.dumps({"citations": list(citations)}).encode()})
+def check(chat, thread, *cited):
+    return citations.check_citations(chat.conversation(thread), {"result.json": json.dumps({"citations": list(cited)}).encode()})
 
 
 async def test_pdf_citations_are_checked_against_the_cited_page(server, tmp_path):
@@ -118,7 +118,7 @@ async def test_a_turn_that_leaves_result_json_alone_reports_no_new_citations(ser
     def card(changed):
         turn = {"number": 2, "uploads": [], "tools": [], "duration_s": 1, "lifecycle": "resumed", "check": earlier,
                 "files": [{"path": "output/result.json", "changed": changed}]}
-        return json.dumps(chat._turn_card(thread, {}, turn).item.widget.model_dump())
+        return json.dumps(chat._turn_card(chat.conversation(thread), {}, turn).item.widget.model_dump())
 
     assert "No new citations this turn" in card(False)
     assert "matches the source documents" not in card(False) and "to review" not in card(False)

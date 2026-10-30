@@ -1,9 +1,11 @@
 # Copyright 2026 openai-agent-substrate contributors
 # SPDX-License-Identifier: Apache-2.0
 
+import asyncio
+
 import pytest
 
-from openai_agent_substrate.lifecycle import KubectlActorControl
+from openai_agent_substrate.lifecycle import ActorCapacityError, KubectlActorControl
 
 
 async def test_upstream_cli_lifecycle_contract(monkeypatch):
@@ -25,6 +27,27 @@ async def test_upstream_cli_lifecycle_contract(monkeypatch):
         prefix + ["suspend", "actor", "actor", "--atespace", "space", "--mode", "sync"],
         prefix + ["delete", "actor", "actor", "--atespace", "space"],
     ]
+
+
+@pytest.mark.parametrize(("stderr", "expected"), [
+    (b"Error: rpc error: code = ResourceExhausted desc = workflow failed at step AssignWorker: no worker has room "
+     b"for the actor", ActorCapacityError),
+    (b"Error: actor not found", RuntimeError),
+])
+async def test_a_full_worker_pool_is_reported_as_a_capacity_error(monkeypatch, stderr, expected):
+    class Finished:
+        returncode = 1
+
+        async def communicate(self):
+            return b"", stderr
+
+    async def spawn(*argv, **kwargs):
+        return Finished()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
+    with pytest.raises(RuntimeError) as raised:
+        await KubectlActorControl(context="test").resume("space", "actor")
+    assert type(raised.value) is expected
 
 
 def test_explicit_cluster_context_is_required():

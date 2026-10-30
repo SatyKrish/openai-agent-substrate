@@ -13,6 +13,14 @@ from pathlib import Path
 from .proxy import ActorProxy
 
 
+class ActorCapacityError(RuntimeError):
+    """Substrate refused to run an Actor because no worker has room; retrying later can succeed."""
+
+
+# Substrate's AssignWorker step reports a full pool with this text and gRPC RESOURCE_EXHAUSTED.
+_NO_ROOM = re.compile(r"no worker has room|RESOURCE_EXHAUSTED", re.IGNORECASE)
+
+
 def resource_name(value: str) -> str:
     if not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", value):
         raise ValueError("Actor, template, and atespace names must be DNS labels (1–63 characters)")
@@ -60,7 +68,8 @@ class KubectlActorControl:
             raise
         if process.returncode:
             detail = (stderr or stdout).decode(errors="replace")[:2000]
-            raise RuntimeError(f"Actor lifecycle command failed (exit {process.returncode}): {detail}")
+            error = ActorCapacityError if _NO_ROOM.search(detail) else RuntimeError
+            raise error(f"Actor lifecycle command failed (exit {process.returncode}): {detail}")
 
     async def create(self, atespace: str, name: str, template: str) -> None:
         await self._run(self.command("create", atespace, name, "--template", resource_name(template)))

@@ -63,8 +63,10 @@ class OTLPTracingProcessor(TracingProcessor):
     excluded. Only span type, known tool/operation names and numeric metrics pass.
     """
 
-    def __init__(self, exporter, *, service_name="openai-agent-substrate", operation_names=()):
+    def __init__(self, exporter, *, service_name="openai-agent-substrate", operation_names=(), harness_tools=()):
         self.operation_names = frozenset(_OPERATIONS) | frozenset(operation_names)
+        # Function tools that run in the harness, not the sandbox; also trusted constants.
+        self.harness_tools = frozenset(harness_tools)
         self.resource = Resource({"service.name": service_name})
         self.processor = BatchSpanProcessor(exporter, schedule_delay_millis=1000,
                                             max_queue_size=4096, max_export_batch_size=512)
@@ -93,6 +95,9 @@ class OTLPTracingProcessor(TracingProcessor):
             attributes = {"openai.span.type": kind}
             if kind == "function" and data.name in _TOOLS:
                 name = "tool." + data.name
+                attributes["gen_ai.tool.name"] = data.name
+            elif kind == "function" and data.name in self.harness_tools:
+                name = "harness_tool." + data.name
                 attributes["gen_ai.tool.name"] = data.name
             if kind == "custom" and data.name in self.operation_names:
                 name = data.name
@@ -130,7 +135,7 @@ class OTLPTracingProcessor(TracingProcessor):
         self.processor.shutdown()
 
 
-def configure_tracing(*, operation_names=()):
+def configure_tracing(*, operation_names=(), harness_tools=()):
     """Install the OTLP processor, or disable export when no endpoint is set.
 
     OTEL_EXPORTER_OTLP_TRACES_ENDPOINT is the full URL. The generic endpoint gets
@@ -144,7 +149,7 @@ def configure_tracing(*, operation_names=()):
         raise ValueError("Tracing supports OTLP http/protobuf; use Jaeger port 4318")
     exporter = OTLPSpanExporter(timeout=5)
     processor = OTLPTracingProcessor(exporter, service_name=os.getenv("OTEL_SERVICE_NAME", "openai-agent-substrate"),
-                                     operation_names=operation_names)
+                                     operation_names=operation_names, harness_tools=harness_tools)
     set_trace_processors([processor])
     return processor
 

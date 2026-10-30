@@ -6,22 +6,12 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-import re
 from pathlib import Path
+
+from harness.settings import live_model, load_env_file
 
 ROOT = Path(__file__).resolve().parents[3]
 DEPLOYMENT = ROOT / "artifacts/examples/document_intelligence/deployment/deployment.json"
-
-
-def load_env_file(path: Path) -> None:
-    """Read plain OPENAI_* KEY=VALUE lines; the file is never executed and never overrides the environment."""
-    if not path.is_file():
-        return
-    for line in path.read_text(encoding="utf-8").splitlines():
-        key, separator, value = line.strip().partition("=")
-        if separator and re.fullmatch(r"OPENAI_[A-Z0-9_]+", key) and key not in os.environ and value:
-            os.environ[key] = value
 
 
 def parse_args(argv=None):
@@ -36,7 +26,8 @@ def parse_args(argv=None):
     parser.add_argument("--host", default="127.0.0.1", choices=["127.0.0.1", "localhost"],
                         help="Loopback only: the server holds the API key and cluster access")
     parser.add_argument("--port", type=int, default=8000)
-    parser.add_argument("--data-dir", type=Path, default=ROOT / "artifacts/examples/document_intelligence/ui")
+    # Conversations from before the shared harness stayed in artifacts/examples/document_intelligence/ui.
+    parser.add_argument("--data-dir", type=Path, default=ROOT / "artifacts/examples/document_intelligence/conversations")
     parser.add_argument("--jaeger-url", default="http://127.0.0.1:16686", help="Jaeger query URL reachable from this host")
     args = parser.parse_args(argv)
     load_env_file(args.env_file)
@@ -46,9 +37,8 @@ def parse_args(argv=None):
             args.template = deployment["template"]
     if not args.template:
         parser.error("Pass --template, or deploy the sandbox image first (local-kubernetes.sh agent-setup)")
-    from ..agent.lib.configuration import select_model
     try:
-        args.model = select_model(args.model)
+        args.model = live_model(args.model)
     except ValueError as error:
         parser.error(str(error))
     return args
@@ -56,24 +46,30 @@ def parse_args(argv=None):
 
 def main(argv=None):
     args = parse_args(argv)
+    import logging
+
     import uvicorn
     from agents import flush_traces
 
+    from harness.chat import HarnessChatServer
+    from harness.store import SQLiteStore
     from openai_agent_substrate import KubectlActorControl, SubstrateSandboxClient
     from openai_agent_substrate.tracing import configure_tracing, tracing_enabled
 
-    from .app import create_app
-    from .server import TRACE_OPERATIONS, DocumentChatServer
-    from .store import SQLiteStore
+    from ..agent.spec import REPORT, SPEC
     from ..main import QUESTION
+    from .app import create_app
+    from .card import check_rows
 
-    configure_tracing(operation_names=TRACE_OPERATIONS)
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(name)s: %(message)s")
+    configure_tracing(operation_names=SPEC.trace_operations)
     # Rendered PDF pages come back as one file, so reads may exceed the 10 MiB upload limit.
     client = SubstrateSandboxClient(atespace=args.atespace, max_file_bytes=32 * 1024 * 1024, control=KubectlActorControl(
         context=args.context, kubeconfig=args.kubeconfig, endpoint=args.api_endpoint))
     store = SQLiteStore(args.data_dir / "threads.sqlite3")
-    server = DocumentChatServer(store, client, model=args.model, template=args.template,
-                                output_dir=args.data_dir / "threads", base_url=f"http://localhost:{args.port}")
+    server = HarnessChatServer(SPEC, store, client, model=args.model, template=args.template,
+                               output_dir=args.data_dir / "threads", base_url=f"http://localhost:{args.port}",
+                               card=check_rows, preferred_output=REPORT)
     config = {"model": args.model, "context": args.context, "atespace": args.atespace, "template": args.template,
               "tracing": tracing_enabled(), "prompts": [
                   {"label": "Compare ACME and BETA fiscal 2024", "prompt": QUESTION},

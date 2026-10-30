@@ -63,6 +63,7 @@ def summarize(payload: dict) -> dict:
     rows, staging = [], []
     model = {"calls": 0, "ms": 0.0, "input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
     tools = {"calls": 0, "failed": 0, "ms": 0.0}
+    harness = {"calls": 0, "ms": 0.0}
     for span in ordered:
         name, values = span["operationName"], tags(span)
         offset, duration = (span["startTime"] - start) / 1000, span["duration"] / 1000
@@ -84,9 +85,13 @@ def summarize(payload: dict) -> dict:
             tools["failed"] += failed
             row.update(kind="error" if failed else ("skill" if name == "tool.load_skill" else "tool"),
                        badge=f"exit {code}" if code is not None else None, error=failed)
+        elif name.startswith("harness_tool."):
+            harness["calls"] += 1
+            harness["ms"] += duration
+            row.update(kind="harness")
         elif name in LIFECYCLE:
             pass
-        elif name == "document_intelligence.verify":
+        elif name.endswith((".check", ".verify")):
             row.update(kind="check")
         elif name == "sandbox.exec" and span["startTime"] < first_model and not any(
                 ancestor["operationName"].startswith("tool.") for ancestor in ancestors(span)):
@@ -102,4 +107,5 @@ def summarize(payload: dict) -> dict:
                      "duration_ms": round((last - first) / 1000, 1), "kind": "life", "badge": None, "error": False})
         rows.sort(key=lambda row: row["start_ms"])
     return {"trace_id": trace["traceID"], "span_count": len(spans), "duration_ms": round((end - start) / 1000, 1),
-            "model": {**model, "ms": round(model["ms"], 1)}, "tools": {**tools, "ms": round(tools["ms"], 1)}, "rows": rows}
+            "model": {**model, "ms": round(model["ms"], 1)}, "tools": {**tools, "ms": round(tools["ms"], 1)},
+            "harness_tools": {**harness, "ms": round(harness["ms"], 1)}, "rows": rows}
