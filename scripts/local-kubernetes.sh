@@ -10,6 +10,13 @@ SOURCE_DIR="${SUBSTRATE_SOURCE_DIR:-$LOCAL_DIR/substrate}"
 PIN="$(cat "$PROJECT_ROOT/.substrate-revision")"
 CLUSTER=openai-agent-substrate
 PROFILE=openai-agent-substrate
+# Cluster size. The defaults suit one or two people testing: one sandbox worker runs four sandbox
+# turns at once (each Actor is 0.5 CPU and 480 MiB), and further turns wait for room. For
+# concurrency tests raise them, for example SANDBOX_WORKERS=2 COLIMA_CPUS=6 COLIMA_MEMORY=12.
+COLIMA_CPUS="${COLIMA_CPUS:-4}"
+COLIMA_MEMORY="${COLIMA_MEMORY:-8}"
+SANDBOX_WORKERS="${SANDBOX_WORKERS:-1}"
+CONTROL_PLANE_REPLICAS="${CONTROL_PLANE_REPLICAS:-1}"
 export KUBECONFIG="$LOCAL_DIR/kubeconfig"
 export KIND_CLUSTER_NAME="$CLUSTER"
 export KIND_REGISTRY_PORT=5501
@@ -24,6 +31,14 @@ configure_docker() {
     export DOCKER_HOST="unix://$HOME/.colima/$PROFILE/docker.sock"
     unset DOCKER_CONTEXT
   fi
+}
+
+apply_size() {
+  # Substrate's install runs two API and identity servers and a two-worker sandbox pool; a later
+  # setup reapplies those counts, so setup calls this again.
+  kubectl --context "kind-$CLUSTER" -n ate-system scale deployment/ate-api-server deployment/ate-idp-server \
+    --replicas="$CONTROL_PLANE_REPLICAS"
+  kubectl --context "kind-$CLUSTER" -n ate-demo-sandbox scale workerpool/sandbox-workerpool --replicas="$SANDBOX_WORKERS"
 }
 
 prepare_source() {
@@ -42,7 +57,8 @@ case "${1:-help}" in
     if [[ "$(uname -s)" == Darwin ]]; then
       command -v colima >/dev/null
       if ! colima status --profile "$PROFILE" >/dev/null 2>&1; then
-        colima start --profile "$PROFILE" --cpus 6 --memory 12 --disk 60 --activate=false --ssh-config=false
+        # A stopped profile restarts at these sizes; stop a running one first to resize it.
+        colima start --profile "$PROFILE" --cpus "$COLIMA_CPUS" --memory "$COLIMA_MEMORY" --disk 60 --activate=false --ssh-config=false
       fi
     fi
     configure_docker
@@ -55,6 +71,12 @@ case "${1:-help}" in
       (cd "$SOURCE_DIR" && hack/create-kind-cluster.sh) 2>&1 | tee "$LOCAL_DIR/cluster-setup.log"
     else
       (cd "$SOURCE_DIR" && hack/kind.sh export kubeconfig --name "$CLUSTER" --kubeconfig "$KUBECONFIG")
+      # After a VM restart Substrate's pods wait for new pod certificates; ate-setup fails until they serve.
+      kubectl --context "kind-$CLUSTER" wait --for=condition=Ready node --all --timeout=300s
+      if kubectl --context "kind-$CLUSTER" get namespace ate-system >/dev/null 2>&1; then
+        kubectl --context "kind-$CLUSTER" -n ate-system wait --for=condition=Ready pod --all \
+          --field-selector=status.phase!=Succeeded --timeout=600s
+      fi
     fi
     # Agent Substrate's quickstart (docs/get-started/quickstart.md), step by step:
     # step 1 created the cluster and registry above; step 2 is ATE_INSTALL_KIND, exported at the top.
@@ -68,6 +90,7 @@ case "${1:-help}" in
     # Step 4 deploys a sample application. The sandbox demo replaces the counter: its WorkerPool
     # (workload=sandbox) runs every agent's Actors, and the provider check uses its template.
     (cd "$SOURCE_DIR" && go run ./cmd/ate-setup --no-dev-env --rollout-timeout 300s deploy demo sandbox) 2>&1 | tee "$LOCAL_DIR/sandbox-setup.log"
+    apply_size
     uv sync --locked
     if [[ -f "$PROJECT_ROOT/.env" ]]; then
       uv run --locked python -m examples.document_intelligence.deploy secret --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG"
@@ -145,8 +168,13 @@ case "${1:-help}" in
     uv run --locked python -m examples.sre.deploy demo --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG"
     uv run --locked python -m examples.sre.deploy access --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG" "${@:2}"
     ;;
+  scale)
+    # Resize a running cluster's Substrate replicas and sandbox workers to the settings above.
+    apply_size
+    ;;
   status)
     kubectl --context "kind-$CLUSTER" get nodes
+    kubectl --context "kind-$CLUSTER" describe nodes | sed -n '/Allocated resources/,/memory/p'
     kubectl --context "kind-$CLUSTER" get pods -n ate-system
     kubectl --context "kind-$CLUSTER" get workerpools,pods -n ate-demo-sandbox
     ;;
@@ -161,7 +189,7 @@ case "${1:-help}" in
     colima stop --profile "$PROFILE"
     ;;
   *)
-    echo "Usage: $0 {setup|test|document-intelligence|agent-setup|agent-test|agent-run|agent-artifacts|tracing-setup|tracing-ui|ui|starter-setup|starter-chat|starter-ui|sre-setup|sre-ui|status|stop|teardown}"
+    echo "Usage: $0 {setup|test|document-intelligence|agent-setup|agent-test|agent-run|agent-artifacts|tracing-setup|tracing-ui|ui|starter-setup|starter-chat|starter-ui|sre-setup|sre-ui|scale|status|stop|teardown}"
     echo "Uses an isolated Kind cluster and project-local kubeconfig. setup reuses an existing cluster."
     ;;
 esac

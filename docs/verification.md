@@ -499,6 +499,25 @@ Dockerfiles, CI and the development guide use the script.
 - A live starter turn on the new template passed its host check, and a
   conversation on the previous template still resumed.
 
+## Small default cluster
+
+Checked on 2026-10-30 on ARM64 Colima with the cluster from the earlier sections.
+
+- The stopped Colima profile restarted at the new default, 4 CPUs and 8 GiB.
+  The first setup run failed in `ate-setup deploy ate-system` with
+  `while resolving /v1, Kind=Namespace: unknown`. Substrate's pods were still
+  waiting for new pod certificates after the restart, and they were ready about
+  a minute later. Setup now waits for the node and the `ate-system` pods before
+  it runs `ate-setup` on an existing cluster. The rerun passed.
+- After setup, `ate-api-server` and `ate-idp-server` each had one replica and
+  `sandbox-workerpool` one worker. Node requests fell from 2,740m CPU and
+  6,514 MiB to 2,440m and 4,978 MiB, which is 61% and 62% of the smaller VM.
+- `./scripts/local-kubernetes.sh test` passed. A live `starter-chat` turn
+  created its Actor in 1.8 s and passed its host check in 15.9 s.
+- Five Actors from `starter-5274a60d228c` were created and started together.
+  Four ran, and the fifth was refused with `ActorCapacityError`, which the
+  harness shows as a wait for a sandbox worker. All five were then deleted.
+
 ## Limits of this verification
 
 These checks establish local functional execution and snapshot recovery on a single-node Kind cluster. They do not establish production availability, multi-tenant authorization policy, resistance to sandbox escape, host/node-loss durability, or model quality beyond the documented live fixture workflow. The local installation uses upstream development identities; shared deployments need an operator-defined identity and authorization configuration.

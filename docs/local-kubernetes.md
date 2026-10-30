@@ -8,7 +8,7 @@ This workflow runs real gVisor-backed Actors on a dedicated Kind cluster. It use
 - Docker CLI, Git, Go, kubectl, and uv.
 - Internet access for the pinned source, Go toolchain/modules, and container images.
 
-On macOS, setup creates a Colima profile named `openai-agent-substrate` with 6 CPUs, 12 GiB RAM, and a 60 GiB virtual disk. The default Docker context and existing Kubernetes configuration remain unchanged. Linux uses the selected Docker daemon; use a dedicated daemon if another cluster already owns the `kind-registry` container on a different port.
+On macOS, setup creates a Colima profile named `openai-agent-substrate` with 4 CPUs, 8 GiB RAM, and a 60 GiB virtual disk. The default Docker context and existing Kubernetes configuration remain unchanged. Linux uses the selected Docker daemon; use a dedicated daemon if another cluster already owns the `kind-registry` container on a different port.
 
 ## Set up
 
@@ -33,6 +33,34 @@ The script follows Agent Substrate's own
 | Teardown: `hack/delete-kind-cluster.sh` | `./scripts/local-kubernetes.sh teardown` |
 
 A repeat setup reuses the existing cluster instead of deleting it.
+
+### Cluster size
+
+The defaults suit one or two people testing. After Substrate's install, setup
+scales it down: one API server and one identity server instead of two each, and
+one sandbox worker instead of two. A worker runs four sandbox turns at once
+(each Actor is 0.5 CPU and 480 MiB), and a fifth waits for room; a conversation
+holds a worker only during its turns. Environment variables set the size:
+
+| Variable | Default | What it sets |
+| --- | --- | --- |
+| `COLIMA_CPUS`, `COLIMA_MEMORY` | `4`, `8` (GiB) | The Colima VM on macOS |
+| `SANDBOX_WORKERS` | `1` | Sandbox workers, four concurrent turns each |
+| `CONTROL_PLANE_REPLICAS` | `1` | Substrate's API and identity servers |
+
+For concurrency tests, Substrate's own sizing is
+`SANDBOX_WORKERS=2 CONTROL_PLANE_REPLICAS=2 COLIMA_CPUS=6 COLIMA_MEMORY=12`.
+`scale` applies the replica settings to a running cluster; Colima takes a new
+CPU and memory size when it starts, so stop the cluster first, then rerun setup:
+
+```sh
+SANDBOX_WORKERS=2 ./scripts/local-kubernetes.sh scale
+./scripts/local-kubernetes.sh stop && COLIMA_CPUS=6 COLIMA_MEMORY=12 ./scripts/local-kubernetes.sh setup
+```
+
+Use the same variables on every later setup: setup reapplies Substrate's
+manifests and then these sizes. `status` shows each node's allocated CPU and
+memory.
 
 The cluster enables the PodCertificateRequest and ClusterTrustBundle APIs required by Substrate. gVisor is used on the tested ARM64 Colima VM; microVM/KVM support is not required for this workflow. The bundled credential provider starts with a default-deny namespace policy, and this repository grants no atespace any namespace, so sandboxes receive no credentials; the harness keeps its own on the host. A Linux host that will run more than about a thousand sandboxes also needs a larger kernel neighbor table, as the quickstart notes.
 
@@ -96,7 +124,7 @@ against a demo namespace with two broken workloads. All three agents run on the
 ./scripts/local-kubernetes.sh stop
 ```
 
-On macOS this stops only the dedicated Colima profile and preserves its disk. Restart that profile with `colima start --profile openai-agent-substrate --activate=false --ssh-config=false`, or rerun setup. The project-specific kubeconfig selects the cluster explicitly.
+On macOS this stops only the dedicated Colima profile and preserves its disk. Rerun setup to restart it at the configured size; `colima start --profile openai-agent-substrate --activate=false --ssh-config=false` also works but keeps the previous size. The project-specific kubeconfig selects the cluster explicitly.
 
 ```sh
 ./scripts/local-kubernetes.sh teardown

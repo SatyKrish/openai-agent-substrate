@@ -116,8 +116,9 @@ memory on a worker:
 
 Concurrency is bounded by running turns, not by conversations. A worker runs as
 many Actors as its reported CPU and memory hold: at the templates' 0.5 CPU and
-480 MiB, a local Kind worker (2,000 millicores, 1,984 MiB) runs four, so the two
-default workers run eight turns at once. A further turn waits, with a visible
+480 MiB, a local Kind worker (2,000 millicores, 1,984 MiB) runs four. The local
+setup's single default worker runs four turns at once, and `SANDBOX_WORKERS=2`
+runs eight. A further turn waits, with a visible
 step, until a worker has room. A suspended conversation costs only snapshot
 storage, about 2 MB each for the documents in the local runs. The
 [verification record](verification.md) has the measurements.
