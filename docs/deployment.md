@@ -36,3 +36,31 @@ Pass `--kubeconfig PATH` for a separate kubeconfig. The provider owns an ephemer
 An explicit `--router-url` selects a trusted HTTP gateway you operate, bypassing the owned CLI proxy. Such a gateway must provide the cluster's required upstream authentication and authorization. This option is also used by the local protocol simulator.
 
 An application gateway can implement the four lifecycle methods in `ActorControl`. Supply a trusted `router_url`, or provide an async `start_proxy(atespace, name)` method returning an object with a loopback `url` and async `aclose()` lifecycle.
+
+## Agent sandbox templates
+
+Each agent runs in its own ActorTemplate, built from its sandbox image. The
+deploy commands build and push the image, register the template (its name is a
+hash of its content), and record it for the agent's launcher:
+
+```sh
+uv run python -m examples.document_intelligence.deploy sandbox \
+  --context YOUR_KUBERNETES_CONTEXT --image YOUR_REGISTRY/document-intelligence:example
+uv run python -m examples.sre.deploy sandbox \
+  --context YOUR_KUBERNETES_CONTEXT --image YOUR_REGISTRY/sre:example
+```
+
+Both templates limit an Actor to 0.5 CPU and 480 MiB (`deploy/kubernetes/sandbox.py`).
+A worker runs as many Actors as its reported CPU and memory hold; on local Kind
+each worker reports 2,000 millicores and 1,984 MiB, so it runs four. When every
+worker is full, the harness waits for room instead of failing the turn.
+
+The SRE agent also needs read access to the namespaces it investigates. With an
+operator kubeconfig, this creates the `sre-agent-reader` ServiceAccount and a
+read-only Role in each existing namespace you name; see the
+[SRE agent](../examples/sre/README.md) for what it can read:
+
+```sh
+uv run python -m examples.sre.deploy access --context YOUR_KUBERNETES_CONTEXT \
+  --kubeconfig PATH --namespace NAME
+```

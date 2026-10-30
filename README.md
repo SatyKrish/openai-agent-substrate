@@ -54,7 +54,7 @@ uv run python -m examples.quickstart --backend substrate \
 
 This creates a uniquely named Actor, exercises shell execution and suspend/resume, and deletes the Actor when finished. Add `--keep-actor` to retain the workspace and save session state. For live model execution, set the API key in the host environment and select a model with `--model YOUR_OPENAI_MODEL_ID`.
 
-The provider is pinned to `openai-agents==0.24.0`. Real Actor execution, authenticated routing, suspend/resume, and external snapshot recovery have been verified on local ARM64 Kind with gVisor. A live Document Intelligence run with `gpt-6.1-terra` also passed through a Secret-backed Kubernetes harness and Substrate Actor. The ChatKit UI ran live multi-turn conversations, including two concurrent conversations with different uploaded documents, each in its own Actor and workspace volume. Production isolation properties remain unverified. See the [verification record](docs/verification.md).
+The provider is pinned to `openai-agents==0.24.0`. Real Actor execution, authenticated routing, suspend/resume, and external snapshot recovery have been verified on local ARM64 Kind with gVisor. A live Document Intelligence run with `gpt-6.1-terra` also passed through a Secret-backed Kubernetes harness and Substrate Actor. On the shared agent harness, nine live conversations started together all passed their checks, the one beyond the cluster's capacity waited for a sandbox worker instead of failing, and the SRE agent's findings matched the evidence it read. Production isolation properties remain unverified. See the [verification record](docs/verification.md).
 
 ## OpenAI configuration in a Kubernetes agent pod
 
@@ -129,7 +129,7 @@ Export SDK model/tool spans and sandbox execution/lifecycle spans to local Jaege
 ```
 
 The [tracing guide](docs/tracing.md) covers configuration, trace verification,
-span content, and the loopback UI. Rebuild the harness with `agent-setup` after
+span content, and the loopback UI. Rebuild the agent Job image with `agent-setup` after
 updating source. The exporter stays in the trusted harness.
 
 ## Repository layout
@@ -146,7 +146,7 @@ tests/                      Provider unit and integration tests, deployment and 
 docs/                       Architecture, deployment, usage, and development guides
   assets/                   Documentation images
 scripts/                    Local Kind bootstrap and CLI dispatch
-deploy/kubernetes/           Reusable permissions, connection settings, PVC, and sandbox templates
+deploy/kubernetes/          Reusable permissions, connection settings, PVC, and sandbox templates
 third_party/                Pinned upstream execution server and its license
 .github/                    CI, dependency updates, and contribution templates
 ```
@@ -158,7 +158,8 @@ third_party/                Pinned upstream execution server and its license
 - [Existing-cluster setup](docs/deployment.md)
 - [SDK integration and session resume](docs/usage.md)
 - [Tracing with Jaeger](docs/tracing.md)
-- [Runnable examples](examples/README.md) and the [Document Intelligence UI](examples/document_intelligence/ui/README.md)
+- [Runnable examples](examples/README.md), the [Document Intelligence UI](examples/document_intelligence/ui/README.md) and the [SRE agent](examples/sre/README.md)
+- [Shared harness package](harness/README.md)
 - [Development](docs/development.md) and the [verification record](docs/verification.md)
 
 ## Contributing

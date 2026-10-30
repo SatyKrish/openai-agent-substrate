@@ -2,8 +2,8 @@
 
 This project follows the [harness separate from compute](architecture.md)
 pattern: the agent loop runs in a trusted harness and tool execution runs in a
-sandbox. Until now the harness lived inside the Document Intelligence UI, mixed
-with that agent's behavior and with Substrate details. A second agent would have
+sandbox. Before this design the harness lived inside the Document Intelligence
+UI, mixed with that agent's behavior and with Substrate details. A second agent would have
 copied all of it. This design splits the code so that adding an agent means
 writing the agent, not another harness.
 
@@ -56,12 +56,13 @@ the SDK does not cover:
 | --- | --- |
 | `name` | Label for traces and logs |
 | `build_agent(manifest, model)` | Returns the `SandboxAgent` |
-| `start(conversation, has_uploads)` | The first turn's workspace manifest |
+| `start(conversation, has_uploads, root)` | The first turn's workspace manifest, rooted at the sandbox's workspace |
 | `instructions(conversation)` | Text added to every turn, such as how follow-up turns work |
 | `tools(turn)` | Harness tools for this turn; they run in the harness, never in the sandbox |
 | `uploads` | Accepted file types, size limits and per-type processors (PDF pages) |
 | `check(conversation, turn, files)` | The host check of this turn's outputs |
-| `collect` | Workspace folders copied to the host after each turn |
+| `collect` | Workspace folders copied to the host after each turn (default `output`, `work`) |
+| `default_question` | The question used when a message has only attachments |
 
 ## What the harness does on every turn
 
@@ -142,14 +143,25 @@ conversations in SQLite. Once it runs in the cluster with sign-in and Postgres,
 it can be published on its own. The agents stay in `examples/`: a top-level
 `agents/` package would shadow the Agents SDK, whose import name is `agents`.
 
-## Not in this change
+## Next steps
 
-- **A shared one-shot runner.** The Document Intelligence command line and
-  Kubernetes Job still use their own runner.
-- **Running the harness in the cluster.** That needs Postgres instead of SQLite,
-  object storage for uploads, and sign-in before anyone else can reach it.
-- **MCP servers for harness tools, tool approvals, alert-triggered runs.**
-- **Older conversations** are not migrated: the UIs use new data folders.
-- **Shared UI code.** Each example's page is its own; the SRE page started as a
-  copy of the Document Intelligence page. A third UI would justify extracting
-  the common parts.
+In rough order, as the harness grows:
+
+1. **Split the runtime from ChatKit.** `chat.py` holds both the conversation
+   runtime and the ChatKit protocol. A runtime that reports progress as plain
+   events would let the chat UIs, a one-shot command line or Kubernetes Job,
+   and alert webhooks share it. The Document Intelligence command line and Job
+   would then drop their own runner.
+2. **One launcher.** The two UI launchers repeat argument parsing, client,
+   store and tracing setup; a shared `serve` helper would cut each to a few lines.
+3. **Run the harness in the cluster.** Postgres for the ChatKit store and
+   `SQLAlchemySession` for history, object storage for the host copies of
+   uploads and evidence, and sign-in before anyone else can reach it.
+4. **More harness tools.** MCP servers, SDK tool approvals for write actions,
+   and alert-triggered runs for the SRE agent.
+5. **Smaller items.** Recognize a full worker pool from Substrate's structured
+   error rather than its message text, and share UI rendering helpers if a
+   third agent UI appears; each page stays the agent's own.
+
+Conversations from before the harness are not migrated: the UIs use new data
+folders.

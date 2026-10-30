@@ -1,12 +1,16 @@
 # Development
 
-Use Python 3.11 or later on macOS or Linux. Install the project and its development tools with:
+Use Python 3.11 or later on macOS or Linux. The repository is a uv workspace
+with two packages: the provider in `sandbox/` and the shared agent harness in
+`harness/`. Install the provider and the development tools with:
 
 ```sh
 uv sync --locked
 ```
 
-The Document Intelligence UI and its tests need the `ui` dependency group (ChatKit, Starlette and uvicorn); CI installs it. Without it, the UI tests are skipped:
+The harness, both agent UIs and their tests need the `ui` dependency group,
+which installs the harness package with ChatKit, Starlette and uvicorn. CI
+installs it. Without it, those tests are skipped:
 
 ```sh
 uv sync --locked --group ui
@@ -17,13 +21,20 @@ The default tests and demo use a deterministic model and temporary local workspa
 ## Tests and execution checks
 
 ```sh
-uv run ruff check src scripts deploy examples tests conftest.py
+uv run ruff check sandbox harness scripts deploy examples tests conftest.py
 uv run mypy
 uv run pytest -q
 uv run python -m examples.quickstart --backend local --output-dir artifacts/local
 ```
 
 Tests cover native skill loading, domain code execution, exact citations and artifact reconciliation, the actual SDK tool loop, filesystem patching, binary files and batched multi-command transfers, shell output/exit codes, routing headers, state serialization and resume, lost Actors, unsupported manifest options, file limits, and non-replay of failed executions.
+
+The harness tests (`harness/tests/`) cover two messages sent to one conversation
+at once, waiting for and timing out on a full worker pool, history after a
+failed turn, and evidence from parallel harness tools. The SRE agent's tests
+cover its tool allowlists, the reader's Role, the evidence check, and an
+investigation end to end with a fake cluster. Agents' tests build on
+`harness.testing`.
 
 For wire compatibility with the actual upstream Go execution server:
 

@@ -1,6 +1,6 @@
 # Architecture
 
-This project follows the **harness separate from compute** pattern in the [OpenAI Sandbox Agents guide](https://developers.openai.com/api/docs/guides/agents/sandboxes). The Agents SDK harness runs in the trusted application. Kubernetes provides sandbox compute through Agent Substrate, which manages the Actors that execute shell commands and own the workspace. `SubstrateSandboxClient` adapts this Kubernetes-backed execution environment to the SDK sandbox interface.
+This project follows the **harness separate from compute** pattern in the [OpenAI Sandbox Agents guide](https://developers.openai.com/api/docs/guides/agents/sandboxes). The Agents SDK harness runs in the trusted application. Kubernetes provides sandbox compute through Agent Substrate, which manages the Actors that execute shell commands and own the workspace. `SubstrateSandboxClient` adapts this Kubernetes-backed execution environment to the SDK sandbox interface. The agents in this repository run on a [shared agent harness](agent-harness.md) built on that client: it runs each agent's loop and gives each conversation its own Actor.
 
 ![Harness separate from compute: the agent harness accesses trusted services while sandbox compute executes commands against a filesystem.](assets/harness-separate-from-compute.png)
 
@@ -54,6 +54,10 @@ size between read commands raises an error.
 Cancelling the Python coroutine does not guarantee cancellation of an in-flight HTTP request; the remote command has its own deadline. The demo server's Go `CommandContext` does not provide process-group management for shell grandchildren. File operations validate SDK workspace paths, but the shell intentionally has Actor-level access; workspace path validation is not an OS isolation boundary.
 
 ## Kubernetes-hosted harness
+
+The agent UIs run their harness on the operator's host. The Document
+Intelligence command-line workflow can also run as a Kubernetes Job, with the
+harness in a pod:
 
 The trusted application may itself run in a Kubernetes pod. The
 [agent Job](../examples/document_intelligence/deploy/README.md) receives `.env` configuration through

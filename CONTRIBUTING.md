@@ -7,10 +7,16 @@ Thank you for contributing to openai-agent-substrate. This project demonstrates 
 Fork the repository, clone your fork, and create a branch for your change. Use Python 3.11+ on macOS or Linux:
 
 ```sh
-uv sync --locked
+uv sync --locked --group ui
 uv run pytest -q
 uv run python -m examples.quickstart --backend local
 ```
+
+The repository is a uv workspace. Provider changes go in `sandbox/` (the
+`openai-agent-substrate` package), agent-runtime changes in `harness/`, and
+agents in `examples/`; boundary tests reject imports that cross the layers the
+wrong way. The `ui` group installs the harness, so its tests and the agents'
+UI tests run instead of being skipped.
 
 The default tests and scripted demo use loopback HTTP and temporary local workspaces. They require no API key or cluster. Detailed checks, including the actual upstream execution server, are in the [development guide](docs/development.md).
 
@@ -27,7 +33,7 @@ Explain the problem, resulting behavior, and how you verified the change. The CI
 Before submitting packaging changes, run:
 
 ```sh
-uv build --no-sources
+uv build --no-sources --package openai-agent-substrate --out-dir dist
 uv run --locked twine check dist/*
 ```
 

@@ -173,7 +173,7 @@ and the Actor receives neither (the first turn checks this).
 ## Tests
 
 ```sh
-uv sync --group ui
+uv sync --locked --group ui
 uv run pytest -q examples/document_intelligence/evals/test_ui.py examples/document_intelligence/evals/test_pdf.py
 ```
 

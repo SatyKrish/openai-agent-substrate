@@ -1,6 +1,7 @@
 # Examples
 
-Run examples from the repository root after `uv sync --locked`. They are source
+Run examples from the repository root after `uv sync --locked`; the agent UIs
+also need `--group ui`, which installs the shared harness. They are source
 applications and are not installed by the library wheel.
 
 | Example | Workflow |
@@ -13,9 +14,10 @@ applications and are not installed by the library wheel.
 Both agents run on the [shared harness](../harness/README.md) at the repository
 root, which runs the agent loop and gives each conversation its own sandbox.
 
-Document Intelligence keeps authored behavior in `agent/`, evaluations in
-`evals/`, application deployment in `deploy/`, and its ChatKit UI in `ui/`. It follows
-[Eve’s organization](https://eve.dev/docs/concepts/project-structure).
+Each agent keeps authored behavior in `agent/`, evaluations in `evals/`,
+application deployment in `deploy/`, and its ChatKit UI in `ui/`, following
+[Eve’s organization](https://eve.dev/docs/concepts/project-structure). In
+`agent/`, `spec.py` is what the harness reads beside the `SandboxAgent`.
 Reusable Kubernetes permissions and connection settings live in
 [the base deployment](../deploy/kubernetes/base/README.md). `scripts/` contains
 only the shell bootstrap and dispatches to the Python module CLIs.

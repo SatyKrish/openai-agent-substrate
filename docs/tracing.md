@@ -41,9 +41,9 @@ by digest in `examples/document_intelligence/deploy/jaeger.py`. It runs in names
 no harness Secret mount or service-account token. Traces disappear when the
 Jaeger pod restarts; this deployment is for local development.
 
-The [Document Intelligence UI](../examples/document_intelligence/ui/README.md)
-(`./scripts/local-kubernetes.sh ui`) records one trace per conversation turn and
-shows it beside the chat, live while the turn runs.
+The agent UIs on the [shared harness](agent-harness.md) (`ui` for Document
+Intelligence, `sre-ui` for the SRE agent) record one trace per conversation turn
+and show it beside the chat, live while the turn runs.
 
 In another terminal, expose the query UI on loopback:
 
@@ -96,7 +96,11 @@ An application can pass trusted custom span names through
 `configure_tracing(operation_names=("invoice.extract",))` or the processor's
 `operation_names` constructor argument. Only `sandbox.*` operations are built
 in. Unregistered custom names export as `agents.custom`, with their data omitted.
-Document Intelligence supplies its own operation names in the example.
+Document Intelligence supplies its own operation names in the example. On the
+harness, each agent's turns are traced as `NAME.turn` and its host check as
+`NAME.check` (for example `sre.turn`), and tools that run in the harness rather
+than the sandbox are registered with `configure_tracing(harness_tools=(...))`
+and export as `harness_tool.NAME`.
 
 ## Span hierarchy and content
 

@@ -9,7 +9,7 @@ description = "Reference implementation of a Kubernetes sandbox provider for the
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
-# README and license files are links to the repository root's copies.
+# License files are links to the repository root's copies; README.md is the package description.
 license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md", "licenses/substrate-sandbox-LICENSE"]
 keywords = ["openai", "agents", "kubernetes", "sandbox", "agent-substrate"]
 classifiers = [

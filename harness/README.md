@@ -58,15 +58,16 @@ SPEC = AgentSpec(
 )
 ```
 
-Then give the agent a sandbox profile and a UI: a launcher that builds
-`HarnessChatServer(SPEC, ...)`, an `app.py` that composes `http.chat_routes`, and
-a page. See [Document Intelligence](../examples/document_intelligence/README.md) and the
+Then give the agent a sandbox profile and a UI: a Dockerfile registered through
+`deploy/kubernetes/sandbox.py`, a launcher that builds `HarnessChatServer(SPEC, ...)`,
+an `app.py` that composes `http.chat_routes`, and a page. Its tests can use
+`harness.testing`: a scripted streaming model and ChatKit request helpers. See [Document Intelligence](../examples/document_intelligence/README.md) and the
 [SRE agent](../examples/sre/README.md).
 
 ## Tests
 
-`uv run --group ui pytest harness/tests` covers two messages sent to
+`uv run --locked --group ui pytest -q harness/tests` covers two messages sent to
 one conversation at once, waiting for and timing out on a full worker pool,
-history after a failed turn, and evidence from harness tools. They run against
+history after a failed turn, and evidence from parallel harness tools. They run against
 the local protocol simulator, or the upstream execution server when
 `SUBSTRATE_DEMO_BINARY` is set.
