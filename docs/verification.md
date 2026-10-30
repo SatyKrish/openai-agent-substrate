@@ -418,6 +418,20 @@ After the fixes the full local suite passed 133 tests (six opt-in or
 poppler-gated tests skipped), and the protocol suite, now including the harness
 and SRE tests, passed 81 against the upstream Go execution server.
 
+**Workspace layout.** The repository then became a uv workspace: the provider
+moved to `sandbox/` and the harness became its own package. No dependency
+version changed in the lock. The provider wheel holds only
+`openai_agent_substrate` and its license files, passes `twine check`, and passed
+the base-wheel smoke test without OpenTelemetry; its source distribution now
+contains the library only, not the repository's examples and guides. The
+harness builds as its own wheel. New boundary tests keep the provider from
+importing the harness and the harness from importing examples or `deploy/`. On
+Kind, the agent Job image rebuilt with the workspace layout (uv built the
+provider from `sandbox/` inside the image), the scripted agent Job completed
+with the host contract verified, both sandbox template names stayed the same,
+and both UIs served their earlier conversations. The full local suite passed
+135 tests and the upstream-server protocol suite 81.
+
 ## Limits of this verification
 
 These checks establish local functional execution and snapshot recovery on a single-node Kind cluster. They do not establish production availability, multi-tenant authorization policy, resistance to sandbox escape, host/node-loss durability, or model quality beyond the documented live fixture workflow. The local installation uses upstream development identities; shared deployments need an operator-defined identity and authorization configuration.

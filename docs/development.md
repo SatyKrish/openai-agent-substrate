@@ -89,11 +89,18 @@ processor in memory without a collector. See [the tracing guide](tracing.md).
 ## Build distributions
 
 ```sh
-uv build --no-sources
+uv build --no-sources --package openai-agent-substrate --out-dir dist
 uv run --locked twine check dist/*
 ```
 
-The wheel contains the SDK adapter, tracing, testing helpers, and license notices. It installs no console command or example application. The source distribution also contains the guides, examples, tests, diagram, and upstream execution server.
+The repository is a uv workspace with two packages: the provider library in
+`sandbox/` (`openai-agent-substrate`) and the shared agent harness in `harness/`
+(`openai-agent-substrate-harness`). Only the provider is meant for publishing.
+Its wheel and source distribution contain the SDK adapter, tracing, testing
+helpers, and license notices; they install no console command, harness or
+example application. Guides, examples, tests and the upstream execution server
+stay in the repository. `uv sync --locked` installs the provider for development;
+`--group ui` adds the harness and its ChatKit dependencies.
 
 The package CI also installs the base wheel in a fresh environment and runs
 `tests/packaging/core_smoke.py`. It verifies provider import and sandbox execution
@@ -111,17 +118,18 @@ folders, including the Document Intelligence Kubernetes checks.
 Base, agent Job, reader and Jaeger builder outputs are compared against saved
 pre-refactor manifests. These JSON files are test expectations; production code
 does not read them. Review intentional manifest changes alongside the expected
-output. The wheel ships only `src/`; the source distribution includes deployment
-modules, examples, tests and guides. No separate example pyproject or workspace
-is required while its dependencies match the library.
+output. Boundary tests keep the layers apart: the provider imports neither the
+harness nor repository code, and the harness imports neither the examples nor
+`deploy/`. The examples need no project file of their own; they run from the
+workspace root with its environment.
 
 ## Working on the provider
 
 - Keep Actor lifecycle and credentials in the trusted application.
-- Implement backend behavior in `src/openai_agent_substrate/`.
+- Implement backend behavior in `sandbox/src/openai_agent_substrate/`, and agent-runtime behavior in `harness/src/harness/`.
 - Keep domain agent definitions and skills under `examples/DOMAIN/agent/` and their evaluations under sibling `evals/`.
 - Keep runnable session utilities under `examples/quickstart/` and shared Kubernetes setup under `deploy/kubernetes/base/`. `scripts/` contains only the shell bootstrap.
-- Keep provider scripted models and loopback emulation under `src/openai_agent_substrate/testing/`.
+- Keep provider scripted models and loopback emulation under `sandbox/src/openai_agent_substrate/testing/`, and agent test helpers in `harness.testing`.
 - Put pure lifecycle tests in `tests/unit/` and HTTP/SDK contract tests in `tests/integration/`.
 - Keep unsupported capabilities explicit and preserve saved-session compatibility.
 - Update [architecture and limits](architecture.md) when behavior changes.

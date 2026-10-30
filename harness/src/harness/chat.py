@@ -43,8 +43,7 @@ from openai_agent_substrate import ActorCapacityError, SubstrateSandboxOptions
 from openai_agent_substrate.instrumentation import operation
 from openai_agent_substrate.tracing import otel_trace_id, tracing_enabled
 
-from .sandbox import WORKSPACE_ROOT
-from .spec import AgentSpec, Conversation, TurnContext
+from .spec import WORKSPACE_ROOT, AgentSpec, Conversation, TurnContext
 from .steps import ToolSteps, fenced, user_text
 from .uploads import UploadRejected, UploadStore, upload_name
 

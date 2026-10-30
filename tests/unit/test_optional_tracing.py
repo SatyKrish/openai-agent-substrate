@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 def test_provider_and_testing_helpers_import_without_otel_sdk_or_exporter():
-    source = Path(__file__).resolve().parents[2] / "src"
+    source = Path(__file__).resolve().parents[2] / "sandbox/src"
     code = """
 import importlib.abc
 import sys

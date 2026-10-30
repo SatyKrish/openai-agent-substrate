@@ -5,11 +5,11 @@ it runs an agent's loop with the OpenAI Agents SDK and gives each conversation
 its own Agent Substrate sandbox for tool execution. Agent examples supply a
 `SandboxAgent` and an `AgentSpec`, and keep their own UI. The harness has no page.
 
-It lives at the repository root beside `deploy/`: reusable code for this
-repository's agents, not part of the installed library. It listens on loopback
-only, has no sign-in, and keeps conversations in SQLite; the
-[design](../docs/agent-harness.md) lists what it needs before it could run in the
-cluster or ship as an optional part of the library.
+It is its own package in the repository's uv workspace
+(`openai-agent-substrate-harness`, imported as `harness`), depending on the
+provider in `../sandbox/`. `uv sync --group ui` installs it. It is not published:
+it listens on loopback only, has no sign-in, and keeps conversations in SQLite;
+the [design](../docs/agent-harness.md) lists what it needs first.
 
 | Module | Role |
 | --- | --- |
@@ -18,8 +18,11 @@ cluster or ship as an optional part of the library.
 | `uploads.py`, `steps.py` | ChatKit's two-phase uploads; tool calls as workflow steps |
 | `store.py`, `traces.py` | ChatKit's SQLite store; the Jaeger trace summary for a turn |
 | `http.py` | Routes an agent UI composes: ChatKit, uploads, thread state, recorded files, traces |
-| `sandbox.py` | A sandbox profile (image and size) built and registered as an ActorTemplate |
 | `settings.py` | `OPENAI_*` settings for UI launchers |
+| `testing.py` | A scripted streaming model and ChatKit request helpers for agents' tests |
+
+An agent's sandbox image and size are deploy-time concerns:
+`deploy/kubernetes/sandbox.py` builds and registers them.
 
 ## A turn
 

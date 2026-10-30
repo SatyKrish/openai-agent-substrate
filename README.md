@@ -20,8 +20,8 @@ execution. `--test` and `agent-test` select deterministic execution evaluations.
 See [its agent layout and live run guide](examples/document_intelligence/README.md).
 
 The wheel installs the provider library and reusable testing helpers.
-From a checkout, `pip install .` installs the provider without the OpenTelemetry
-SDK or OTLP exporter; use `pip install '.[tracing]'` for OTLP export. Run the
+From a checkout, `pip install ./sandbox` installs the provider without the OpenTelemetry
+SDK or OTLP exporter; use `pip install './sandbox[tracing]'` for OTLP export. Run the
 [quickstart](examples/quickstart/README.md) from a source checkout; the former
 `openai-agent-substrate` console command has been removed.
 
@@ -135,15 +135,18 @@ updating source. The exporter stays in the trusted harness.
 ## Repository layout
 
 ```text
-src/openai_agent_substrate/  Library: SDK provider, transport, lifecycle, tracing
-  testing/                  Scripted model and loopback execution helpers
-harness/                    Shared agent harness: the agent loop and one sandbox per conversation
-examples/                   Quickstart and the agents that run on the harness; not installed by the wheel
-tests/                      Unit and integration tests
+pyproject.toml              uv workspace root: dev tools and test settings, no package
+sandbox/                    The provider library (openai-agent-substrate), the only published wheel
+  src/openai_agent_substrate/  SDK provider, transport, lifecycle, tracing
+    testing/                Scripted model and loopback execution helpers
+harness/                    Shared agent harness package: the agent loop, one sandbox per conversation
+  src/harness/              ChatKit runtime, uploads, evidence, checks, routes, test helpers
+examples/                   The agents that run on the harness, and the provider quickstart
+tests/                      Provider unit and integration tests, deployment and boundary checks
 docs/                       Architecture, deployment, usage, and development guides
   assets/                   Documentation images
 scripts/                    Local Kind bootstrap and CLI dispatch
-deploy/kubernetes/base/     Reusable permissions, connection settings, and PVC
+deploy/kubernetes/           Reusable permissions, connection settings, PVC, and sandbox templates
 third_party/                Pinned upstream execution server and its license
 .github/                    CI, dependency updates, and contribution templates
 ```

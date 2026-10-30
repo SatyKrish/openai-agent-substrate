@@ -32,7 +32,7 @@ used by `SandboxAgent`; setting a URL does not establish endpoint compatibility.
 The [OpenAI SDK reads API configuration from the environment](https://developers.openai.com/api/docs/quickstart#create-and-export-an-api-key).
 This application's pod entrypoint selects the model from `OPENAI_MODEL`.
 `.env` is Git-ignored and excluded from image build contexts. `.env.example`
-contains placeholders and is included in the source distribution.
+contains placeholders.
 
 ## Prepare the local cluster and agent
 

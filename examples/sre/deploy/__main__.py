@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 
 from deploy.kubernetes.base import resources as base
-from harness import sandbox as profiles
+from deploy.kubernetes import sandbox as profiles
 
 from . import access, demo
 

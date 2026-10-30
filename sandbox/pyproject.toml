@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openai-agent-substrate"
+version = "0.1.0"
+description = "Reference implementation of a Kubernetes sandbox provider for the OpenAI Agents SDK using Agent Substrate"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+# README and license files are links to the repository root's copies.
+license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md", "licenses/substrate-sandbox-LICENSE"]
+keywords = ["openai", "agents", "kubernetes", "sandbox", "agent-substrate"]
+classifiers = [
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Operating System :: POSIX",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "openai-agents==0.24.0",
+]
+
+[project.optional-dependencies]
+tracing = [
+    "opentelemetry-exporter-otlp-proto-http>=1.39,<2",
+    "opentelemetry-sdk>=1.39,<2",
+]
+
+[project.urls]
+Homepage = "https://github.com/SatyKrish/openai-agent-substrate"
+Documentation = "https://github.com/SatyKrish/openai-agent-substrate/tree/main/docs"
+Repository = "https://github.com/SatyKrish/openai-agent-substrate"
+Issues = "https://github.com/SatyKrish/openai-agent-substrate/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]

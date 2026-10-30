@@ -18,7 +18,7 @@ from chatkit.types import ThreadMetadata  # noqa: E402
 from harness.chat import HarnessChatServer  # noqa: E402
 from harness.spec import AgentSpec, Conversation, TurnContext  # noqa: E402
 from harness.store import SQLiteStore  # noqa: E402
-from harness.tests.scripted import Calls, shell  # noqa: E402
+from harness.testing import Calls, events, message, shell, titles  # noqa: E402
 from openai_agent_substrate import ActorCapacityError, SubstrateSandboxClient, SubstrateSandboxOptions  # noqa: E402
 
 
@@ -65,30 +65,6 @@ def make_chat(server, tmp_path, model, *, control=None, **options):
     store = SQLiteStore(tmp_path / "threads.sqlite3")
     return HarnessChatServer(SPEC, store, client, model=model, template="test", output_dir=tmp_path / "threads",
                              workspace_root=str(server.root), model_label="scripted", **options)
-
-
-def message(text):
-    return {"content": [{"type": "input_text", "text": text}], "attachments": [], "inference_options": {}}
-
-
-async def events(chat, payload):
-    result = await chat.process(json.dumps(payload), {})
-    collected = []
-    async for chunk in result:
-        collected += [json.loads(line[6:]) for line in chunk.decode().splitlines() if line.startswith("data: ")]
-    return collected
-
-
-def titles(stream):
-    found = []
-    for event in stream:
-        item = event.get("item") or {}
-        if item.get("type") == "workflow":
-            found += [task.get("title") for task in item["workflow"]["tasks"]]
-        task = (event.get("update") or {}).get("task")
-        if task:
-            found.append(task.get("title"))
-    return found
 
 
 async def new_thread(chat, text="First question"):

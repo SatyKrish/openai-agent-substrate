@@ -80,7 +80,8 @@ def build(args):
         target = context / name
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(ROOT / name, target)
-    for name in ["src", "examples"]:
+    # Both workspace members (uv sync --frozen reads every member's project file) and the examples.
+    for name in ["sandbox", "harness", "examples"]:
         target = context / name
         if target.exists():
             shutil.rmtree(target)

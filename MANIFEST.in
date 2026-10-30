@@ -1,8 +1,0 @@
-include .substrate-revision .go-version conftest.py .dockerignore .env.example README.md LICENSE NOTICE THIRD_PARTY_NOTICES.md CONTRIBUTING.md SECURITY.md uv.lock
-recursive-include docs *.md *.png
-recursive-include examples *.py *.md *.csv *.json *.Dockerfile *.html *.css *.js LICENSE
-recursive-include tests *.py *.json
-recursive-include third_party *.go *.md LICENSE
-recursive-include scripts *.sh
-recursive-include deploy *.py *.md
-recursive-include harness *.py *.md

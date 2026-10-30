@@ -1,6 +1,9 @@
 # Copyright 2026 openai-agent-substrate contributors
 # SPDX-License-Identifier: Apache-2.0
-"""An agent's sandbox profile, built as an image and registered as an immutable ActorTemplate."""
+"""An agent's sandbox profile, built as an image and registered as an immutable ActorTemplate.
+
+Deploy-time code: the harness runtime never imports it.
+"""
 
 from __future__ import annotations
 
@@ -9,8 +12,11 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+from .base.resources import checked
+
+ROOT = Path(__file__).resolve().parents[2]
 # The ActorTemplate mounts a per-Actor durableDir volume here, so the workspace lives as long as the Actor.
+# The harness uses the same root (harness.spec.WORKSPACE_ROOT).
 WORKSPACE_ROOT = "/workspace"
 MIB = 1024 * 1024
 
@@ -44,8 +50,6 @@ def build_template(profile: SandboxProfile, image: str, atespace: str) -> dict:
 
 def deploy(profile: SandboxProfile, args) -> dict:
     """Build and push the image, register its template if new, and record it in ``args.output_dir``."""
-    from deploy.kubernetes.base.resources import checked
-
     kubectl = ["kubectl", "ate", "--context", args.context]
     if args.kubeconfig:
         kubectl += ["--kubeconfig", str(args.kubeconfig)]

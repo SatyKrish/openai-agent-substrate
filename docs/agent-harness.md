@@ -12,8 +12,8 @@ writing the agent, not another harness.
 | Part | Owns | Code |
 | --- | --- | --- |
 | **Agent example** | Instructions, skills, tools, the starting workspace, the sandbox image and size, host checks of its outputs, and its own UI | `examples/document_intelligence/`, `examples/sre/` |
-| **Harness** | The SDK agent loop and history; one sandbox session per conversation; locking, waiting for sandbox capacity, turn records, uploads, collecting outputs, recording tool evidence, running the agent's checks, tracing; the ChatKit protocol and HTTP helpers that agent UIs build on | `harness/` at the repository root |
-| **Sandbox** | The SDK sandbox client for Agent Substrate, Actor lifecycle, and registering an agent's image and size as an ActorTemplate | `src/openai_agent_substrate/`, `harness/sandbox.py` |
+| **Harness** | The SDK agent loop and history; one sandbox session per conversation; locking, waiting for sandbox capacity, turn records, uploads, collecting outputs, recording tool evidence, running the agent's checks, tracing; the ChatKit protocol and HTTP helpers that agent UIs build on | `harness/` (the `openai-agent-substrate-harness` package) |
+| **Sandbox** | The SDK sandbox client for Agent Substrate, Actor lifecycle, and registering an agent's image and size as an ActorTemplate | `sandbox/` (the `openai-agent-substrate` package), `deploy/kubernetes/sandbox.py` |
 
 ```mermaid
 flowchart LR
@@ -113,16 +113,18 @@ and a demo namespace with a crash-looping and an unpullable workload.
 ## Layout
 
 ```text
-src/openai_agent_substrate/   Sandbox provider: ActorCapacityError added
-harness/                      Shared harness (no UI pages), outside the wheel like deploy/
+pyproject.toml                uv workspace root
+sandbox/                      Provider package: src/openai_agent_substrate (ActorCapacityError added)
+harness/                      Harness package (no UI pages): src/harness/
   spec.py                     AgentSpec, Conversation, TurnContext
   chat.py                     ChatKit adapter and conversation runtime
   uploads.py, steps.py        Upload staging; tool calls as workflow steps
   store.py, traces.py         ChatKit's SQLite store; Jaeger trace summary
   http.py                     Routes an agent UI composes
-  sandbox.py                  Sandbox profile to ActorTemplate
   settings.py                 OPENAI_* settings for UI launchers
-  tests/                      Lock and reload, capacity waits, history, evidence
+  testing.py                  Scripted model and ChatKit helpers for agents' tests
+harness/tests/                Lock and reload, capacity waits, history, evidence
+deploy/kubernetes/sandbox.py  Sandbox profile to ActorTemplate (deploy time)
 examples/document_intelligence/
   agent/                      SandboxAgent, skills, spec, PDF processor, citation checks
   ui/                         Its page, routes, card and launcher (port 8000)
@@ -132,12 +134,13 @@ examples/sre/
   ui/                         Its page, routes, card and launcher (port 8001)
 ```
 
-The harness sits at the repository root, beside `deploy/`, rather than under
-`examples/`: it is the platform the agents run on and will grow. It is not part
-of the installed library yet, because it listens on loopback only, has no
-sign-in and keeps conversations in SQLite. Once it runs in the cluster with
-sign-in and Postgres, it can ship as an optional extra
-(`openai-agent-substrate[harness]`).
+The repository is a uv workspace. The provider (`sandbox/`) and the harness
+(`harness/`) are separate packages, so their boundary is a dependency: the
+provider cannot import the harness or ChatKit. Only the provider is meant for
+publishing today: the harness listens on loopback only, has no sign-in and keeps
+conversations in SQLite. Once it runs in the cluster with sign-in and Postgres,
+it can be published on its own. The agents stay in `examples/`: a top-level
+`agents/` package would shadow the Agents SDK, whose import name is `agents`.
 
 ## Not in this change
 

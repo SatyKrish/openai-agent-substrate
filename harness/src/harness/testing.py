@@ -1,6 +1,6 @@
 # Copyright 2026 openai-agent-substrate contributors
 # SPDX-License-Identifier: Apache-2.0
-"""A streaming model that makes one scripted tool call per model call, then answers."""
+"""Test helpers for agents on the harness: a scripted streaming model and ChatKit request helpers."""
 
 from __future__ import annotations
 
@@ -64,3 +64,30 @@ class Calls(Model):
             sequence += 2
         yield ResponseCompletedEvent.model_construct(type="response.completed", sequence_number=sequence, response=Response.model_construct(
             id=f"resp_{uuid.uuid4().hex}", output=list(response.output), usage=None, object="response", model="scripted"))
+
+
+def message(text: str, attachments=()) -> dict:
+    """A ChatKit user message input."""
+    return {"content": [{"type": "input_text", "text": text}], "attachments": list(attachments), "inference_options": {}}
+
+
+async def events(chat, payload: dict) -> list[dict]:
+    """Send one ChatKit request to a harness server and collect its streamed events."""
+    result = await chat.process(json.dumps(payload), {})
+    collected = []
+    async for chunk in result:
+        collected += [json.loads(line[6:]) for line in chunk.decode().splitlines() if line.startswith("data: ")]
+    return collected
+
+
+def titles(stream: list[dict]) -> list[str]:
+    """The titles of every workflow step in a stream, in order."""
+    found = []
+    for event in stream:
+        item = event.get("item") or {}
+        if item.get("type") == "workflow":
+            found += [task.get("title") for task in item["workflow"]["tasks"]]
+        task = (event.get("update") or {}).get("task")
+        if task:
+            found.append(task.get("title"))
+    return found

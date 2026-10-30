@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openai-agent-substrate-harness"
+version = "0.1.0"
+description = "Runs OpenAI Agents SDK SandboxAgents with one Agent Substrate sandbox per ChatKit conversation"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+dependencies = [
+    "openai-agent-substrate",
+    "openai-chatkit==1.6.5",
+    "python-multipart>=0.0.20",
+    "starlette>=1,<2",
+    "uvicorn>=0.30,<1",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

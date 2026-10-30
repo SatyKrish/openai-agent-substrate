@@ -8,7 +8,7 @@ import argparse
 from pathlib import Path
 
 from harness.settings import live_model, load_env_file
-from harness.sandbox import deployed_template
+from deploy.kubernetes.sandbox import deployed_template
 
 ROOT = Path(__file__).resolve().parents[3]
 DEPLOYMENT_DIR = ROOT / "artifacts/examples/sre/deployment"

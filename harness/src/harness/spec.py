@@ -14,6 +14,8 @@ from agents.sandbox import Manifest, SandboxAgent
 from chatkit.types import ThreadMetadata
 
 MIB = 1024 * 1024
+# The sandbox template mounts each Actor's durableDir volume here (deploy/kubernetes/sandbox.py).
+WORKSPACE_ROOT = "/workspace"
 
 
 @dataclass

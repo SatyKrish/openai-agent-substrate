@@ -1,61 +1,28 @@
-[build-system]
-requires = ["setuptools>=80"]
-build-backend = "setuptools.build_meta"
+# Workspace root: no package of its own. The provider library is sandbox/, the
+# shared agent harness is harness/, and the agents in examples/ run from here.
+[tool.uv.workspace]
+members = ["sandbox", "harness"]
 
-[project]
-name = "openai-agent-substrate"
-version = "0.1.0"
-description = "Reference implementation of a Kubernetes sandbox provider for the OpenAI Agents SDK using Agent Substrate"
-readme = "README.md"
-requires-python = ">=3.11"
-license = "Apache-2.0"
-license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md", "third_party/substrate-sandbox/LICENSE", "examples/document_intelligence/agent/sandbox/workspace/inputs/LICENSE"]
-keywords = ["openai", "agents", "kubernetes", "sandbox", "agent-substrate"]
-classifiers = [
-    "Intended Audience :: Developers",
-    "Programming Language :: Python :: 3",
-    "Operating System :: POSIX",
-    "Topic :: Software Development :: Libraries :: Python Modules",
-]
-dependencies = [
-    "openai-agents==0.24.0",
-]
-
-[project.optional-dependencies]
-tracing = [
-    "opentelemetry-exporter-otlp-proto-http>=1.39,<2",
-    "opentelemetry-sdk>=1.39,<2",
-]
-
-[project.urls]
-Homepage = "https://github.com/SatyKrish/openai-agent-substrate"
-Documentation = "https://github.com/SatyKrish/openai-agent-substrate/tree/main/docs"
-Repository = "https://github.com/SatyKrish/openai-agent-substrate"
-Issues = "https://github.com/SatyKrish/openai-agent-substrate/issues"
+[tool.uv.sources]
+openai-agent-substrate = { workspace = true }
+openai-agent-substrate-harness = { workspace = true }
 
 [dependency-groups]
 dev = [
-    "opentelemetry-exporter-otlp-proto-http>=1.39,<2",
+    "openai-agent-substrate[tracing]",
     "mypy>=2.4.1",
     "pytest>=9.2,<10",
     "pytest-asyncio>=1.4,<2",
     "ruff>=0.17.3",
     "twine>=6,<7",
 ]
+# The harness and its ChatKit UI dependencies, for the agent UIs and their tests.
 ui = [
-    "openai-chatkit==1.6.5",
-    "opentelemetry-exporter-otlp-proto-http>=1.39,<2",
-    "python-multipart>=0.0.20",
-    "starlette>=1,<2",
-    "uvicorn>=0.30,<1",
+    "openai-agent-substrate-harness",
 ]
-
-[tool.setuptools.packages.find]
-where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "harness/tests", "examples/document_intelligence/evals", "examples/sre/evals", "examples/quickstart/evals"]
-pythonpath = ["src"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 
@@ -68,4 +35,4 @@ select = ["E9", "F"]
 [tool.mypy]
 python_version = "3.11"
 follow_imports = "silent"
-files = ["src/openai_agent_substrate/transport.py", "src/openai_agent_substrate/proxy.py", "src/openai_agent_substrate/lifecycle.py"]
+files = ["sandbox/src/openai_agent_substrate/transport.py", "sandbox/src/openai_agent_substrate/proxy.py", "sandbox/src/openai_agent_substrate/lifecycle.py"]

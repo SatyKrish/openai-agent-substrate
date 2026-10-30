@@ -4,7 +4,7 @@
 
 from pathlib import Path
 
-from harness import sandbox as profiles
+from deploy.kubernetes import sandbox as profiles
 
 PROFILE = profiles.SandboxProfile("document-intelligence", Path(__file__).resolve().parent / "sandbox.Dockerfile")
 

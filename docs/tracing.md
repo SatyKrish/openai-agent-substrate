@@ -12,7 +12,7 @@ The OpenTelemetry SDK and OTLP exporter are optional dependencies:
 
 ```sh
 # From the repository root
-pip install '.[tracing]'
+pip install './sandbox[tracing]'
 ```
 
 The provider and its SDK-only instrumentation work without this extra. The
