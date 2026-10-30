@@ -6,6 +6,12 @@ Use Python 3.11 or later on macOS or Linux. Install the project and its developm
 uv sync --locked
 ```
 
+The Document Intelligence UI and its tests need the `ui` dependency group (ChatKit, Starlette and uvicorn); CI installs it. Without it, the UI tests are skipped:
+
+```sh
+uv sync --locked --group ui
+```
+
 The default tests and demo use a deterministic model and temporary local workspaces. They require no OpenAI API key or Kubernetes cluster. Loopback sockets must be allowed in your development environment.
 
 ## Tests and execution checks

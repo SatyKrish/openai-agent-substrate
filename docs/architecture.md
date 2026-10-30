@@ -43,7 +43,7 @@ Cancelling the Python coroutine does not guarantee cancellation of an in-flight 
 ## Kubernetes-hosted harness
 
 The trusted application may itself run in a Kubernetes pod. The
-[agent Job](../deploy/kubernetes/README.md) receives `.env` configuration through
+[agent Job](../examples/document_intelligence/deploy/README.md) receives `.env` configuration through
 `envFrom.secretRef` and a read-only Secret volume. The SDK model connection,
 Kubernetes ServiceAccount, and Substrate CLI remain in that harness pod. The
 untrusted execution Actor is a separate workload with its own image and workspace.
@@ -58,6 +58,29 @@ setup. Namespace-wide pod listing remains necessary for the upstream router
 selector; direct pod reads and forwarding are restricted to the named routers.
 The local run helpers refresh this allowlist before each Job. Direct helper users
 should run `python -m deploy.kubernetes.base resources` after router rollouts.
+
+## Workspace persistence and conversations
+
+The provider maps the SDK workspace root to a directory in the Actor and leaves
+persistence to Substrate: closing a session suspends the Actor, and resuming it
+restores what the template's snapshots hold. A template can make the workspace
+independent of process memory by mounting a per-Actor `durableDir` volume at the
+workspace root. The Document Intelligence template does this at `/workspace`:
+the volume is created with the Actor, kept by every snapshot across suspend and
+resume, and deleted with the Actor. Kubernetes ephemeral volumes are not an
+option here: an ActorTemplate mounts only `durableDir`, external CSI (a preview
+feature) or `systemInfo` volumes, and a worker pod's emptyDir would not follow
+an Actor that resumes on another worker.
+
+A multi-turn application keeps one Actor per conversation. It creates the Actor
+on the first message, stores the serialized session state with the
+conversation, resumes the Actor for each later message, and deletes it with the
+conversation. Different conversations run concurrently in separate Actors and
+cannot see each other's files; turns within one conversation must not overlap
+(see the table above). Files added later, such as user uploads, go through the
+provider's file API (1 MiB per file, chunked writes) into the same volume. The
+[Document Intelligence UI](../examples/document_intelligence/ui/README.md)
+implements this pattern with ChatKit threads.
 
 ## Domain skills and code execution
 

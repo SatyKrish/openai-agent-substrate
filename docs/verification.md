@@ -16,7 +16,7 @@ Date: 2026-10-29.
 
 | Check | Result |
 | --- | --- |
-| Default unit/integration suite | 89 passed; five real-cluster checks are opt-in |
+| Default unit/integration suite, with the `ui` group | 97 passed; five real-cluster checks are opt-in |
 | Unit/integration suite using the actual upstream Go execution server (before tracing change) | 63 passed; four real-cluster tests skipped |
 | Opt-in Kubernetes integration test | Passed against a fresh real Actor |
 | SDK scripted workflow on Kubernetes | Passed: shell tool execution, report creation, serialized session resume, and preserved edits |
@@ -28,6 +28,9 @@ Date: 2026-10-29.
 | Live OpenAI Document Intelligence on Kubernetes | Passed with `gpt-6.1-terra`: seven API responses, native skill/shell/patch tools, model-authored Python, independent artifact validation, and Actor cleanup |
 | Full suite with all local Kubernetes and Jaeger checks enabled | 94 passed, no skips; includes the Secret-backed harness and Jaeger query API |
 | Source distribution and wheel | Built successfully; `twine check` passed |
+| ChatKit UI, multi-turn on Kubernetes | Passed with `gpt-6.1-terra`: three turns on one Actor across a UI server restart, live per-turn traces, and thread deletion removing the Actor |
+| Per-Actor workspace volume | Passed: a `durableDir` mounted at `/workspace` kept a file across suspend and resume; the sample workflow passed on the new template |
+| Uploads and parallel conversations | Passed with `gpt-6.1-terra`: two conversations with different uploaded documents ran concurrently in separate Actors, each saw only its own files, all quotes matched, and follow-ups resumed the right Actor |
 
 The Kubernetes path uses owned loopback `kubectl ate proxy actor` processes and authenticated Substrate ingress. The scripted infrastructure tests exercise the real SDK runner and actual sandbox execution without model calls. The separate live OpenAI run is recorded below.
 
@@ -212,8 +215,42 @@ with five cluster checks skipped. The selected upstream Go-server suite passed
 command, tracing description, package description and source manifest patterns
 were corrected. These checks made no new model API calls.
 
+## Document Intelligence UI
+
+The ChatKit UI ran on the host as the trusted harness, against the Kind cluster,
+with `gpt-6.1-terra` and the local Jaeger collector.
+
+- **Multi-turn:** turn 1 created an Actor and passed the host contract check in
+  55.3 s (7 model calls, 62,184 tokens). Turn 2 resumed the same Actor in 0.9 s
+  and wrote a new output that the panel marked as not host-checked. After a UI
+  server restart, the thread reloaded from SQLite and turn 3 resumed the same
+  Actor and still saw turn 2's file. Jaeger held one trace per turn, with
+  `sandbox.create` only in turn 1. Deleting the thread from ChatKit's history
+  deleted the Actor (`NotFound`).
+- **Workspace volume:** the sandbox template `document-intelligence-272cce09f181`
+  mounts a `durableDir` at `/workspace`. A direct provider check showed it as a
+  separate mount, wrote a file, suspended and resumed the Actor, and read the
+  file back. Creating an Actor with an empty workspace took 5.8 s, against
+  about 14 s when the sample reports are staged. The key-free sample workflow
+  passed its host contract check on this template.
+- **Parallel conversations with uploads:** conversation A uploaded one Markdown
+  report and conversation B a Markdown report and a CSV, all fictional. Their
+  first turns overlapped for 45 s and their follow-ups for 9.9 s, in two
+  separate Actors whose traces started in the same second. Asked to list every
+  visible file, each agent found only its own uploads. The host citation check
+  passed for every quote (2 in A, 4 in B including the CSV), and the computed
+  figures matched the documents. Both Actors were suspended between turns and
+  deleted with their threads, along with the host copies.
+- **Browser upload:** ChatKit's own two-phase uploader sent a file to the UI
+  server, and the turn passed the citation check. This run found that ChatKit
+  refuses to start with attachments enabled unless `uploadStrategy` is set, and
+  that uploads-only threads must tell the agent not to run the samples-only
+  verifier; both are fixed.
+
 ## Limits of this verification
 
 These checks establish local functional execution and snapshot recovery on a single-node Kind cluster. They do not establish production availability, multi-tenant authorization policy, resistance to sandbox escape, host/node-loss durability, or model quality beyond the documented live fixture workflow. The local installation uses upstream development identities; shared deployments need an operator-defined identity and authorization configuration.
+
+The UI checks drove ChatKit's uploader from a script rather than its file picker, used only localhost (ChatKit's `local-dev` domain key), and loaded ChatKit's unversioned script from OpenAI's CDN. Parallel isolation was shown for two conversations on one node, not under load.
 
 The existing public CI also exercises the key-free paths on Python 3.11–3.14. See [local-kubernetes.md](local-kubernetes.md) to repeat the real-cluster checks.

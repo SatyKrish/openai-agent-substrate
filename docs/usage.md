@@ -81,6 +81,8 @@ async with resumed:
 
 Keep SDK conversation history or `RunState` separately. Actor suspension preserves compute/workspace state, not the external SDK harness. `examples/quickstart/main.py` shows carrying `result.to_input_list()` into the next run.
 
+For a chat application, keep one Actor per conversation: create it on the first message, store the serialized state and `result.to_input_list()` with the conversation, resume the Actor for each later message, and delete it when the conversation is deleted. Serialize turns within one conversation; separate conversations can run concurrently. The [Document Intelligence UI](../examples/document_intelligence/ui/README.md) implements this with ChatKit, and [architecture](architecture.md#workspace-persistence-and-conversations) covers the workspace volume that makes it durable.
+
 For complete runnable examples, see [examples/README.md](../examples/README.md).
 
 The generic retained-session utility is `python -m examples.quickstart.resume`:

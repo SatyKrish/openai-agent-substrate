@@ -65,7 +65,9 @@ See [tracing and independent verification](tracing.md) for the complete workflow
 
 For multi-turn testing, `./scripts/local-kubernetes.sh ui` serves the
 [Document Intelligence UI](../examples/document_intelligence/ui/README.md) on
-<http://localhost:8000> and shows each turn's trace beside the conversation.
+<http://localhost:8000> and shows each turn's files and trace beside the
+conversation. Each conversation gets its own Actor and workspace volume, and
+accepts `.md`, `.txt` and `.csv` uploads. The UI uses the live model from `.env`.
 
 ## Stop and restart
 

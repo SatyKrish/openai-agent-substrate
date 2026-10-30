@@ -54,7 +54,7 @@ uv run python -m examples.quickstart --backend substrate \
 
 This creates a uniquely named Actor, exercises shell execution and suspend/resume, and deletes the Actor when finished. Add `--keep-actor` to retain the workspace and save session state. For live model execution, set the API key in the host environment and select a model with `--model YOUR_OPENAI_MODEL_ID`.
 
-The provider is pinned to `openai-agents==0.24.0`. Real Actor execution, authenticated routing, suspend/resume, and external snapshot recovery have been verified on local ARM64 Kind with gVisor. A live Document Intelligence run with `gpt-6.1-terra` also passed through a Secret-backed Kubernetes harness and Substrate Actor. Production isolation properties remain unverified. See the [verification record](docs/verification.md).
+The provider is pinned to `openai-agents==0.24.0`. Real Actor execution, authenticated routing, suspend/resume, and external snapshot recovery have been verified on local ARM64 Kind with gVisor. A live Document Intelligence run with `gpt-6.1-terra` also passed through a Secret-backed Kubernetes harness and Substrate Actor. The ChatKit UI ran live multi-turn conversations, including two concurrent conversations with different uploaded documents, each in its own Actor and workspace volume. Production isolation properties remain unverified. See the [verification record](docs/verification.md).
 
 ## OpenAI configuration in a Kubernetes agent pod
 
@@ -95,6 +95,13 @@ uv run python -m examples.document_intelligence --test
 Both commands use fixed model decisions with real SDK tool execution. Select a
 live OpenAI model on Kubernetes using the example's documented `--model` option.
 
+For multi-turn testing with the live model, `./scripts/local-kubernetes.sh ui`
+serves a ChatKit conversation beside an artifact panel on <http://localhost:8000>.
+Each conversation is one Actor with its own workspace volume: the first message
+creates it, later messages resume it, and deleting the conversation deletes it.
+Attach `.md`, `.txt` or `.csv` files and inspect every turn's files and Jaeger
+trace. See the [UI guide](examples/document_intelligence/ui/README.md).
+
 ## Tracing
 
 Export SDK model/tool spans and sandbox execution/lifecycle spans to local Jaeger:
@@ -130,8 +137,9 @@ third_party/                Pinned upstream execution server and its license
 - [Local Kubernetes setup and tests](docs/local-kubernetes.md)
 - [Existing-cluster setup](docs/deployment.md)
 - [SDK integration and session resume](docs/usage.md)
-- [Runnable examples](examples/README.md)
-- [Development and verification](docs/development.md)
+- [Tracing with Jaeger](docs/tracing.md)
+- [Runnable examples](examples/README.md) and the [Document Intelligence UI](examples/document_intelligence/ui/README.md)
+- [Development](docs/development.md) and the [verification record](docs/verification.md)
 
 ## Contributing
 
