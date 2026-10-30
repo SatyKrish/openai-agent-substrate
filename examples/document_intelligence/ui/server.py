@@ -44,6 +44,7 @@ from openai_agent_substrate.tracing import otel_trace_id, tracing_enabled
 from ..agent.agent import build_agent
 from ..agent.lib.verify import OUTPUTS, verify_artifacts
 from ..agent.sandbox.sandbox import ACTOR_WORKSPACE, build_manifest, stage_inputs
+from . import pdf
 
 TRACE_OPERATIONS = ("document_intelligence.turn", "document_intelligence.verify")
 FOLLOW_UP_INSTRUCTIONS = """
@@ -51,7 +52,8 @@ This is a multi-turn conversation in one persistent workspace. Files from earlie
 turns stay in inputs/, work/ and output/. For a follow-up question, start from the
 existing files and the cited sources, write new code only when the question needs
 it, and save any new result in output/ under a descriptive name. Do not rewrite
-comparison.md, kpis.csv or result.json unless the user asks for it.
+comparison.md, kpis.csv or result.json unless the user asks for it, except to add
+citations for uploaded documents as described below.
 
 The user may upload documents. They arrive in inputs/uploads/, listed with their
 SHA-256 in inputs/uploads/MANIFEST.json. The document-analysis skill's extractor
@@ -59,9 +61,19 @@ supports only the bundled sample reports: analyze uploaded documents with the sh
 and Python instead. When you report facts from uploaded documents, also write
 output/result.json with a "citations" list of {"document_id": "<file name>",
 "quote": "<text copied exactly from that file>"}; the host checks every quote
-against its retained source bytes. Use a full inputs/ path when file names or
+against its retained source bytes. In a follow-up turn, add the new answer's
+citations to that list and keep the earlier ones. Use a full inputs/ path when file names or
 short document IDs are ambiguous. Mixed reports may cite both the sample reports
 and uploads; their calculated figures are not covered by the citation check.
+
+Uploaded PDFs are already processed: inputs/derived/<file name>/page-NNN.txt holds
+each page's extracted text and page-NNN.jpg its image (MANIFEST.json lists the
+pages with a text layer). Read the text first. Use the view_image tool on a page
+image for tables, charts, or pages with little or no text. Cite a PDF with
+{"document_id": "<file name>", "page": <page number>, "quote": "<exact text>"};
+the host checks the quote against that page's extracted text. For text you could
+only read from a page image, add "source": "image"; those citations are shown
+for a person to review instead of being checked.
 """.strip()
 UPLOADS_ONLY_INSTRUCTIONS = """
 This workspace has no sample reports: its sources are the uploaded documents in
@@ -69,8 +81,8 @@ inputs/uploads/. Do not run the document-analysis skill's documents.py extract o
 verify commands; they accept only the bundled sample reports. Check your own
 figures and citations against the uploaded files instead.
 """.strip()
-UPLOAD_TYPES = {".md": "text/markdown", ".txt": "text/plain", ".csv": "text/csv"}
-MAX_UPLOAD_BYTES = 1024 * 1024
+UPLOAD_TYPES = {".md": "text/markdown", ".txt": "text/plain", ".csv": "text/csv", ".pdf": "application/pdf"}
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 MAX_UPLOADS_PER_MESSAGE = 5
 _COLLECTED = re.compile(r"(output|work)/[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 _ATTACHMENT_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
@@ -90,7 +102,7 @@ def upload_name(name: str) -> str:
     stem, dot, extension = base.rpartition(".")
     extension = "." + extension.lower() if dot else ""
     if extension not in UPLOAD_TYPES:
-        raise UploadRejected("Upload Markdown, text or CSV files (.md, .txt, .csv).")
+        raise UploadRejected("Upload PDF, Markdown, text or CSV files (.pdf, .md, .txt, .csv).")
     stem = re.sub(r"[^A-Za-z0-9._-]+", "-", stem).strip(".-")[:80] or "document"
     return stem + extension
 
@@ -119,7 +131,7 @@ class UploadStore(AttachmentStore[dict]):
     async def create_attachment(self, input: AttachmentCreateParams, context: dict) -> Attachment:
         name = upload_name(input.name)
         if input.size > MAX_UPLOAD_BYTES:
-            raise UploadRejected("Uploads are limited to 1 MiB per file.")
+            raise UploadRejected("Uploads are limited to 10 MiB per file.")
         self._prune()
         attachment_id = self.generate_attachment_id(input.mime_type, context)
         descriptor = AttachmentUploadDescriptor(url=f"{self.base_url}/uploads/{attachment_id}", method="PUT")
@@ -132,11 +144,15 @@ class UploadStore(AttachmentStore[dict]):
         if attachment.upload_descriptor is None:
             raise UploadRejected("This upload has already been received.")
         if len(data) > MAX_UPLOAD_BYTES:
-            raise UploadRejected("Uploads are limited to 1 MiB per file.")
-        try:
-            data.decode("utf-8")
-        except UnicodeDecodeError:
-            raise UploadRejected("Uploads must be UTF-8 text.") from None
+            raise UploadRejected("Uploads are limited to 10 MiB per file.")
+        if attachment.name.endswith(".pdf"):
+            if not data.startswith(b"%PDF-"):
+                raise UploadRejected("This file is not a PDF.")
+        else:
+            try:
+                data.decode("utf-8")
+            except UnicodeDecodeError:
+                raise UploadRejected("Text uploads must be UTF-8.") from None
         partial = target.with_suffix(".part")
         partial.write_bytes(data)
         partial.replace(target)
@@ -374,13 +390,16 @@ class DocumentChatServer(ChatKitServer[dict]):
                 index = len(workflow.workflow.tasks) - 1
                 yield ThreadItemUpdatedEvent(item_id=workflow.id, update=WorkflowTaskAdded(task=copying, task_index=index))
                 added = await self._store_uploads(session, thread, turn, attachments, context_.request_context)
-                listing = "\n".join(f"{item['path']}  {item['bytes']} bytes  sha256 {item['sha256'][:12]}…" for item in added)
+                listing = "\n".join(f"{item['path']}  {item['bytes']} bytes  sha256 {item['sha256'][:12]}…"
+                                    + (f"  {self._pdf_summary(item['pdf'])}" if item.get("pdf") else "") for item in added)
                 copied = CustomTask(title=f"Copied {len(added)} {noun} to inputs/uploads/", content=fenced(listing),
                                     status_indicator="complete")
                 workflow.workflow.tasks[index] = copied
                 yield ThreadItemUpdatedEvent(item_id=workflow.id, update=WorkflowTaskUpdated(task=copied, task_index=index))
                 text += "\n\n[Uploaded to the workspace this turn: " + ", ".join(
-                    f"{item['path']} ({item['bytes']} bytes)" for item in added) + "]"
+                    f"{item['path']} ({item['bytes']} bytes"
+                    + (f"; {self._pdf_summary(item['pdf'])}, pages in {pdf.derived_dir(item['name'])}/" if item.get("pdf") else "")
+                    + ")" for item in added) + "]"
 
             agent = build_agent(session.state.manifest, self.model)
             instructions = agent.instructions + "\n\n" + FOLLOW_UP_INSTRUCTIONS
@@ -398,6 +417,13 @@ class DocumentChatServer(ChatKitServer[dict]):
             files = await self._collect(session, thread, turn)
             turn["check"] = self._check(thread, files, analysis_id)
         meta["substrate"] = self.client.serialize_session_state(session.state)
+
+    @staticmethod
+    def _pdf_summary(info: dict) -> str:
+        summary = f"{info['pages']} page{'s' if info['pages'] != 1 else ''}, {len(info['text_pages'])} with text"
+        if info["processed"] < info["pages"]:
+            summary += f", first {info['processed']} processed"
+        return summary
 
     def _host_upload_path(self, thread: ThreadMetadata, upload: dict) -> Path:
         return self.output_dir / thread.id / f"turn-{upload['turn']}" / upload["path"]
@@ -433,20 +459,40 @@ class DocumentChatServer(ChatKitServer[dict]):
             target = destination / entry["path"]
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(data)
+            if entry["path"].endswith(".pdf"):
+                entry["pdf"] = await self._process_pdf(session, thread, entry)
             if is_new:
                 uploads.append(entry)
                 by_id[attachment.id] = entry
             added.append(entry)
             turn["uploads"].append(entry["name"])
             turn["files"].append({"path": entry["path"], "bytes": entry["bytes"], "sha256": entry["sha256"],
-                                  "new": is_new, "changed": is_new, "upload": True})
-        listing = {"files": [{key: item[key] for key in ("name", "bytes", "sha256")} for item in uploads]}
+                                  "new": is_new, "changed": is_new, "upload": True, "pdf": entry.get("pdf")})
+        listing = {"files": [{**{key: item[key] for key in ("name", "bytes", "sha256")},
+                              **({"pdf": {**item["pdf"], "derived": pdf.derived_dir(item["name"])}} if item.get("pdf") else {})}
+                             for item in uploads]}
         await session.write(Path("inputs/uploads/MANIFEST.json"), io.BytesIO(json.dumps(listing, indent=2).encode()))
         # Persist the attachment-to-host-copy mapping before removing temporary bytes.
         await self.store.save_thread(thread, context)
         for attachment in attachments:
             await self.uploads.delete_attachment(attachment.id, {})
         return added
+
+    async def _process_pdf(self, session, thread: ThreadMetadata, entry: dict) -> dict:
+        """Extract and render in the Actor before the model runs; keep the host's own copies."""
+        try:
+            pages = await pdf.process(session, entry["path"], entry["name"], f"work/.pdf-{uuid.uuid4().hex}")
+        except pdf.PdfRejected as error:
+            raise UploadRejected(str(error)) from None
+        base = self.output_dir / thread.id / f"turn-{entry['turn']}"
+        for number, (text, image) in enumerate(zip(pages.texts, pages.images), 1):
+            text_path = base / pdf.page_file(entry["name"], number, "txt")
+            text_path.parent.mkdir(parents=True, exist_ok=True)
+            text_path.write_text(text, encoding="utf-8")
+            if image:
+                (base / pdf.page_file(entry["name"], number, "jpg")).write_bytes(image)
+        return {"pages": pages.pages, "processed": pages.processed, "text_pages": pages.text_pages,
+                "images": sum(1 for image in pages.images if image)}
 
     async def _collect(self, session, thread: ThreadMetadata, turn: dict) -> dict[str, bytes]:
         """Copy output/ and work/ files to the host while the Actor is still running."""
@@ -507,6 +553,13 @@ class DocumentChatServer(ChatKitServer[dict]):
                 if Path(name).suffix in UPLOAD_TYPES:
                     sources[f"inputs/{name}"] = {"name": name, "text": " ".join(data.decode("utf-8").split()), "uploaded": False}
         for upload in thread.metadata.get("uploads", []):
+            if upload.get("pdf"):
+                # The host's copy of each page's text, taken before the model ran.
+                base = self.output_dir / thread.id / f"turn-{upload['turn']}"
+                pages = [(base / pdf.page_file(upload["name"], number, "txt")).read_text(encoding="utf-8")
+                         for number in range(1, upload["pdf"]["processed"] + 1)]
+                sources[upload["path"]] = {"name": upload["name"], "text": "", "pages": pages, "uploaded": True}
+                continue
             text = self._host_upload_path(thread, upload).read_text(encoding="utf-8")
             sources[upload["path"]] = {"name": upload["name"], "text": " ".join(text.split()), "uploaded": True}
         return sources
@@ -539,6 +592,8 @@ class DocumentChatServer(ChatKitServer[dict]):
         except (ValueError, KeyError, TypeError):
             return {"status": "failed", "detail": "output/result.json has no citations list.", "unchecked": unchecked}
         documents = set()
+        checked = visual = 0
+        pages = []  # page-level PDF citations, for the panel
         for citation in citations:
             document = citation.get("document_id") if isinstance(citation, dict) else None
             quote = citation.get("quote") if isinstance(citation, dict) else None
@@ -549,30 +604,66 @@ class DocumentChatServer(ChatKitServer[dict]):
             if source_id is None:
                 return {"status": "failed", "detail": f"A citation names {document!r}, which is not a source file.",
                         "unchecked": unchecked}
-            if not isinstance(quote, str) or not quote.strip() or " ".join(quote.split()) not in sources[source_id]["text"]:
-                shown = clipped(str(quote), 120)
+            source = sources[source_id]
+            shown = clipped(str(quote), 120)
+            if "pages" in source:
+                page = citation.get("page")
+                if type(page) is not int or not 1 <= page <= len(source["pages"]):
+                    return {"status": "failed", "unchecked": unchecked, "detail":
+                            f"A citation of {document} needs a page number from 1 to {len(source['pages'])}."}
+                if not isinstance(quote, str) or not quote.strip():
+                    return {"status": "failed", "detail": f"A citation of page {page} of {document} has no quote.",
+                            "unchecked": unchecked}
+                # A page without a text layer can only be read from its image: a person reviews those.
+                is_visual = citation.get("source") == "image" or not source["pages"][page - 1].strip()
+                if not is_visual and not pdf.quote_on_page(quote, source["pages"][page - 1]):
+                    return {"status": "failed", "detail": f"Not found on page {page} of {document}: {shown}",
+                            "unchecked": unchecked}
+                visual += is_visual
+                checked += not is_visual
+                pages.append({"document": source["name"], "page": page, "kind": "visual" if is_visual else "text",
+                              "quote": clipped(quote, 240)})
+            elif not isinstance(quote, str) or not quote.strip() or " ".join(quote.split()) not in source["text"]:
                 return {"status": "failed", "detail": f"Not found in {document}: {shown}", "unchecked": unchecked}
+            else:
+                checked += 1
             documents.add(document)
         if not documents:
             return {"status": "no_citations", "unchecked": unchecked}
-        return {"status": "citations_passed", "count": len(citations), "documents": sorted(documents), "unchecked": unchecked}
+        return {"status": "citations_passed" if checked else "visual_only", "count": checked, "visual": visual,
+                "documents": sorted(documents), "citations": pages, "unchecked": unchecked}
 
     def _turn_card(self, thread: ThreadMetadata, context: dict, turn: dict) -> ThreadItemDoneEvent:
         check = turn.get("check") or {}
         changed = {item["path"] for item in turn["files"] if item.get("changed")}
         contract_changed = any(f"output/{name}" in changed for name in OUTPUTS)
+        # Quotes from an earlier turn's result.json say nothing about this turn's answer.
+        stale = check.get("scope") == "citations" and "output/result.json" not in changed
         children = []
         if turn["uploads"]:
             children.append({"type": "Text", "size": "sm", "value":
                              "Uploaded to inputs/uploads/: " + ", ".join(turn["uploads"])})
-        if check.get("status") == "citations_passed":
+        if stale and check.get("status") in ("citations_passed", "visual_only"):
+            children.append({"type": "Row", "children": [{"type": "Badge", "variant": "soft", "color": "secondary",
+                             "label": "No new citations this turn"}]})
+            children.append({"type": "Text", "size": "sm", "color": "secondary", "value":
+                             "result.json is unchanged: its earlier quotes still match their sources, "
+                             "but nothing in this answer was checked."})
+        if check.get("status") == "citations_passed" and not stale:
             count = check["count"]
             children.append({"type": "Row", "children": [{"type": "Badge", "variant": "soft", "color": "success",
                              "label": f"{count} quote{' matches' if count == 1 else 's match'} the source documents"}]})
             children.append({"type": "Text", "size": "sm", "color": "secondary", "value":
-                             "Every quote in result.json appears in the source file it cites (host check). "
-                             "Figures computed from them are the agent's own work."})
-        elif check.get("status") == "no_citations" and any(path.startswith("output/") for path in changed):
+                             "Each checked quote in result.json appears in the source file it cites, on the cited page "
+                             "for PDFs (host check). Figures computed from them are the agent's own work."})
+        if check.get("visual") and not stale:
+            count = check["visual"]
+            children.append({"type": "Row", "children": [{"type": "Badge", "variant": "soft", "color": "warning",
+                             "label": f"{count} quote{'' if count == 1 else 's'} from page images to review"}]})
+            children.append({"type": "Text", "size": "sm", "color": "secondary", "value":
+                             "The agent read these from page images, so the host cannot check them against "
+                             "extracted text. Compare them with the page images in the panel."})
+        if check.get("status") == "no_citations" and any(path.startswith("output/") for path in changed):
             children.append({"type": "Row", "children": [{"type": "Badge", "variant": "soft", "color": "warning",
                              "label": "No citations to check"}]})
         if check.get("status") == "passed":

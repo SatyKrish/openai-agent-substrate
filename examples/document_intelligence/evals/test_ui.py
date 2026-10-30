@@ -279,7 +279,8 @@ async def test_uploads_reach_the_actor_workspace_and_their_quotes_are_checked(se
         state = http.get(f"/api/threads/{thread_id}").json()
         assert state["sources"] == "uploads" and [item["name"] for item in state["uploads"]] == ["gamma-notes.md"]
         turn = state["turns"][0]
-        assert turn["check"] == {"status": "citations_passed", "count": 1, "documents": ["gamma-notes.md"], "unchecked": [], "scope": "citations"}
+        assert turn["check"] == {"status": "citations_passed", "count": 1, "visual": 0, "documents": ["gamma-notes.md"],
+                                 "citations": [], "unchecked": [], "scope": "citations"}
         assert "1 quote matches the source documents" in json.dumps(stream)
         # Only the upload was staged: an uploads thread starts without the sample reports.
         assert (server.root / "inputs/uploads/gamma-notes.md").read_bytes() == NOTES
@@ -307,14 +308,19 @@ async def test_a_quote_missing_from_the_upload_fails_the_check(server, tmp_path)
 async def test_uploads_are_validated_before_they_reach_a_workspace(server, tmp_path):
     chat, app = upload_chat(server, tmp_path, ShellSteps([]))
     assert upload_name("../../etc/Q3 report (final).MD") == "Q3-report-final.md"
+    assert upload_name("Annual Report 2025.PDF") == "Annual-Report-2025.pdf"
     with pytest.raises(UploadRejected):
-        upload_name("scan.pdf")
+        upload_name("macro.docm")
     with TestClient(app, base_url="http://localhost:8000") as http:
         rejected = http.post("/chatkit", content=json.dumps({"type": "attachments.create", "params": {
-            "name": "big.md", "size": 2 * 1024 * 1024, "mime_type": "text/markdown"}}))
-        assert rejected.status_code == 400 and "1 MiB" in rejected.json()["error"]
+            "name": "big.pdf", "size": 11 * 1024 * 1024, "mime_type": "application/pdf"}}))
+        assert rejected.status_code == 400 and "10 MiB" in rejected.json()["error"]
         assert http.post("/chatkit", content=json.dumps({"type": "attachments.create", "params": {
-            "name": "scan.pdf", "size": 10, "mime_type": "application/pdf"}})).status_code == 400
+            "name": "macro.docm", "size": 10, "mime_type": "application/octet-stream"}})).status_code == 400
+        fake = post_chatkit(http, {"type": "attachments.create", "params": {"name": "fake.pdf", "size": 9, "mime_type": "application/pdf"}})
+        assert http.put("/uploads/" + fake["id"], content=b"not a pdf").status_code == 400
+        real = post_chatkit(http, {"type": "attachments.create", "params": {"name": "real.pdf", "size": 9, "mime_type": "application/pdf"}})
+        assert http.put("/uploads/" + real["id"], content=b"%PDF-1.4\n").status_code == 200
         attachment = post_chatkit(http, {"type": "attachments.create", "params": {"name": "a.md", "size": 2, "mime_type": "text/markdown"}})
         url = "/uploads/" + attachment["id"]
         assert http.put(url, content=b"\xff\xfe").status_code == 400

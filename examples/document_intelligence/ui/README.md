@@ -8,7 +8,7 @@ analysis backed by one Actor and its workspace volume:
 | --- | --- |
 | First message in a thread | `client.create()` creates an Actor; the sample reports, or the attached files, go into its workspace |
 | Every later message | `client.resume()` resumes the same Actor; it never creates a replacement |
-| Attached files | copied into the Actor's workspace volume at `inputs/uploads/` |
+| Attached files | copied into the Actor's workspace volume at `inputs/uploads/`; PDF pages are extracted and rendered in the Actor |
 | End of each turn | the session closes, which suspends the Actor (`--mode sync`) |
 | Thread metadata | the serialized `SubstrateSessionState` and the SDK conversation history |
 | Deleting the thread | `client.delete()` deletes the Actor and its volume; the server deletes its host copies |
@@ -49,8 +49,8 @@ worker.
 
 ## Uploads
 
-Attach Markdown, text or CSV files (`.md`, `.txt`, `.csv`; up to five per
-message, 1 MiB each) with the composer's **+** button. ChatKit uploads in two
+Attach PDF, Markdown, text or CSV files (`.pdf`, `.md`, `.txt`, `.csv`; up to
+five per message, 10 MiB each) with the composer's **+** button. ChatKit uploads in two
 steps: `attachments.create` returns an upload URL on this server, then the
 browser sends the file there. The server stages it on the host until the next
 turn, writes it into the Actor at `inputs/uploads/`, lists every upload with its
@@ -81,6 +81,27 @@ and other output files remain the agent's own work, as the UI labels explain.
 Sample-only reports retain the full sample contract check, including their
 calculations and CSV; matching quotes cannot bypass a failed sample check.
 
+## PDFs
+
+The sandbox image includes poppler, and a PDF is only ever parsed inside the
+Actor. Before the model sees a new PDF, the server runs one command in the
+Actor: `pdftotext` extracts each page's text and `pdftoppm` renders each page
+as a 100 DPI JPEG, for the first 30 pages, into
+`inputs/derived/<name>/page-NNN.txt` and `page-NNN.jpg`. The server reads back a
+summary and the page images, validates them (page counts, sizes, JPEG
+signatures) and keeps host copies. A damaged or password-protected PDF is
+rejected with a message.
+
+The agent reads a page's text first and uses the SDK's built-in `view_image`
+tool (part of the `Filesystem` capability) to look at tables, charts and pages
+without a text layer. PDF citations name a page:
+`{"document_id": "report.pdf", "page": 3, "quote": "..."}`. The host checks each
+quote against its copy of that page's extracted text, ignoring whitespace,
+ligatures and words hyphenated across lines, so a quote from the wrong page
+fails. A quote the agent read from an image (marked `"source": "image"`), or
+from a page without a text layer, cannot be checked against text: the card
+counts it as a quote to review and the panel shows it beside its page.
+
 ## What you see
 
 - **Conversation (ChatKit):** each turn starts with a workspace step (created or
@@ -92,7 +113,8 @@ calculations and CSV; matching quotes cannot bypass a failed sample check.
 - **Artifact panel:** a tab for every file in `output/`, `inputs/uploads/` and
   `work/`, rendered by type (Markdown report, CSV table, JSON, code), with the
   turn's version picker and a download link. Files the host check does not cover
-  are marked as not checked.
+  are marked as not checked. A PDF shows its rendered pages, each with the
+  quotes cited from it (checked or to review) and its extracted text on request.
 - **Trace tab:** the turn's trace from Jaeger: duration, model calls, tokens,
   tool calls and failures, where the time went, and a span timeline. It updates
   live while the turn runs and links to the full trace in Jaeger.
@@ -125,12 +147,17 @@ and the Actor receives neither (the first turn checks this).
 - It listens on loopback only and rejects other `Host` headers and cross-site
   requests to `/chatkit` and the upload URLs. There is no sign-in: do not expose
   it beyond your machine.
-- Uploads are limited by extension, size and count, must be UTF-8 text, get a
-  sanitized file name, and can be written once. Their contents only reach the
-  Actor's own volume and the host copy for that thread.
+- Uploads are limited by extension, size and count, get a sanitized file name,
+  and can be written once. Text uploads must be UTF-8; PDFs must start with
+  `%PDF-`. Their contents only reach the Actor's own volume and the host copy
+  for that thread.
+- PDFs are parsed by poppler in the Actor, never by the server. What comes
+  back is treated as untrusted: the server accepts only a well-formed summary
+  and JPEG page images, at most 30 pages and 4 MiB per image.
 - Text from the sandbox and from uploads (commands, output, file contents) is
-  shown as code or plain text, never as HTML. Files are served as `text/plain`
-  with a sandbox CSP, and only paths the server recorded can be fetched.
+  shown as code or plain text, never as HTML. Files are served as `text/plain`,
+  page images as `image/jpeg`, both with a sandbox CSP; an uploaded PDF is only
+  offered as a download. Only paths the server recorded can be fetched.
 - Thread metadata (Actor state, conversation history) stays on the server;
   ChatKit never sends it to the browser.
 - Traces carry timing, tool names, exit codes and token counts only.
@@ -139,7 +166,7 @@ and the Actor receives neither (the first turn checks this).
 
 ```sh
 uv sync --group ui
-uv run pytest -q examples/document_intelligence/evals/test_ui.py
+uv run pytest -q examples/document_intelligence/evals/test_ui.py examples/document_intelligence/evals/test_pdf.py
 ```
 
 They drive the ChatKit protocol on the local protocol simulator with scripted
@@ -150,4 +177,7 @@ resolved without shadowing another source; retries restore original bytes after
 a restart; mixed sample/upload reports check both sets of quotes while sample
 calculations remain strictly checked; upload limits are enforced; deleting a
 thread deletes its Actor and host copies. They also cover
-the HTTP guards and the trace summary.
+the HTTP guards and the trace summary. The PDF tests cover validation of the
+sandbox's output, page-level citation checks (right page, wrong page, quotes to
+review) and the page routes; one more test sends a generated PDF through the
+whole flow when poppler is installed on the host (CI installs it).

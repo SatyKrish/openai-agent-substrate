@@ -194,6 +194,8 @@ workspace and save `session.json`. Inspect it with
 including the same kubeconfig and atespace when applicable. Do not publish
 credentials or session state from real document workflows.
 
-The input format is bounded fictional Markdown and CSV. This example does not
-implement PDF parsing, OCR, arbitrary financial-document extraction, or financial
-advice. Extend the skill's extractor and output checks for another document type.
+The command-line workflow's input format is bounded fictional Markdown and CSV.
+The [UI](ui/README.md) also accepts PDFs, which poppler extracts and renders
+inside the Actor for the agent to read and view. Neither implements OCR,
+arbitrary financial-document extraction, or financial advice. Extend the skill's
+extractor and output checks for another document type.

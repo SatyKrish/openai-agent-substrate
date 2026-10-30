@@ -83,12 +83,12 @@ function chatkitOptions() {
       prompts: (state.config?.prompts || []).map((prompt) => ({ label: prompt.label, prompt: prompt.prompt })),
     },
     composer: {
-      placeholder: "Ask about the reports, or attach your own .md, .txt or .csv files…",
+      placeholder: "Ask about the reports, or attach PDF, .md, .txt or .csv files…",
       attachments: {
         enabled: true,
         maxCount: 5,
-        maxSize: 1024 * 1024,
-        accept: { "text/markdown": [".md"], "text/plain": [".txt"], "text/csv": [".csv"] },
+        maxSize: 10 * 1024 * 1024,
+        accept: { "application/pdf": [".pdf"], "text/markdown": [".md"], "text/plain": [".txt"], "text/csv": [".csv"] },
       },
     },
     threadItemActions: { feedback: false, retry: true },
@@ -252,7 +252,7 @@ function renderPanel() {
     body.replaceChildren(el("div", { class: "empty" },
       el("h3", {}, "Ask a question to start"),
       el("p", {}, "Each conversation gets its own Agent Substrate Actor with its own workspace volume. Start from the sample " +
-        "reports, or attach your own .md, .txt or .csv files: they are copied into the volume, which lives exactly as long " +
+        "reports, or attach your own PDF, .md, .txt or .csv files: they are copied into the volume, which lives exactly as long " +
         "as the conversation. After every turn the server copies the workspace files here, checks the results against the " +
         "original documents, and suspends the Actor until your next message."),
       el("p", {}, state.config?.tracing ? "Each turn also has a trace in Jaeger." : "Tracing is off: set OTEL_EXPORTER_OTLP_ENDPOINT to see traces.")));
@@ -296,7 +296,13 @@ function turnNotice(turn) {
   if (turn.status === "failed") return el("div", { class: "notice err" }, `Turn ${turn.number} failed (${turn.error}). The workspace was suspended.`);
   if (!check) return null;
   if (check.status === "passed") return el("div", { class: "notice ok" }, "comparison.md, kpis.csv and result.json match the original documents (host check).");
-  if (check.status === "citations_passed") return el("div", { class: "notice ok" }, `${check.count} quotes in result.json match the source documents (host check).`);
+  const fresh = turn.files.some((file) => file.path === "output/result.json" && file.changed);
+  const review = check.visual ? ` ${check.visual} read from page images need review.` : "";
+  if (check.scope === "citations" && !fresh && ["citations_passed", "visual_only"].includes(check.status)) {
+    return el("div", { class: "notice" }, "No new citations this turn: result.json is unchanged from an earlier turn.");
+  }
+  if (check.status === "citations_passed") return el("div", { class: "notice ok" }, `${check.count} quotes in result.json match the source documents (host check).${review}`);
+  if (check.status === "visual_only") return el("div", { class: "notice warn" }, `${check.visual} quotes were read from page images: review them against the pages.`);
   if (check.status === "failed") return el("div", { class: "notice err" }, `Host check failed: ${check.detail}`);
   return null;
 }
@@ -312,16 +318,17 @@ async function renderFile(turn, file, body, download) {
     : output && name === "result.json" && turn.check?.status === "citations_passed" ? "citations checked"
     : unchecked ? "not host-checked" : "";
   $("artifact-title").textContent = name;
-  $("artifact-sub").textContent = [file.path, file.too_large ? "over 1 MiB" : formatBytes(file.bytes),
+  $("artifact-sub").textContent = [file.path, file.too_large ? "over the transfer limit" : formatBytes(file.bytes),
     file.turn === turn.number ? `turn ${file.turn}` : `from turn ${file.turn}`, checkLabel].filter(Boolean).join(" · ");
   if (file.too_large) {
-    body.replaceChildren(el("div", { class: "notice warn" }, "This file is larger than the 1 MiB transfer limit and was not copied."));
+    body.replaceChildren(el("div", { class: "notice warn" }, "This file is larger than the provider's transfer limit and was not copied."));
     return;
   }
   download.href = `${url}?download=1`;
   download.hidden = false;
   const viewKey = `${state.threadId}:${file.turn}:${file.path}`;
   body.dataset.view = viewKey;
+  if (file.pdf) return renderPdf(turn, file, body);
   body.replaceChildren(el("div", { class: "empty" }, el("p", {}, "Loading…")));
   const response = await fetch(url);
   const text = response.ok ? await response.text() : "";
@@ -339,6 +346,48 @@ async function renderFile(turn, file, body, download) {
   else if (name.endsWith(".json")) nodes.push(renderCode(prettyJson(text)));
   else nodes.push(renderCode(text));
   body.replaceChildren(...nodes);
+}
+
+function renderPdf(turn, file, body) {
+  // Page images and text come from the sandbox's own extraction; the browser never parses the PDF.
+  const name = file.path.split("/").pop();
+  const info = file.pdf;
+  const base = `/api/threads/${encodeURIComponent(state.threadId)}/turns/${file.turn}/files/inputs/derived/${encodeURIComponent(name)}`;
+  const textPages = new Set(info.text_pages);
+  const cited = (turn.check?.citations || []).filter((citation) => citation.document === name);
+  const summary = `${info.pages} page${info.pages === 1 ? "" : "s"}, ${info.text_pages.length} with a text layer` +
+    (info.processed < info.pages ? `; the first ${info.processed} were processed` : "") +
+    ". The sandbox extracted and rendered these pages; citations to pages without text are marked for review.";
+  const grid = el("div", { class: "pages" });
+  for (let number = 1; number <= info.processed; number += 1) {
+    const padded = String(number).padStart(3, "0");
+    const quotes = cited.filter((citation) => citation.page === number);
+    const textBox = el("pre", { class: "page-text", hidden: true });
+    const toggle = el("button", { type: "button", class: "text-toggle", "aria-expanded": "false" }, "Show text");
+    toggle.addEventListener("click", async () => {
+      const open = textBox.hidden;
+      if (open && !textBox.dataset.loaded) {
+        const response = await fetch(`${base}/page-${padded}.txt`);
+        textBox.textContent = response.ok ? (await response.text()).trim() || "(no text on this page)" : "The text could not be loaded.";
+        textBox.dataset.loaded = "1";
+      }
+      textBox.hidden = !open;
+      toggle.setAttribute("aria-expanded", String(open));
+      toggle.textContent = open ? "Hide text" : "Show text";
+    });
+    grid.append(el("figure", { class: `page-card${quotes.length ? " cited" : ""}` },
+      el("img", { src: `${base}/page-${padded}.jpg`, alt: `Page ${number} of ${name}`, loading: "lazy" }),
+      el("figcaption", {},
+        el("span", { class: "page-number" }, `Page ${number}`),
+        textPages.has(number) ? null : el("span", { class: "pill" }, "no text layer"),
+        quotes.length ? el("span", { class: "badge" }, `cited ×${quotes.length}`) : null),
+      quotes.map((citation) => el("blockquote", { class: `page-quote ${citation.kind}` },
+        el("span", { class: "quote-kind" }, citation.kind === "text" ? "Checked against the page text" : "Read from the image · review"),
+        `“${citation.quote}”`)),
+      textPages.has(number) ? toggle : null,
+      textBox));
+  }
+  body.replaceChildren(el("div", { class: "pdf-view" }, el("p", { class: "pdf-summary" }, summary), grid));
 }
 
 function formatBytes(bytes) {

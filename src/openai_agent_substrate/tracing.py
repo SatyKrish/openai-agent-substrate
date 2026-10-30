@@ -28,7 +28,7 @@ from .instrumentation import operation as operation, traced_operation as traced_
 
 logger = logging.getLogger(__name__)
 _TYPES = {"agent", "task", "turn", "generation", "response", "function", "custom", "handoff", "guardrail"}
-_TOOLS = {"load_skill", "exec_command", "apply_patch"}
+_TOOLS = {"load_skill", "exec_command", "apply_patch", "view_image"}
 _OPERATIONS = {"sandbox.create", "sandbox.resume", "sandbox.suspend", "sandbox.delete",
                "sandbox.proxy", "sandbox.exec"}
 

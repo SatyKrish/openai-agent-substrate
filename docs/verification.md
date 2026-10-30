@@ -32,6 +32,7 @@ Date: 2026-10-29.
 | Per-Actor workspace volume | Passed: a `durableDir` mounted at `/workspace` kept a file across suspend and resume; the sample workflow passed on the new template |
 | Batched file transfer on Kubernetes | Passed: 1 MiB writes went from 10.4 s to 0.82 s, files up to 10 MiB round trip, sample staging went from 13.9 s to 5.9 s, and the real-cluster suite passed on the upstream and Document Intelligence images |
 | Uploads and parallel conversations | Passed with `gpt-6.1-terra`: two conversations with different uploaded documents ran concurrently in separate Actors, each saw only its own files, all quotes matched, and follow-ups resumed the right Actor |
+| PDF uploads on Kubernetes | Passed with `gpt-6.1-terra`: poppler in the Actor extracted and rendered a four-page PDF, the agent used `view_image` for a chart and a scanned page, page-level quotes were checked against the extracted text, image-read quotes were marked for review, a 9.8 MiB PDF went through, and an 11 MiB file and a fake PDF were refused |
 
 The Kubernetes path uses owned loopback `kubectl ate proxy actor` processes and authenticated Substrate ingress. The scripted infrastructure tests exercise the real SDK runner and actual sandbox execution without model calls. The separate live OpenAI run is recorded below.
 
@@ -307,10 +308,60 @@ suite passed 114 tests with five cluster checks skipped. The CI protocol suite
 passed 64 tests against the upstream Go execution server. Lint, configured type
 checks, JavaScript syntax, distribution builds and metadata checks passed again.
 
+## PDF uploads
+
+A four-page PDF built for this run (a text page with a word hyphenated across
+lines, a segment table, a bar chart whose values exist only as bar heights, and
+a scanned auditor's statement with no text layer) went through the UI against
+the sandbox template on local Kind, with `gpt-6.1-terra`:
+
+- **Processing in the Actor:** one server-run command extracted each page's text
+  and rendered each page at 100 DPI, all four pages, three with a text layer.
+  Workspace setup for the first turn, including the upload and the PDF
+  processing, took 22 commands and 5.6 s.
+- **First turn (42 s):** the agent read the extracted text, then called
+  `view_image` on two page images (traced as `tool.view_image` spans). The host
+  checked its page 1 and page 2 quotes against its own copy of those pages'
+  text; the quote read from the scanned page 4 was counted as one to review.
+  The answers matched the document: USD 3.2 billion, 14.0%, Cloud at 17.0%, and
+  1,240 employees.
+- **Follow-up turn (22–23 s, same Actor resumed):** asked about the chart, the
+  agent called `view_image` on page 3 and read the four quarters exactly (720,
+  770, 810 and 900, summing to the annual USD 3.2 billion).
+- **Panel:** the PDF tab showed the rendered pages with "no text layer" and
+  "cited" markers, checked and to-review quotes under their pages, and each
+  page's extracted text on request. The browser received only JPEG pages and
+  text; the PDF itself is served only as a download.
+- **Limits:** a 10,241,030-byte (9.8 MiB) PDF went through in its own
+  conversation, and copying it into the Actor added about 6 s (37 commands,
+  11.6 s of setup). An 11 MiB PDF was refused when the upload was created, and
+  an HTML file named `.pdf` was refused at upload.
+
+The run found two defects, both fixed and rerun:
+
+- The Alpine sandbox image had no fonts, so poppler rendered pages that use the
+  standard PDF fonts without embedding them with no text at all; the
+  extracted text was unaffected, but `view_image` would have seen blank pages.
+  The image now installs the URW base 35 fonts (3.1 MB), and the rerun rendered
+  every page with its text.
+- In a follow-up turn the agent kept `output/result.json` as it was, because the
+  instructions said not to rewrite it, so the card reported the earlier quotes
+  as passing for an answer they did not cover. The instructions now ask for each
+  answer's citations to be added to the list, and the rerun's follow-up added a
+  checked page 3 quote. When `result.json` is unchanged, the card and panel now
+  say "No new citations this turn" instead.
+
+With these changes the full local suite passed 119 tests (six opt-in or
+poppler-gated tests skipped), and the CI protocol suite passed 69 tests against
+the upstream Go execution server. The end-to-end PDF test needs poppler on the
+host, so it runs in CI, which installs poppler-utils.
+
 ## Limits of this verification
 
 These checks establish local functional execution and snapshot recovery on a single-node Kind cluster. They do not establish production availability, multi-tenant authorization policy, resistance to sandbox escape, host/node-loss durability, or model quality beyond the documented live fixture workflow. The local installation uses upstream development identities; shared deployments need an operator-defined identity and authorization configuration.
 
 The UI checks drove ChatKit's uploader from a script rather than its file picker, used only localhost (ChatKit's `local-dev` domain key), and loaded ChatKit's unversioned script from OpenAI's CDN. Parallel isolation was shown for two conversations on one node, not under load.
+
+The PDF checks used generated PDFs, not a corpus of real-world files. Pages that rely on fonts outside the standard set and not embedded in the PDF (for example most CJK text) may still render without text. Text read from page images is not checked by the host; it is shown for review.
 
 The existing public CI also exercises the key-free paths on Python 3.11–3.14. See [local-kubernetes.md](local-kubernetes.md) to repeat the real-cluster checks.

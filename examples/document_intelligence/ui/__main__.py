@@ -68,7 +68,8 @@ def main(argv=None):
     from ..main import QUESTION
 
     configure_tracing(operation_names=TRACE_OPERATIONS)
-    client = SubstrateSandboxClient(atespace=args.atespace, control=KubectlActorControl(
+    # Rendered PDF pages come back as one file, so reads may exceed the 10 MiB upload limit.
+    client = SubstrateSandboxClient(atespace=args.atespace, max_file_bytes=32 * 1024 * 1024, control=KubectlActorControl(
         context=args.context, kubeconfig=args.kubeconfig, endpoint=args.api_endpoint))
     store = SQLiteStore(args.data_dir / "threads.sqlite3")
     server = DocumentChatServer(store, client, model=args.model, template=args.template,

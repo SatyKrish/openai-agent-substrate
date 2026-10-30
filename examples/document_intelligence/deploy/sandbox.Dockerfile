@@ -8,6 +8,10 @@ COPY third_party/substrate-sandbox/main.go ./main.go
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /sandbox-server main.go
 
 FROM python:3.14-alpine@sha256:eb2c62658b8d51bff0acc408504b76521d02030de56a8a3c1e830083e89b89d2
+# PDF text extraction and page rendering happen here, inside the sandbox, never in the harness.
+# The URW fonts stand in for the 14 standard PDF fonts, which PDFs may use without embedding them;
+# without them poppler renders such pages with no text.
+RUN apk add --no-cache poppler-utils font-urw-base35
 COPY --from=builder /sandbox-server /usr/local/bin/sandbox-server
 COPY third_party/substrate-sandbox/LICENSE /usr/share/licenses/substrate/LICENSE
 ENV PORT=80 PYTHONDONTWRITEBYTECODE=1

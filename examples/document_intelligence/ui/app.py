@@ -23,6 +23,8 @@ from .server import MAX_UPLOAD_BYTES, DocumentChatServer, UploadRejected
 
 STATIC = Path(__file__).resolve().parent / "static"
 _THREAD_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
+# Page text and images of an uploaded PDF, as the server wrote them on the host.
+_PDF_PAGE = re.compile(r"inputs/derived/([A-Za-z0-9][A-Za-z0-9._-]{0,127}\.pdf)/page-(\d{3})\.(jpg|txt)")
 
 
 def create_app(server: DocumentChatServer, *, config: dict, port: int, jaeger_url: str | None) -> Starlette:
@@ -54,7 +56,7 @@ def create_app(server: DocumentChatServer, *, config: dict, port: int, jaeger_ur
             return JSONResponse({"error": "cross-origin request refused"}, status_code=403)
         declared = request.headers.get("content-length")
         if declared and declared.isdigit() and int(declared) > MAX_UPLOAD_BYTES + 64 * 1024:
-            return JSONResponse({"error": "Uploads are limited to 1 MiB per file."}, status_code=413)
+            return JSONResponse({"error": "Uploads are limited to 10 MiB per file."}, status_code=413)
         if request.headers.get("content-type", "").lower().startswith("multipart/form-data"):
             form = await request.form(max_files=1, max_fields=4, max_part_size=MAX_UPLOAD_BYTES + 1)
             part = form.get("file")
@@ -101,12 +103,28 @@ def create_app(server: DocumentChatServer, *, config: dict, port: int, jaeger_ur
         thread = await load(request)
         turn = find_turn(thread, request.path_params["turn"]) if thread else None
         path = request.path_params["path"]
+        headers = {"X-Content-Type-Options": "nosniff", "Content-Security-Policy": "sandbox", "Cache-Control": "no-store"}
+        page = _PDF_PAGE.fullmatch(path)
+        if page and thread is not None:
+            # A page of a recorded PDF upload, served from the turn that processed it.
+            upload = next((item for item in thread.metadata.get("uploads", [])
+                           if item["name"] == page[1] and item.get("pdf")), None)
+            if upload is None or not 1 <= int(page[2]) <= upload["pdf"]["processed"]:
+                return JSONResponse({"error": "file not found"}, status_code=404)
+            target = server.output_dir / thread.id / f"turn-{upload['turn']}" / path
+            if not target.is_file():
+                return JSONResponse({"error": "file not found"}, status_code=404)
+            media = "image/jpeg" if page[3] == "jpg" else "text/plain; charset=utf-8"
+            return FileResponse(target, media_type=media, headers=headers)
         # Only paths the server collected and recorded can be served.
         entry = next((item for item in (turn or {}).get("files", []) if item["path"] == path and not item.get("too_large")), None)
         if entry is None:
             return JSONResponse({"error": "file not found"}, status_code=404)
         target = server.output_dir / thread.id / f"turn-{turn['number']}" / path
-        headers = {"X-Content-Type-Options": "nosniff", "Content-Security-Policy": "sandbox", "Cache-Control": "no-store"}
+        if path.endswith(".pdf"):
+            # The browser never renders an uploaded PDF; the panel shows the sandbox's page images instead.
+            headers["Content-Disposition"] = f'attachment; filename="{Path(path).name}"'
+            return FileResponse(target, media_type="application/octet-stream", headers=headers)
         if request.query_params.get("download"):
             headers["Content-Disposition"] = f'attachment; filename="{Path(path).name}"'
         return FileResponse(target, media_type="text/plain; charset=utf-8", headers=headers)
