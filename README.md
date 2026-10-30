@@ -99,8 +99,10 @@ For multi-turn testing with the live model, `./scripts/local-kubernetes.sh ui`
 serves a ChatKit conversation beside an artifact panel on <http://localhost:8000>.
 Each conversation is one Actor with its own workspace volume: the first message
 creates it, later messages resume it, and deleting the conversation deletes it.
-Attach `.md`, `.txt` or `.csv` files and inspect every turn's files and Jaeger
-trace. See the [UI guide](examples/document_intelligence/ui/README.md).
+Attach PDF, Markdown, text or CSV files and inspect every turn's files and Jaeger
+trace. PDFs are extracted and rendered inside the Actor, and the agent's quotes
+are checked against the cited page. See the
+[UI guide](examples/document_intelligence/ui/README.md).
 
 ## Tracing
 

@@ -1,11 +1,20 @@
 # Document Intelligence
 
-Compare two synthetic annual reports with a skill-driven `SandboxAgent`. The
-agent loads a skill, inspects files, extracts and reconciles source facts, writes
-Python analysis code, executes it in a Kubernetes-backed Actor, and checks the
-resulting Markdown, CSV, and JSON artifacts.
+Analyze financial documents with a skill-driven `SandboxAgent` that runs its
+code in a Kubernetes-backed Actor. The trusted host independently checks what
+the agent produces. The agent can be run in two ways:
 
-The workflow follows the domain example in
+- **Command-line workflow:** compares two bundled synthetic annual reports. The
+  agent loads a skill, inspects files, extracts and reconciles source facts,
+  writes Python analysis code, executes it in the Actor, and the host checks the
+  resulting Markdown, CSV, and JSON artifacts.
+- **[Interactive UI](ui/README.md):** a multi-turn ChatKit conversation about the
+  sample reports or your own PDF, Markdown, text, or CSV uploads. PDFs are
+  extracted and rendered inside the Actor; the agent reads each page's text,
+  looks at page images, and cites pages, and the host checks its quotes against
+  the source documents.
+
+The command-line workflow follows the domain example in
 [SatyKrish/bedrock-document-intelligence-agent](https://github.com/SatyKrish/bedrock-document-intelligence-agent/tree/7eb1dfbba95f87512aa20dc3444111983f0f3b3e).
 Only its MIT-licensed synthetic fixtures are reused. This implementation uses
 OpenAI Agents SDK and Agent Substrate with Kubernetes as the compute provider.
@@ -24,7 +33,7 @@ examples/document_intelligence/
   agent/
     agent.py                       SandboxAgent definition
     instructions.md                Standing agent behavior
-    tools/capabilities.py          Native SDK shell, patch, and skill registration
+    tools/capabilities.py          Native SDK shell, filesystem (patch, view_image), and skill registration
     skills/document-analysis/      Domain procedure, scripts, output contract
     lib/                           Trusted configuration and artifact verification
     sandbox/
@@ -36,6 +45,11 @@ examples/document_intelligence/
     fixtures/analysis.py           Code fixture emitted through apply_patch
     test_workflow.py               Execution and output contract checks
     test_configuration.py          Live defaults and explicit test-mode checks
+    test_ui.py, test_pdf.py        ChatKit protocol, upload, and PDF checks
+  ui/
+    server.py                      ChatKit server: one Actor per thread, uploads, host checks
+    pdf.py                         In-Actor PDF extraction and page-level quote matching
+    app.py, static/                HTTP routes and the artifact-panel page
   main.py                          Host CLI and workflow orchestration
   deploy/                          Example images, entrypoint, Job, and CLI
 ```
@@ -75,10 +89,12 @@ run records both SDK and OpenTelemetry trace IDs in `verification.json`.
 `./scripts/local-kubernetes.sh ui` serves a ChatKit conversation with an artifact
 panel on <http://localhost:8000>. Each thread is one Actor that the server resumes
 for every message and suspends after it, so you can test multi-turn analyses and
-inspect each turn's files and Jaeger trace. Attach your own `.md`, `.txt` or `.csv`
-documents: they go into the Actor's workspace volume, which lives exactly as long
-as the conversation, and the host checks the agent's quotes against them. See the
-[UI guide](ui/README.md).
+inspect each turn's files and Jaeger trace. Attach your own `.pdf`, `.md`, `.txt`
+or `.csv` documents (up to 10 MiB each): they go into the Actor's workspace volume,
+which lives exactly as long as the conversation, and the host checks the agent's
+quotes against them. Poppler in the Actor extracts each PDF page's text and
+renders it as an image; the agent views pages with the SDK's `view_image` tool
+and cites them by page. See the [UI guide](ui/README.md).
 
 ## Skill and tool execution
 

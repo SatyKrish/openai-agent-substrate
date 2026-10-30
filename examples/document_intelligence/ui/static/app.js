@@ -79,7 +79,7 @@ function chatkitOptions() {
     header: { enabled: true, title: { enabled: true } },
     history: { enabled: true, showDelete: true, showRename: true },
     startScreen: {
-      greeting: "Compare the synthetic annual reports in an isolated workspace",
+      greeting: "Analyze the sample reports or your own documents in an isolated workspace",
       prompts: (state.config?.prompts || []).map((prompt) => ({ label: prompt.label, prompt: prompt.prompt })),
     },
     composer: {
