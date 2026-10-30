@@ -57,7 +57,10 @@ def deploy(profile: SandboxProfile, args) -> dict:
     existing = json.loads(checked([*kubectl, "get", "actor-templates", "--atespace", args.atespace, "-o", "json"],
                                    capture_output=True).stdout)
     docker = ["docker"] + (["--context", args.docker_context] if args.docker_context else [])
-    checked([*docker, "build", "--provenance=false", "-f", str(profile.dockerfile), "-t", args.image, str(ROOT)])
+    # The image builds Agent Substrate's execution server at the same commit as the cluster.
+    revision = (ROOT / ".substrate-revision").read_text().strip()
+    checked([*docker, "build", "--provenance=false", "--build-arg", f"SUBSTRATE_REVISION={revision}",
+             "-f", str(profile.dockerfile), "-t", args.image, str(ROOT)])
     checked([*docker, "push", args.image])
     digests = json.loads(checked([*docker, "image", "inspect", args.image, "--format", "{{json .RepoDigests}}"],
                                  capture_output=True).stdout)

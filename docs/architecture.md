@@ -145,7 +145,7 @@ with the harness. Scripted mode exercises the same SDK tools without inference.
 - [Agent Substrate sandbox demo](https://github.com/agent-substrate/substrate/tree/6949841e9dc98edbd2e0042ef95c19b4ce20aef5/demos/sandbox)
 - [Verified Actor lifecycle CLI](https://github.com/agent-substrate/substrate/blob/6949841e9dc98edbd2e0042ef95c19b4ce20aef5/cmd/kubectl-ate/internal/cmd/actor.go)
 
-Upstream changes quickly. The provider was developed against the SDK above and Substrate commit `6949841e9dc98edbd2e0042ef95c19b4ce20aef5` (2026-10-29). The copied execution server retains its Apache-2.0 license in `third_party/substrate-sandbox/`. See [verification record](verification.md) for the checks performed in this environment.
+Upstream changes quickly. The provider was developed against the SDK above and Substrate commit `6949841e9dc98edbd2e0042ef95c19b4ce20aef5` (2026-10-29). The sandbox images build the upstream execution server unmodified from that commit's Go module (`scripts/build-sandbox-server.sh`) and carry its Apache-2.0 license. See [verification record](verification.md) for the checks performed in this environment.
 
 The dedicated harness namespace carries `ate.dev/api-access=true`, as required by
 Substrate's existing API ingress policy. Secret refresh preserves this label;

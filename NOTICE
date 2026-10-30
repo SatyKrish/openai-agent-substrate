@@ -3,9 +3,10 @@ Copyright 2026 openai-agent-substrate contributors
 
 Licensed under the Apache License, Version 2.0.
 
-This distribution includes an unmodified Agent Substrate sandbox execution
-server, Copyright 2026 Google LLC, under Apache-2.0. See
-third_party/substrate-sandbox/README.md and its LICENSE for source provenance.
+The sandbox images this repository builds contain the Agent Substrate execution
+server, Copyright 2026 Google LLC, under Apache-2.0, compiled unmodified from the
+pinned upstream commit; each image carries its license. The repository vendors
+no upstream source. See THIRD_PARTY_NOTICES.md.
 
 The OpenAI architecture diagram is third-party documentation artwork and is
 excluded from this project's Apache-2.0 license grant. See

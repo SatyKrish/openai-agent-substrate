@@ -24,7 +24,7 @@ The default tests and the provider check use loopback HTTP and temporary local w
 
 Use an issue to discuss substantial API or architecture changes before implementation. For bugs, include the SDK and Python versions, a minimal reproduction, and expected versus observed behavior. Follow [SECURITY.md](SECURITY.md) for vulnerabilities.
 
-Keep changes focused, add tests for behavior changes, and update the relevant guide when interfaces or limits change. Preserve saved-session compatibility and keep unsupported features explicit. Do not change vendored upstream files without updating their provenance and notices.
+Keep changes focused, add tests for behavior changes, and update the relevant guide when interfaces or limits change. Preserve saved-session compatibility and keep unsupported features explicit. The repository vendors no upstream source: the sandbox images build Agent Substrate's execution server from the commit in `.substrate-revision`, so update that pin, not a copy, and keep `THIRD_PARTY_NOTICES.md` current.
 
 ## Open a pull request
 

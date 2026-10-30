@@ -42,15 +42,15 @@ investigation end to end with a fake cluster. Agents' tests build on
 For wire compatibility with the actual upstream Go execution server:
 
 ```sh
-mkdir -p artifacts
-go build -o artifacts/upstream-sandbox-server third_party/substrate-sandbox/main.go
+sh scripts/build-sandbox-server.sh "$(cat .substrate-revision)" artifacts/upstream-sandbox
+mv artifacts/upstream-sandbox/sandbox-server artifacts/upstream-sandbox-server
 SUBSTRATE_DEMO_BINARY="$PWD/artifacts/upstream-sandbox-server" uv run pytest -q
 uv run python -m examples.provider_check --backend local \
   --upstream-binary "$PWD/artifacts/upstream-sandbox-server" \
   --output-dir artifacts/upstream
 ```
 
-This runs the actual upstream HTTP execution code locally. Lifecycle operations remain simulated; it does not prove Kubernetes suspend/resume. The upstream server briefly listens on the selected port on all host interfaces, matching its source. Run this compatibility check only on a trusted development machine.
+The script downloads upstream's `demos/sandbox` package at the pinned commit through the Go module proxy, the same source the sandbox images build. This runs the actual upstream HTTP execution code locally. Lifecycle operations remain simulated; it does not prove Kubernetes suspend/resume. The upstream server briefly listens on the selected port on all host interfaces, matching its source. Run this compatibility check only on a trusted development machine.
 
 ## Real Kubernetes tests
 

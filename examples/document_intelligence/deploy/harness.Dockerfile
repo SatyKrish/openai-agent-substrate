@@ -10,7 +10,6 @@ COPY pyproject.toml uv.lock README.md LICENSE NOTICE THIRD_PARTY_NOTICES.md ./
 COPY sandbox/ sandbox/
 COPY harness/ harness/
 COPY examples/ examples/
-COPY third_party/substrate-sandbox/LICENSE third_party/substrate-sandbox/LICENSE
 # The Job runs the command-line workflow, which needs the provider only.
 RUN uv sync --frozen --package openai-agent-substrate --extra tracing --no-dev --no-editable --no-cache
 COPY kubectl kubectl-ate /usr/local/bin/

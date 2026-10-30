@@ -75,8 +75,7 @@ def build(args):
     binaries = ROOT / "artifacts/local/agent-tools" / ("linux-" + architecture)
     binaries.mkdir(parents=True, exist_ok=True)
     # Allowlist the build context. Local .env and kubeconfig never enter the image.
-    for name in ["pyproject.toml", "uv.lock", "README.md", "LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md",
-                 "third_party/substrate-sandbox/LICENSE"]:
+    for name in ["pyproject.toml", "uv.lock", "README.md", "LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md"]:
         target = context / name
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(ROOT / name, target)

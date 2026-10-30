@@ -53,7 +53,9 @@ jobs:
           go-version-file: .go-version
           cache: false
       - name: Build the upstream execution server
-        run: go build -o artifacts/upstream-sandbox-server third_party/substrate-sandbox/main.go
+        run: |
+          sh scripts/build-sandbox-server.sh "$(cat .substrate-revision)" artifacts/upstream-sandbox
+          mv artifacts/upstream-sandbox/sandbox-server artifacts/upstream-sandbox-server
       - name: Verify upstream protocol compatibility
         run: uv run --locked pytest -q tests/integration harness/tests examples/sre/evals examples/starter/evals examples/document_intelligence/evals/test_workflow.py examples/document_intelligence/evals/test_ui.py examples/document_intelligence/evals/test_pdf.py
         env:

@@ -161,7 +161,6 @@ docs/                       Architecture, deployment, usage, and development gui
   assets/                   Documentation images
 scripts/                    Local Kind bootstrap and CLI dispatch
 deploy/kubernetes/          Reusable permissions, connection settings, PVC, and sandbox templates
-third_party/                Pinned upstream execution server and its license
 .github/                    CI, dependency updates, and contribution templates
 ```
 

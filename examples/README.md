@@ -22,7 +22,8 @@ application deployment in `deploy/`, and its ChatKit UI in `ui/`, following
 `agent/`, `spec.py` is what the harness reads beside the `SandboxAgent`.
 Reusable Kubernetes permissions and connection settings live in
 [the base deployment](../deploy/kubernetes/base/README.md). `scripts/` contains
-only the shell bootstrap and dispatches to the Python module CLIs.
+the shell bootstrap, which dispatches to the Python module CLIs, and the
+execution server's build.
 
 Use `python -m examples.provider_check.resume` to inspect a retained Actor. See the
 [session guide](../docs/usage.md) for state handling.

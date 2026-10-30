@@ -38,6 +38,7 @@ Date: 2026-10-29.
 | SRE agent on Kubernetes | Passed with `gpt-6.1-terra`: read-only cluster reads ran in the harness, analysis ran in the sandbox, and every quote in its findings matched the host's copy of the evidence |
 | Golden path on Kubernetes | Passed with `gpt-6.1-terra`: `starter-setup` registered the starter's template; `starter-chat` ran a two-turn conversation in one Actor from the terminal (one question, then an interactive follow-up) with passing host checks and traces; `starter-ui`, running at the same time, showed the same conversation |
 | Setup aligned with Substrate's quickstart | Passed: rerunning `setup` with the quickstart's bundled `k8s.io` credential provider (default-deny) rolled out cleanly; the provider check and Kubernetes test passed, an existing conversation resumed its Actor, and a new sandbox had no credentials |
+| Execution server built from the pinned module | Passed: `third_party/` removed; the three sandbox images built the server from `go.ate.dev/substrate/demos/sandbox` at the pinned commit, each ran it with upstream's license and its tools, and the scripted, upstream-server and live checks passed |
 
 The Kubernetes path uses owned loopback `kubectl ate proxy actor` processes and authenticated Substrate ingress. The scripted infrastructure tests exercise the real SDK runner and actual sandbox execution without model calls. The separate live OpenAI run is recorded below.
 
@@ -475,6 +476,28 @@ deployed `k8s-credential-provider` and rolled out the other components. Then:
 
 `teardown` (the quickstart's `hack/delete-kind-cluster.sh`) was added but not
 run, to keep the cluster.
+
+## Execution server built from the pinned module
+
+`third_party/` held an unmodified copy of upstream's `demos/sandbox/main.go`.
+It is gone: `scripts/build-sandbox-server.sh` downloads that package at the
+commit in `.substrate-revision` through the Go module proxy (checked against
+the Go checksum database) and builds it, the way upstream's ko build does. The
+source it fetched is byte-identical to the removed copy. The three sandbox
+Dockerfiles, CI and the development guide use the script.
+
+- Locally: lint, mypy and the full suite (142 passed) passed, and the protocol
+  suite passed 88 tests against the server the script built.
+- On Kind, the three images were rebuilt, giving new templates
+  `document-intelligence-e424943936bc`, `sre-2312cede3fca` and
+  `starter-5274a60d228c`. The Document Intelligence scripted workflow and its
+  Kubernetes test passed on its new template.
+- An Actor from each new template ran the server and held upstream's license
+  at `/usr/share/licenses/substrate/LICENSE`, with Python 3.14.10 in all three,
+  poppler 25.12 in Document Intelligence (which processed the four-page PDF:
+  three pages with text, four images) and jq 1.8.2 in SRE.
+- A live starter turn on the new template passed its host check, and a
+  conversation on the previous template still resumed.
 
 ## Limits of this verification
 
