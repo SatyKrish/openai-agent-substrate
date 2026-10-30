@@ -98,6 +98,26 @@ quotes against them. Poppler in the Actor extracts each PDF page's text and
 renders it as an image; the agent views pages with the SDK's `view_image` tool
 and cites them by page. See the [UI guide](ui/README.md).
 
+A conversation, step by step:
+
+1. **First message.** The harness creates the conversation's Actor. Uploaded
+   files are copied into its workspace, and each PDF is extracted and rendered
+   there before the model runs; the PDF never reaches the harness's parser.
+2. **The agent loop.** The model, called from the harness, reads page text with
+   the shell, views charts and scanned pages with `view_image`, and writes and
+   runs Python. Every command runs in the Actor.
+3. **Results.** The answer streams back. The harness copies `output/` and
+   `work/` to the host and checks the quotes in `result.json` against its own
+   copy of the cited page or file. Quotes the agent could only read from a page
+   image are marked for a person to review instead.
+4. **Between messages.** The harness suspends the Actor. Its workspace volume
+   keeps the extracted pages, scripts and outputs.
+5. **Next message.** The same Actor resumes with that workspace, so nothing is
+   uploaded or extracted again.
+
+The UI processes the first 30 pages of a PDF and accepts files up to 10 MiB. It
+was checked with generated reports, not a corpus of real filings.
+
 ## Skill and tool execution
 
 The trusted host keeps the model connection, provider credentials, input hashes,

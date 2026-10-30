@@ -13,7 +13,23 @@ This project follows the [harness separate from compute pattern](https://develop
 
 *Diagram from the [official OpenAI documentation](https://developers.openai.com/api/docs/guides/agents/sandboxes).*
 
-`SubstrateSandboxClient` connects the SDK sandbox interface to the Kubernetes execution environment. Agent Substrate manages Actor lifecycle and routes execution requests to each workspace. The agents in this repository run on a [shared agent harness](docs/agent-harness.md): it runs each agent's loop and gives each conversation its own Actor. See the [architecture and supported capabilities](docs/architecture.md).
+`SubstrateSandboxClient` connects the SDK sandbox interface to the Kubernetes execution environment. Agent Substrate manages Actor lifecycle and routes execution requests to each workspace. The agents in this repository run on a [shared agent harness](docs/agent-harness.md):
+
+| Harness (runs the agent loop) | Sandbox (runs the tools) |
+| --- | --- |
+| The OpenAI Agents SDK, with SDK sessions for history | One Agent Substrate Actor per conversation |
+| ChatKit for the streaming UI, or a terminal chat | Shell, files, skills and agent-written code |
+| OpenTelemetry to Jaeger | A per-Actor volume that keeps the workspace across turns |
+| Credentials, conversation state, suspend and resume, host checks of outputs | No credentials: the harness checks this when it creates the workspace |
+
+The harness never shares a process with the sandbox. Code execution and file
+access cross the boundary; the loop, model calls and orchestration stay on the
+harness side, so a compromised or misbehaving tool cannot reach the harness's
+credentials or conversation state. Tools that need credentials, such as the SRE
+agent's read-only cluster access, run in the harness and hand their output to
+the sandbox as evidence. After every turn the harness suspends the Actor: its
+snapshot frees the worker, and the next message resumes it with the workspace
+intact. See the [architecture and supported capabilities](docs/architecture.md).
 
 ## Quick start
 

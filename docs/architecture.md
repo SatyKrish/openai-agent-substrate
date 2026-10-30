@@ -97,7 +97,35 @@ cannot see each other's files; turns within one conversation must not overlap
 (see the table above). Files added later, such as user uploads, go through the
 provider's file API (10 MiB per file by default) into the same volume. The
 [shared agent harness](agent-harness.md) implements this pattern with ChatKit
-threads for both the Document Intelligence and SRE agents.
+threads for the starter, Document Intelligence and SRE agents.
+
+## Conversation lifecycle and density
+
+The harness suspends a conversation's Actor at the end of every turn, not after
+an idle timeout. A turn always runs to completion first; there is no suspension
+in the middle of one. While the user reads or types, the Actor holds no CPU or
+memory on a worker:
+
+| Moment | What happens |
+| --- | --- |
+| First message | The harness creates the Actor (created suspended) and starts it on a worker with room; the workspace volume is created with it |
+| During the turn | The agent loop runs in the harness; each tool call runs in the Actor |
+| End of the turn | The harness copies outputs to the host, runs the agent's check, and suspends the Actor (`--mode sync`), which frees its worker |
+| Next message | The harness resumes the same Actor, possibly on another worker, with the workspace as it was; about 1 to 3 s in local runs |
+| Conversation deleted | The harness deletes the Actor and its volume |
+
+Concurrency is bounded by running turns, not by conversations. A worker runs as
+many Actors as its reported CPU and memory hold: at the templates' 0.5 CPU and
+480 MiB, a local Kind worker (2,000 millicores, 1,984 MiB) runs four, so the two
+default workers run eight turns at once. A further turn waits, with a visible
+step, until a worker has room. A suspended conversation costs only snapshot
+storage, about 2 MB each for the documents in the local runs. The
+[verification record](verification.md) has the measurements.
+
+Raw documents, rendered pages and intermediate files stay in the sandbox's
+workspace. What reaches the model, and therefore the conversation history, is
+what the agent reads: command output it prints, files it opens, and page images
+it views with `view_image`.
 
 ## Domain skills and code execution
 
