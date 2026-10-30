@@ -56,7 +56,10 @@ browser sends the file there. The server stages it on the host until the next
 turn, writes it into the Actor at `inputs/uploads/`, lists every upload with its
 SHA-256 in `inputs/uploads/MANIFEST.json`, keeps its own copy for checks and the
 panel, and deletes the staged copy. Staged files that are never sent expire
-after an hour.
+after an hour. Retrying a message reuses its attachment IDs and restores the
+original host bytes at the same workspace paths, including after a server
+restart. The retained copies must stay with the SQLite database. Messages saved
+before attachment-ID tracking was added need their files attached again to retry.
 
 A thread that starts with attachments gets an empty workspace; a thread that
 starts with a question gets the bundled sample reports. Either kind can receive
@@ -66,8 +69,17 @@ The document-analysis skill's extractor and the host contract check only
 understand the sample reports. For uploaded documents the agent analyzes with
 the shell and Python, and writes `output/result.json` with a `citations` list.
 The host then checks that every quote appears, word for word (ignoring
-whitespace), in its own copy of the uploaded file it cites. Figures computed
-from those quotes, and other output files, remain the agent's own work.
+whitespace), in its own copy of the source file it cites. Use an exact filename
+as the `document_id`, or the full workspace path such as
+`inputs/uploads/report.md`. A short ID such as `report` is accepted only when it
+identifies one source. Exact filenames take priority over short IDs; ambiguous
+names require a full path.
+
+In a thread with both sample reports and uploads, a report citing uploads can
+quote either set of sources. This check covers quotes only: calculated figures
+and other output files remain the agent's own work, as the UI labels explain.
+Sample-only reports retain the full sample contract check, including their
+calculations and CSV; matching quotes cannot bypass a failed sample check.
 
 ## What you see
 
@@ -132,6 +144,9 @@ uv run pytest -q examples/document_intelligence/evals/test_ui.py
 They drive the ChatKit protocol on the local protocol simulator with scripted
 models: one Actor is created and resumed across two turns; the host check runs;
 files are copied; uploads go through the two-phase flow into the workspace and
-their quotes are checked (and a missing quote fails); upload limits are
-enforced; deleting a thread deletes its Actor and host copies. They also cover
+their quotes are checked (and a missing quote fails); filename collisions are
+resolved without shadowing another source; retries restore original bytes after
+a restart; mixed sample/upload reports check both sets of quotes while sample
+calculations remain strictly checked; upload limits are enforced; deleting a
+thread deletes its Actor and host copies. They also cover
 the HTTP guards and the trace summary.

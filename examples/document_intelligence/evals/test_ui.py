@@ -2,12 +2,16 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
+import shlex
 import sys
 import uuid
 
 import pytest
 
 pytest.importorskip("chatkit", reason="install the ui dependency group: uv sync --group ui")
+
+from agents import Runner  # noqa: E402
+from chatkit.types import UserMessageItem  # noqa: E402
 
 from agents.items import ModelResponse  # noqa: E402
 from agents.models.interface import Model  # noqa: E402
@@ -275,8 +279,8 @@ async def test_uploads_reach_the_actor_workspace_and_their_quotes_are_checked(se
         state = http.get(f"/api/threads/{thread_id}").json()
         assert state["sources"] == "uploads" and [item["name"] for item in state["uploads"]] == ["gamma-notes.md"]
         turn = state["turns"][0]
-        assert turn["check"] == {"status": "citations_passed", "count": 1, "documents": ["gamma-notes.md"], "unchecked": []}
-        assert "1 quote matches the uploaded documents" in json.dumps(stream)
+        assert turn["check"] == {"status": "citations_passed", "count": 1, "documents": ["gamma-notes.md"], "unchecked": [], "scope": "citations"}
+        assert "1 quote matches the source documents" in json.dumps(stream)
         # Only the upload was staged: an uploads thread starts without the sample reports.
         assert (server.root / "inputs/uploads/gamma-notes.md").read_bytes() == NOTES
         assert not (server.root / "inputs/acme-2024.md").exists()
@@ -318,3 +322,193 @@ async def test_uploads_are_validated_before_they_reach_a_workspace(server, tmp_p
         assert http.put(url, files={"file": ("a.md", b"ok", "text/markdown")}).status_code == 200
         assert http.put(url, content=b"again").status_code == 400
         assert http.put("/uploads/../../threads.sqlite3", content=b"x").status_code == 404
+
+
+def created_thread(stream):
+    assert not [event for event in stream if event["type"] == "error"]
+    return next(event["thread"]["id"] for event in stream if event["type"] == "thread.created")
+
+
+async def add_message(chat, thread_id, text, attachments=()):
+    stream = await events(chat, {"type": "threads.add_user_message", "params": {
+        "thread_id": thread_id, "input": message(text, attachments)}})
+    assert not [event for event in stream if event["type"] == "error"]
+    return stream
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+async def test_exact_upload_filename_wins_over_another_files_stem(server, tmp_path, reverse):
+    chat, app = upload_chat(server, tmp_path, ShellSteps([citations("Revenue was 99.", "report.md")]))
+    try:
+        with TestClient(app, base_url="http://localhost:8000") as http:
+            inputs = [("report.md", b"Revenue was 12."), ("report.md.txt", b"Revenue was 99.")]
+            attachments = [upload(http, name, data) for name, data in (inputs[::-1] if reverse else inputs)]
+            tid = created_thread(await events(chat, {"type": "threads.create", "params": {"input": message("Revenue?", attachments)}}))
+            check = http.get(f"/api/threads/{tid}").json()["turns"][-1]["check"]
+            assert check["status"] == "failed" and "Not found in report.md" in check["detail"]
+            chat.model = ShellSteps([citations("Revenue was 12.", "report.md")])
+            await add_message(chat, tid, "Cite the first file correctly")
+            assert http.get(f"/api/threads/{tid}").json()["turns"][-1]["check"]["status"] == "citations_passed"
+            await chat.store.delete_thread(tid, {})
+    finally:
+        chat.store.close()
+
+
+async def test_ambiguous_stems_need_a_filename_or_full_path(server, tmp_path):
+    chat, app = upload_chat(server, tmp_path, ShellSteps([citations("Revenue was 12.", "report")]))
+    try:
+        with TestClient(app, base_url="http://localhost:8000") as http:
+            attachments = [upload(http, "report.md", b"Revenue was 12."), upload(http, "report.txt", b"Revenue was 99.")]
+            tid = created_thread(await events(chat, {"type": "threads.create", "params": {"input": message("Revenue?", attachments)}}))
+            check = http.get(f"/api/threads/{tid}").json()["turns"][-1]["check"]
+            assert check["status"] == "failed" and "ambiguous" in check["detail"]
+            chat.model = ShellSteps([citations("Revenue was 12.", "inputs/uploads/report.md")])
+            await add_message(chat, tid, "Use an unambiguous source path")
+            assert http.get(f"/api/threads/{tid}").json()["turns"][-1]["check"]["status"] == "citations_passed"
+            await chat.store.delete_thread(tid, {})
+    finally:
+        chat.store.close()
+
+
+@pytest.mark.parametrize("fail_first", [False, True])
+async def test_upload_retry_restores_host_copy_after_server_restart(server, tmp_path, monkeypatch, fail_first):
+    quote = "Gamma revenue was USD 12.5 billion in fiscal 2025."
+    chat, app = upload_chat(server, tmp_path, ShellSteps([citations(quote)]))
+    with TestClient(app, base_url="http://localhost:8000") as http:
+        attachment = upload(http, "gamma-notes.md", NOTES)
+        with monkeypatch.context() as patcher:
+            if fail_first:
+                def fail(*args, **kwargs):
+                    raise RuntimeError("simulated model failure after staging")
+                patcher.setattr(Runner, "run_streamed", fail)
+            stream = await events(chat, {"type": "threads.create", "params": {"input": message("Revenue?", [attachment])}})
+        tid = next(event["thread"]["id"] for event in stream if event["type"] == "thread.created")
+        assert bool([event for event in stream if event["type"] == "error"]) is fail_first
+        assert not chat.uploads.path(attachment).exists()
+        items = await chat.store.load_thread_items(tid, None, 100, "asc", {})
+        item_id = next(item.id for item in items.data if isinstance(item, UserMessageItem))
+    chat.store.close()
+    # Simulate an untrusted edit: a retry must restore the trusted original bytes.
+    (server.root / "inputs/uploads/gamma-notes.md").write_bytes(b"tampered inside the Actor")
+    chat, app = upload_chat(server, tmp_path, ShellSteps([citations(quote)]))
+    try:
+        with TestClient(app, base_url="http://localhost:8000") as http:
+            retried = await events(chat, {"type": "threads.retry_after_item", "params": {"thread_id": tid, "item_id": item_id}})
+            assert not [event for event in retried if event["type"] == "error"]
+            state = http.get(f"/api/threads/{tid}").json()
+            assert state["turns"][-1]["status"] == "completed"
+            assert state["turns"][-1]["check"]["status"] == "citations_passed"
+            assert len(state["uploads"]) == 1 and state["uploads"][0]["attachment_id"] == attachment
+            assert state["turns"][-1]["uploads"] == ["gamma-notes.md"]
+            assert (server.root / "inputs/uploads/gamma-notes.md").read_bytes() == NOTES
+            assert not (server.root / "inputs/uploads/gamma-notes-2.md").exists()
+            assert http.get(f"/api/threads/{tid}/turns/2/files/inputs/uploads/gamma-notes.md").content == NOTES
+            assert [kind for kind, _ in server.control.events].count("create") == 1
+            await chat.store.delete_thread(tid, {})
+    finally:
+        chat.store.close()
+
+
+@pytest.mark.parametrize("valid", [False, True])
+async def test_uploads_in_sample_started_threads_are_quote_checked(server, tmp_path, valid):
+    chat, app = upload_chat(server, tmp_path, ShellSteps([]))
+    try:
+        with TestClient(app, base_url="http://localhost:8000") as http:
+            tid = created_thread(await events(chat, {"type": "threads.create", "params": {"input": message("Hello")}}))
+            quote = "Gamma revenue was USD 12.5 billion in fiscal 2025." if valid else "A fabricated quote."
+            chat.model = ShellSteps([citations(quote)])
+            attachment = upload(http, "gamma-notes.md", NOTES)
+            await add_message(chat, tid, "Analyze the uploaded file", [attachment])
+            state = http.get(f"/api/threads/{tid}").json()
+            assert state["sources"] == "samples"  # The initial workspace stays intact.
+            check = state["turns"][-1]["check"]
+            assert check["status"] == ("citations_passed" if valid else "failed")
+            assert check["scope"] == "citations"
+            await chat.store.delete_thread(tid, {})
+    finally:
+        chat.store.close()
+
+
+@pytest.mark.parametrize("valid_sample", [False, True])
+async def test_mixed_reports_validate_both_sample_and_uploaded_quotes(server, tmp_path, valid_sample):
+    chat, app = upload_chat(server, tmp_path, ShellSteps([]))
+    try:
+        with TestClient(app, base_url="http://localhost:8000") as http:
+            tid = created_thread(await events(chat, {"type": "threads.create", "params": {"input": message("Hello")}}))
+            sample = "Operating income was USD 21.6 billion in fiscal 2024." if valid_sample else "Invented sample quote."
+            payload = json.dumps({"citations": [
+                {"document_id": "acme-2024", "quote": sample},
+                {"document_id": "gamma-notes.md", "quote": "Headcount grew to 4,100."}]})
+            chat.model = ShellSteps([f"printf %s {shlex.quote(payload)} > output/result.json"])
+            attachment = upload(http, "gamma-notes.md", NOTES)
+            await add_message(chat, tid, "Compare the sources", [attachment])
+            check = http.get(f"/api/threads/{tid}").json()["turns"][-1]["check"]
+            assert check["status"] == ("citations_passed" if valid_sample else "failed")
+            await chat.store.delete_thread(tid, {})
+    finally:
+        chat.store.close()
+
+
+async def test_sample_contract_checks_remain_strict_after_an_upload(server, tmp_path):
+    chat, app = upload_chat(server, tmp_path, StreamingScripted())
+    try:
+        with TestClient(app, base_url="http://localhost:8000") as http:
+            tid = created_thread(await events(chat, {"type": "threads.create", "params": {"input": message(QUESTION)}}))
+            attachment = upload(http, "gamma-notes.md", NOTES)
+            chat.model = ShellSteps(["true"])
+            await add_message(chat, tid, "Keep the sample outputs unchanged", [attachment])
+            assert http.get(f"/api/threads/{tid}").json()["turns"][-1]["check"]["status"] == "passed"
+            code = "import json; from pathlib import Path; p=Path('output/result.json'); r=json.loads(p.read_text()); r['rows'][0]['operating_margin_pct']='99.99'; p.write_text(json.dumps(r))"
+            chat.model = ShellSteps([f"{shlex.quote(sys.executable)} -c {shlex.quote(code)}"])
+            await add_message(chat, tid, "Recheck the sample calculation")
+            assert http.get(f"/api/threads/{tid}").json()["turns"][-1]["check"]["status"] == "failed"
+            await chat.store.delete_thread(tid, {})
+    finally:
+        chat.store.close()
+
+
+@pytest.mark.parametrize("damage", ["missing", "changed"])
+async def test_retry_rejects_an_unavailable_or_changed_host_copy(server, tmp_path, damage):
+    chat, app = upload_chat(server, tmp_path, ShellSteps([]))
+    try:
+        with TestClient(app, base_url="http://localhost:8000") as http:
+            attachment = upload(http, "gamma-notes.md", NOTES)
+            tid = created_thread(await events(chat, {"type": "threads.create", "params": {
+                "input": message("Keep this file", [attachment])}}))
+            items = await chat.store.load_thread_items(tid, None, 100, "asc", {})
+            item_id = next(item.id for item in items.data if isinstance(item, UserMessageItem))
+            host_copy = tmp_path / "threads" / tid / "turn-1/inputs/uploads/gamma-notes.md"
+            if damage == "missing":
+                host_copy.unlink()
+            else:
+                host_copy.write_bytes(b"modified on the host")
+            stream = await events(chat, {"type": "threads.retry_after_item", "params": {
+                "thread_id": tid, "item_id": item_id}})
+            errors = [event for event in stream if event["type"] == "error"]
+            assert errors and "attach the file again" in json.dumps(errors)
+            assert (server.root / "inputs/uploads/gamma-notes.md").read_bytes() == NOTES
+            await chat.store.delete_thread(tid, {})
+    finally:
+        chat.store.close()
+
+
+async def test_mixed_sources_with_the_same_filename_require_full_paths(server, tmp_path):
+    chat, app = upload_chat(server, tmp_path, ShellSteps([]))
+    try:
+        with TestClient(app, base_url="http://localhost:8000") as http:
+            tid = created_thread(await events(chat, {"type": "threads.create", "params": {"input": message("Hello")}}))
+            attachment = upload(http, "acme-2024.md", NOTES)
+            chat.model = ShellSteps([citations("Headcount grew to 4,100.", "acme-2024.md")])
+            await add_message(chat, tid, "Cite the upload", [attachment])
+            check = http.get(f"/api/threads/{tid}").json()["turns"][-1]["check"]
+            assert check["status"] == "failed" and "ambiguous" in check["detail"]
+            payload = json.dumps({"citations": [
+                {"document_id": "inputs/acme-2024.md", "quote": "Operating income was USD 21.6 billion in fiscal 2024."},
+                {"document_id": "inputs/uploads/acme-2024.md", "quote": "Headcount grew to 4,100."}]})
+            chat.model = ShellSteps([f"printf %s {shlex.quote(payload)} > output/result.json"])
+            await add_message(chat, tid, "Cite each full source path")
+            check = http.get(f"/api/threads/{tid}").json()["turns"][-1]["check"]
+            assert check["status"] == "citations_passed" and check["count"] == 2
+            await chat.store.delete_thread(tid, {})
+    finally:
+        chat.store.close()

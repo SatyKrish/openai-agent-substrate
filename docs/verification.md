@@ -16,7 +16,7 @@ Date: 2026-10-29.
 
 | Check | Result |
 | --- | --- |
-| Default unit/integration suite, with the `ui` group | 97 passed; five real-cluster checks are opt-in |
+| Default unit/integration suite, with the `ui` group | 114 passed; five real-cluster checks are opt-in |
 | Unit/integration suite using the actual upstream Go execution server (before tracing change) | 63 passed; four real-cluster tests skipped |
 | Opt-in Kubernetes integration test | Passed against a fresh real Actor |
 | SDK scripted workflow on Kubernetes | Passed: shell tool execution, report creation, serialized session resume, and preserved edits |
@@ -274,6 +274,38 @@ partial file. The real-cluster suite passed against the upstream
 `sandbox-template` image (binary write, read and resume) and the Document
 Intelligence image, which shows both provide the `dd`, `wc`, `base64` and
 `dirname` the transfer scripts use. These checks made no model API calls.
+
+## UI upload review follow-up
+
+The citation lookup now resolves canonical workspace paths first, exact filenames
+second, and unique short document IDs last. Ambiguous filenames or short IDs fail
+with a request for the full source path. Regression cases cover filename/stem
+collisions in both upload orders and an upload sharing a bundled sample's name.
+
+Uploads retain their ChatKit attachment IDs with the original host copy before
+staged bytes are removed. Retrying after a successful or failed turn, including
+a server restart, restores the original bytes under the same workspace filename
+without creating another Actor or a renamed duplicate. Missing or altered host
+copies are rejected with instructions to attach the file again. Uploads saved
+before this mapping was introduced need to be attached again when retrying.
+
+Uploads added to sample-started threads receive quote checks against both the
+sample fixtures and retained uploads. The UI identifies this as quote validation;
+calculated figures and other output files remain unchecked. The full contract
+check still applies to sample-only reports, so matching sample quotes cannot
+hide a failed calculation or CSV check.
+
+The follow-up added 13 regression cases. On Python 3.11, the full local suite
+passed 110 tests, with five opt-in Kubernetes/Jaeger tests skipped. All 20 UI
+tests also passed against the upstream Go execution server. Ruff, the configured
+mypy targets, JavaScript syntax, wheel/source builds and `twine check` passed.
+These follow-up checks used scripted models and made no new OpenAI API calls;
+the earlier live Kubernetes and model evidence is recorded above.
+
+After integrating the file-transfer improvements from `main`, the combined local
+suite passed 114 tests with five cluster checks skipped. The CI protocol suite
+passed 64 tests against the upstream Go execution server. Lint, configured type
+checks, JavaScript syntax, distribution builds and metadata checks passed again.
 
 ## Limits of this verification
 

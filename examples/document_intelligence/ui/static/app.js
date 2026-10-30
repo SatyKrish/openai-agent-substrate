@@ -296,7 +296,7 @@ function turnNotice(turn) {
   if (turn.status === "failed") return el("div", { class: "notice err" }, `Turn ${turn.number} failed (${turn.error}). The workspace was suspended.`);
   if (!check) return null;
   if (check.status === "passed") return el("div", { class: "notice ok" }, "comparison.md, kpis.csv and result.json match the original documents (host check).");
-  if (check.status === "citations_passed") return el("div", { class: "notice ok" }, `${check.count} quotes in result.json match the uploaded documents (host check).`);
+  if (check.status === "citations_passed") return el("div", { class: "notice ok" }, `${check.count} quotes in result.json match the source documents (host check).`);
   if (check.status === "failed") return el("div", { class: "notice err" }, `Host check failed: ${check.detail}`);
   return null;
 }
@@ -328,7 +328,7 @@ async function renderFile(turn, file, body, download) {
   if (body.dataset.view !== viewKey) return; // the user switched tabs meanwhile
   const nodes = [];
   if (unchecked && file.turn === turn.number) {
-    const covered = state.thread?.sources === "uploads"
+    const covered = turn.check?.scope === "citations"
       ? "The host check covers the quotes in result.json."
       : "The host check covers comparison.md, kpis.csv and result.json.";
     nodes.push(el("div", { class: "notice warn" }, `Not checked on the host: ${name} is the agent's own work. ${covered}`));

@@ -59,7 +59,9 @@ supports only the bundled sample reports: analyze uploaded documents with the sh
 and Python instead. When you report facts from uploaded documents, also write
 output/result.json with a "citations" list of {"document_id": "<file name>",
 "quote": "<text copied exactly from that file>"}; the host checks every quote
-against the uploaded bytes.
+against its retained source bytes. Use a full inputs/ path when file names or
+short document IDs are ambiguous. Mixed reports may cite both the sample reports
+and uploads; their calculated figures are not covered by the citation check.
 """.strip()
 UPLOADS_ONLY_INSTRUCTIONS = """
 This workspace has no sample reports: its sources are the uploaded documents in
@@ -314,6 +316,8 @@ class DocumentChatServer(ChatKitServer[dict]):
             if context_.workflow_item is not None:
                 yield ThreadItemDoneEvent(item=context_.workflow_item)
                 context_.workflow_item = None
+            if isinstance(error, UploadRejected):
+                raise CustomStreamError(str(error), allow_retry=False) from error
             # Exception text can contain command output; the browser gets the type only.
             raise CustomStreamError(
                 f"The turn failed ({type(error).__name__}). The workspace was suspended; you can retry.",
@@ -369,7 +373,7 @@ class DocumentChatServer(ChatKitServer[dict]):
                 workflow.workflow.tasks.append(copying)
                 index = len(workflow.workflow.tasks) - 1
                 yield ThreadItemUpdatedEvent(item_id=workflow.id, update=WorkflowTaskAdded(task=copying, task_index=index))
-                added = await self._store_uploads(session, thread, turn, attachments)
+                added = await self._store_uploads(session, thread, turn, attachments, context_.request_context)
                 listing = "\n".join(f"{item['path']}  {item['bytes']} bytes  sha256 {item['sha256'][:12]}…" for item in added)
                 copied = CustomTask(title=f"Copied {len(added)} {noun} to inputs/uploads/", content=fenced(listing),
                                     status_indicator="complete")
@@ -395,33 +399,51 @@ class DocumentChatServer(ChatKitServer[dict]):
             turn["check"] = self._check(thread, files, analysis_id)
         meta["substrate"] = self.client.serialize_session_state(session.state)
 
-    async def _store_uploads(self, session, thread: ThreadMetadata, turn: dict, attachments: list) -> list[dict]:
-        """Write uploads into the Actor's volume and keep the host's own copy for checks and the panel."""
+    def _host_upload_path(self, thread: ThreadMetadata, upload: dict) -> Path:
+        return self.output_dir / thread.id / f"turn-{upload['turn']}" / upload["path"]
+
+    async def _store_uploads(self, session, thread: ThreadMetadata, turn: dict, attachments: list, context: dict) -> list[dict]:
+        """Stage new uploads once; retries restore the original bytes under the same name."""
         uploads = thread.metadata.setdefault("uploads", [])
+        by_id = {item["attachment_id"]: item for item in uploads if item.get("attachment_id")}
         taken = {item["name"] for item in uploads}
         destination = self.output_dir / thread.id / f"turn-{turn['number']}"
         added = []
         for attachment in attachments:
-            data = self.uploads.read_file(attachment.id)
-            name = upload_name(attachment.name)
-            stem, extension = Path(name).stem, Path(name).suffix
-            counter = 2
-            while name in taken:
-                name, counter = f"{stem}-{counter}{extension}", counter + 1
-            taken.add(name)
-            path = f"inputs/uploads/{name}"
-            await session.write(Path(path), io.BytesIO(data))
-            (destination / path).parent.mkdir(parents=True, exist_ok=True)
-            (destination / path).write_bytes(data)
-            entry = {"name": name, "path": path, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest(),
-                     "turn": turn["number"]}
-            uploads.append(entry)
+            entry = by_id.get(attachment.id)
+            is_new = entry is None
+            if is_new:
+                data = self.uploads.read_file(attachment.id)
+                name = upload_name(attachment.name)
+                stem, extension = Path(name).stem, Path(name).suffix
+                counter = 2
+                while name in taken:
+                    name, counter = f"{stem}-{counter}{extension}", counter + 1
+                taken.add(name)
+                entry = {"attachment_id": attachment.id, "name": name, "path": f"inputs/uploads/{name}",
+                         "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest(), "turn": turn["number"]}
+            else:
+                try:
+                    data = self._host_upload_path(thread, entry).read_bytes()
+                except FileNotFoundError:
+                    raise UploadRejected("The retained upload is unavailable; attach the file again.") from None
+                if len(data) != entry["bytes"] or hashlib.sha256(data).hexdigest() != entry["sha256"]:
+                    raise UploadRejected("The retained upload changed; attach the file again.")
+            await session.write(Path(entry["path"]), io.BytesIO(data))
+            target = destination / entry["path"]
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+            if is_new:
+                uploads.append(entry)
+                by_id[attachment.id] = entry
             added.append(entry)
-            turn["uploads"].append(name)
-            turn["files"].append({"path": path, "bytes": entry["bytes"], "sha256": entry["sha256"],
-                                  "new": True, "changed": True, "upload": True})
+            turn["uploads"].append(entry["name"])
+            turn["files"].append({"path": entry["path"], "bytes": entry["bytes"], "sha256": entry["sha256"],
+                                  "new": is_new, "changed": is_new, "upload": True})
         listing = {"files": [{key: item[key] for key in ("name", "bytes", "sha256")} for item in uploads]}
         await session.write(Path("inputs/uploads/MANIFEST.json"), io.BytesIO(json.dumps(listing, indent=2).encode()))
+        # Persist the attachment-to-host-copy mapping before removing temporary bytes.
+        await self.store.save_thread(thread, context)
         for attachment in attachments:
             await self.uploads.delete_attachment(attachment.id, {})
         return added
@@ -452,34 +474,64 @@ class DocumentChatServer(ChatKitServer[dict]):
 
     def _check(self, thread: ThreadMetadata, files: dict[str, bytes], analysis_id: str) -> dict:
         outputs = {name.removeprefix("output/"): data for name, data in files.items() if name.startswith("output/")}
-        if thread.metadata["sources"] == "uploads":
-            with operation("document_intelligence.verify"):
-                return self._check_citations(thread, outputs)
+        samples = thread.metadata["sources"] == "samples"
+        with operation("document_intelligence.verify"):
+            sample_check = self._check_samples(outputs, analysis_id) if samples else None
+            if sample_check and (sample_check["status"] == "passed" or not thread.metadata.get("uploads")):
+                return sample_check
+            sources = self._citation_sources(thread, include_samples=samples)
+            checked = self._check_citations(thread, outputs, sources=sources)
+            checked["scope"] = "citations"
+            if checked["status"] == "citations_passed" and sample_check:
+                uses_uploads = any(sources[self._resolve_source(document, sources)]["uploaded"]
+                                   for document in checked["documents"])
+                if not uses_uploads:
+                    # Matching sample quotes cannot hide a broken sample calculation or CSV.
+                    return sample_check
+            return checked
+
+    def _check_samples(self, outputs: dict[str, bytes], analysis_id: str) -> dict:
         extra = sorted(name for name in outputs if name not in OUTPUTS)
         if not set(OUTPUTS) <= outputs.keys():
             return {"status": "not_written", "unchecked": extra}
-        with operation("document_intelligence.verify"):
-            try:
-                verify_artifacts({name: outputs[name] for name in OUTPUTS}, self._inputs, analysis_id)
-            except ValueError as error:
-                return {"status": "failed", "detail": str(error), "unchecked": extra}
+        try:
+            verify_artifacts({name: outputs[name] for name in OUTPUTS}, self._inputs, analysis_id)
+        except ValueError as error:
+            return {"status": "failed", "detail": str(error), "unchecked": extra}
         return {"status": "passed", "unchecked": extra}
 
-    def _check_citations(self, thread: ThreadMetadata, outputs: dict[str, bytes]) -> dict:
-        """Every quote in output/result.json must appear in the uploaded file it cites.
+    def _citation_sources(self, thread: ThreadMetadata, *, include_samples=False) -> dict:
+        sources = {}
+        if include_samples:
+            for name, data in self._inputs.items():
+                if Path(name).suffix in UPLOAD_TYPES:
+                    sources[f"inputs/{name}"] = {"name": name, "text": " ".join(data.decode("utf-8").split()), "uploaded": False}
+        for upload in thread.metadata.get("uploads", []):
+            text = self._host_upload_path(thread, upload).read_text(encoding="utf-8")
+            sources[upload["path"]] = {"name": upload["name"], "text": " ".join(text.split()), "uploaded": True}
+        return sources
 
-        The host compares against its own copy of each upload, never the sandbox's,
-        and ignores differences in whitespace only. Figures derived from the quotes
-        remain the agent's work.
-        """
+    @staticmethod
+    def _resolve_source(document, sources: dict) -> str | None:
+        """Paths and exact filenames take priority; stems must resolve uniquely."""
+        if not isinstance(document, str):
+            return None
+        if document in sources:
+            return document
+        matches = [key for key, source in sources.items() if source["name"] == document]
+        if not matches:
+            matches = [key for key, source in sources.items() if Path(source["name"]).stem == document]
+        if len(matches) > 1:
+            raise ValueError(f"Document ID {document!r} is ambiguous; cite the full inputs/ path.")
+        return matches[0] if matches else None
+
+    def _check_citations(self, thread: ThreadMetadata, outputs: dict[str, bytes], *, sources=None) -> dict:
+        """Check quotes against trusted host sources, never against sandbox-edited inputs."""
         unchecked = sorted(name for name in outputs if name != "result.json")
         if "result.json" not in outputs:
             return {"status": "no_citations", "unchecked": unchecked}
-        sources = {}
-        for upload in thread.metadata.get("uploads", []):
-            path = self.output_dir / thread.id / f"turn-{upload['turn']}" / upload["path"]
-            text = " ".join(path.read_text(encoding="utf-8").split())
-            sources[upload["name"]] = sources[Path(upload["name"]).stem] = text
+        if sources is None:
+            sources = self._citation_sources(thread)
         try:
             citations = json.loads(outputs["result.json"])["citations"]
             if not isinstance(citations, list):
@@ -490,11 +542,14 @@ class DocumentChatServer(ChatKitServer[dict]):
         for citation in citations:
             document = citation.get("document_id") if isinstance(citation, dict) else None
             quote = citation.get("quote") if isinstance(citation, dict) else None
-            source = sources.get(document) if isinstance(document, str) else None
-            if source is None:
-                return {"status": "failed", "detail": f"A citation names {document!r}, which is not an uploaded file.",
+            try:
+                source_id = self._resolve_source(document, sources)
+            except ValueError as error:
+                return {"status": "failed", "detail": str(error), "unchecked": unchecked}
+            if source_id is None:
+                return {"status": "failed", "detail": f"A citation names {document!r}, which is not a source file.",
                         "unchecked": unchecked}
-            if not isinstance(quote, str) or not quote.strip() or " ".join(quote.split()) not in source:
+            if not isinstance(quote, str) or not quote.strip() or " ".join(quote.split()) not in sources[source_id]["text"]:
                 shown = clipped(str(quote), 120)
                 return {"status": "failed", "detail": f"Not found in {document}: {shown}", "unchecked": unchecked}
             documents.add(document)
@@ -513,9 +568,9 @@ class DocumentChatServer(ChatKitServer[dict]):
         if check.get("status") == "citations_passed":
             count = check["count"]
             children.append({"type": "Row", "children": [{"type": "Badge", "variant": "soft", "color": "success",
-                             "label": f"{count} quote{' matches' if count == 1 else 's match'} the uploaded documents"}]})
+                             "label": f"{count} quote{' matches' if count == 1 else 's match'} the source documents"}]})
             children.append({"type": "Text", "size": "sm", "color": "secondary", "value":
-                             "Every quote in result.json appears in the uploaded file it cites (host check). "
+                             "Every quote in result.json appears in the source file it cites (host check). "
                              "Figures computed from them are the agent's own work."})
         elif check.get("status") == "no_citations" and any(path.startswith("output/") for path in changed):
             children.append({"type": "Row", "children": [{"type": "Badge", "variant": "soft", "color": "warning",
@@ -532,10 +587,11 @@ class DocumentChatServer(ChatKitServer[dict]):
             children.append({"type": "Row", "children": [{"type": "Badge", "label": "Host check failed", "color": "danger", "variant": "soft"}]})
             children.append({"type": "Text", "size": "sm", "value": check.get("detail", "")})
         unchecked = [name for name in check.get("unchecked", []) if f"output/{name}" in changed]
-        if unchecked and thread.metadata["sources"] == "samples":
+        if unchecked:
             children.append({"type": "Row", "children": [{"type": "Badge", "label": "Not checked on the host", "color": "warning", "variant": "soft"}]})
             children.append({"type": "Text", "size": "sm", "color": "secondary", "value":
-                             ", ".join(unchecked) + " is the agent's own work; the host check covers the three contract outputs only."})
+                             ", ".join(unchecked) + " is the agent's own work; " + ("the host checked quotes in result.json only."
+                             if check.get("scope") == "citations" else "the host check covers the three contract outputs only.")})
         buttons = [
             {"type": "Button", "label": item["path"].removeprefix("output/"), "style": "secondary", "size": "sm",
              "onClickAction": {"type": "open_file", "handler": "client",
