@@ -3,7 +3,7 @@
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 [![CI](https://github.com/SatyKrish/openai-agent-substrate/actions/workflows/ci.yml/badge.svg)](https://github.com/SatyKrish/openai-agent-substrate/actions/workflows/ci.yml)
 
-A community reference implementation of **Kubernetes as a sandbox compute provider for OpenAI Agents SDK `SandboxAgent`**, using Agent Substrate to manage sandboxed Actors and workers. The SDK harness runs in your trusted application; shell commands and workspace files run in the Actor.
+A reference implementation of **Kubernetes as a sandbox compute provider for OpenAI Agents SDK `SandboxAgent`**, using Agent Substrate to manage sandboxed Actors and workers. The SDK harness runs in your trusted application; shell commands and workspace files run in the Actor.
 
 ## Harness separate from compute
 
