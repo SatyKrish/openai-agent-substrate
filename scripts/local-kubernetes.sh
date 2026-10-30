@@ -100,6 +100,25 @@ case "${1:-help}" in
   agent-artifacts)
     uv run --locked python -m examples.document_intelligence.deploy collect --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG"
     ;;
+  ui)
+    # The UI server is the trusted harness: it runs on this host with .env's OPENAI_* settings.
+    UI_ENV=(OPENAI_AGENTS_DISABLE_TRACING=1)
+    if kubectl --context "kind-$CLUSTER" -n openai-agent-substrate get service jaeger-all-in-one >/dev/null 2>&1; then
+      # Separate forwards: an already running tracing-ui keeps 16686 and only 4318 is added.
+      FORWARD_PIDS=()
+      for PORT in 4318 16686; do
+        kubectl --context "kind-$CLUSTER" -n openai-agent-substrate port-forward service/jaeger-all-in-one "$PORT:$PORT" \
+          --address 127.0.0.1 >>"$LOCAL_DIR/ui-port-forward.log" 2>&1 &
+        FORWARD_PIDS+=("$!")
+      done
+      trap 'kill "${FORWARD_PIDS[@]}" 2>/dev/null' EXIT
+      UI_ENV=(OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318 OTEL_SERVICE_NAME=openai-agent-substrate)
+    else
+      echo "Jaeger is not deployed; run tracing-setup for per-turn traces. Starting without tracing." >&2
+    fi
+    env "${UI_ENV[@]}" uv run --locked --group ui python -m examples.document_intelligence.ui \
+      --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG" "${@:2}"
+    ;;
   status)
     kubectl --context "kind-$CLUSTER" get nodes
     kubectl --context "kind-$CLUSTER" get pods -n ate-system
@@ -110,7 +129,7 @@ case "${1:-help}" in
     colima stop --profile "$PROFILE"
     ;;
   *)
-    echo "Usage: $0 {setup|test|document-intelligence|agent-setup|agent-test|agent-run|agent-artifacts|tracing-setup|tracing-ui|status|stop}"
+    echo "Usage: $0 {setup|test|document-intelligence|agent-setup|agent-test|agent-run|agent-artifacts|tracing-setup|tracing-ui|ui|status|stop}"
     echo "Uses an isolated Kind cluster and project-local kubeconfig. setup reuses an existing cluster."
     ;;
 esac

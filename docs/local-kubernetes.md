@@ -63,6 +63,10 @@ configure OTLP for new agent Jobs. Run `agent-run` for live model inference, or
 terminal to open a loopback port forward for <http://127.0.0.1:16686>.
 See [tracing and independent verification](tracing.md) for the complete workflow.
 
+For multi-turn testing, `./scripts/local-kubernetes.sh ui` serves the
+[Document Intelligence UI](../examples/document_intelligence/ui/README.md) on
+<http://localhost:8000> and shows each turn's trace beside the conversation.
+
 ## Stop and restart
 
 ```sh

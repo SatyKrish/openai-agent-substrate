@@ -41,6 +41,10 @@ by digest in `examples/document_intelligence/deploy/jaeger.py`. It runs in names
 no harness Secret mount or service-account token. Traces disappear when the
 Jaeger pod restarts; this deployment is for local development.
 
+The [Document Intelligence UI](../examples/document_intelligence/ui/README.md)
+(`./scripts/local-kubernetes.sh ui`) records one trace per conversation turn and
+shows it beside the chat, live while the turn runs.
+
 In another terminal, expose the query UI on loopback:
 
 ```sh

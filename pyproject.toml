@@ -42,6 +42,12 @@ dev = [
     "ruff>=0.17.3",
     "twine>=6,<7",
 ]
+ui = [
+    "openai-chatkit==1.6.5",
+    "opentelemetry-exporter-otlp-proto-http>=1.39,<2",
+    "starlette>=1,<2",
+    "uvicorn>=0.30,<1",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

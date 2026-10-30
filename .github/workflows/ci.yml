@@ -37,7 +37,7 @@ jobs:
           version: "0.11.7"
           python-version: ${{ matrix.python }}
       - name: Install locked dependencies
-        run: uv sync --locked
+        run: uv sync --locked --group ui
       - name: Lint Python sources
         run: uv run --locked ruff check src scripts deploy examples tests conftest.py
       - name: Type-check transport, proxy, and lifecycle contracts
@@ -53,7 +53,7 @@ jobs:
       - name: Build the upstream execution server
         run: go build -o artifacts/upstream-sandbox-server third_party/substrate-sandbox/main.go
       - name: Verify upstream protocol compatibility
-        run: uv run --locked pytest -q tests/integration examples/document_intelligence/evals/test_workflow.py
+        run: uv run --locked pytest -q tests/integration examples/document_intelligence/evals/test_workflow.py examples/document_intelligence/evals/test_ui.py
         env:
           SUBSTRATE_DEMO_BINARY: ${{ github.workspace }}/artifacts/upstream-sandbox-server
 
