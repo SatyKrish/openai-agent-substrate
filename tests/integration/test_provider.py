@@ -3,6 +3,7 @@
 
 import io
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -140,7 +141,7 @@ async def test_file_limits_fail_before_upload(client, server):
     session = await client.create(manifest=Manifest(root=str(server.root)), options=options())
     try:
         async with session:
-            with pytest.raises(ValueError, match="1 MiB"):
+            with pytest.raises(ValueError, match="10 MiB file limit"):
                 await session.write(Path("too-large"), io.BytesIO(b"x" * (MAX_FILE_BYTES + 1)))
             assert not (server.root / "too-large").exists()
     finally:
@@ -277,5 +278,86 @@ async def test_command_output_is_utf8_text_but_file_reads_preserve_bytes(client,
             result = await session.exec("printf '\\377\\376' > raw.bin; cat raw.bin")
             assert result.stdout == "\ufffd\ufffd".encode("utf-8")
             assert (await session.read(Path("raw.bin"))).read() == b"\xff\xfe"
+    finally:
+        await client.delete(session)
+
+
+def write_commands(server):
+    return [request for request in server.requests if "base64 -d" in " ".join(request["command"][:3])]
+
+
+async def test_large_files_round_trip_in_few_commands(client, server):
+    session = await client.create(manifest=Manifest(root=str(server.root)), options=options())
+    payload = os.urandom(2 * 1024 * 1024 + 12345)  # several write commands and three read chunks
+    try:
+        async with session:
+            before = len(server.requests)
+            await session.write(Path("large/blob.bin"), io.BytesIO(payload))
+            if server.requests:
+                # 7 parts of 90 KiB per command: 2 MiB needs 4 commands instead of the 45 a 48 KiB chunk scheme used.
+                assert len(server.requests) - before == 4
+            read_before = len(server.requests)
+            assert (await session.read(Path("large/blob.bin"))).read() == payload
+            if server.requests:
+                assert len(server.requests) - read_before == 3
+            assert await session.read_bounded(Path("large/blob.bin"), max_bytes=1024 * 1024 + 7) == payload[:1024 * 1024 + 7]
+            assert not list(server.root.rglob(".oas-upload-*"))
+    finally:
+        await client.delete(session)
+
+
+async def test_small_and_empty_files_take_one_command(client, server):
+    session = await client.create(manifest=Manifest(root=str(server.root)), options=options())
+    try:
+        async with session:
+            for name, payload in (("small.txt", b"hello"), ("empty.txt", b"")):
+                before = len(server.requests)
+                await session.write(Path(name), io.BytesIO(payload))
+                if server.requests:
+                    assert len(server.requests) - before == 1
+                assert (await session.read(Path(name))).read() == payload
+    finally:
+        await client.delete(session)
+
+
+async def test_file_limit_is_configurable_and_checked_before_transfer(server):
+    client = SubstrateSandboxClient(router_url=server.url, atespace="test-space", control=server.control, max_file_bytes=1000)
+    session = await client.create(manifest=Manifest(root=str(server.root)), options=options())
+    try:
+        async with session:
+            with pytest.raises(ValueError, match="file limit"):
+                await session.write(Path("too-big"), io.BytesIO(b"x" * 1001))
+            await session.exec("sh", "-c", "head -c 5000 /dev/zero > made-in-sandbox.bin", shell=False)
+            before = len(server.requests)
+            with pytest.raises(ValueError, match="file limit"):
+                await session.read(Path("made-in-sandbox.bin"))
+            if server.requests:
+                assert len(server.requests) - before == 1  # refused from the size, without reading the rest
+            assert await session.read_bounded(Path("made-in-sandbox.bin"), max_bytes=600) == b"\0" * 600
+    finally:
+        await client.delete(session)
+    with pytest.raises(ValueError, match="positive"):
+        SubstrateSandboxClient(router_url=server.url, atespace="test-space", control=server.control, max_file_bytes=0)
+
+
+async def test_a_failure_between_write_commands_leaves_no_partial_file(client, server, monkeypatch):
+    session = await client.create(manifest=Manifest(root=str(server.root)), options=options())
+    try:
+        async with session:
+            original = session._inner._checked
+            calls = []
+
+            async def fail_second_write(*command):
+                if command[0] == "sh" and "base64 -d" in command[2]:
+                    calls.append(command)
+                    if len(calls) == 2:
+                        raise RuntimeError("transport lost between commands")
+                return await original(*command)
+
+            monkeypatch.setattr(session._inner, "_checked", fail_second_write)
+            with pytest.raises(RuntimeError, match="transport lost"):
+                await session.write(Path("partial.bin"), io.BytesIO(os.urandom(1024 * 1024)))
+            assert not (server.root / "partial.bin").exists()
+            assert not list(server.root.rglob(".oas-upload-*"))
     finally:
         await client.delete(session)

@@ -32,11 +32,24 @@ The upstream demo has no application authorization and buffers command output in
 | Real SDK `SandboxSession`, `Shell()`, and `Filesystem()` | SDK pinned to `openai-agents==0.24.0`; uses provider base-class APIs |
 | Native SDK `Skills` with eager or lazy local skill files | Skills materialize as workspace files; Git-backed sources and external mounts remain unsupported |
 | `File`, `Dir`, `LocalFile`, and `LocalDir` manifests | No cloud mounts, GitRepo materialization, custom users/groups, manifest environment, or extra path grants |
-| Binary file reads/writes over base64 | 1 MiB per file; 4 MiB execution response; writes are chunked |
+| Binary file reads/writes over base64 | 10 MiB per file by default (`max_file_bytes`); writes send up to 630 KiB per command, reads return up to 1 MiB per command; 4 MiB execution response |
 | Command stdout/stderr as UTF-8 JSON text | Invalid UTF-8 bytes are replaced by U+FFFD upstream; use base64-backed file reads/writes for binary data |
 | Existing Actor suspension/resumption | Substrate owns snapshots; no portable SDK tar export/import or replacement Actor recovery |
 | Synchronous shell execution and nonzero exit codes | No PTY, stdin streaming, preview ports, or precise timeout-vs-signal classification |
 | One application owns a session at a time | Do not concurrently resume, run, or delete the same Actor from multiple workers |
+
+File transfer runs over the same `/process` endpoint, so its cost is the number
+of commands: on local Kind each round trip takes about 0.4 s whatever its size,
+and concurrent commands to one Actor run one after another. A write therefore
+sends as much data per command as the argument limits allow: 90 KiB base64
+parts, which stay under Linux's 128 KiB per-argument limit, seven to a command,
+which stays under macOS's 1 MiB argument limit for the local simulator. The
+first command creates a hidden partial file next to the target and the last
+renames it into place, so the target appears complete or not at all; a failure
+removes the partial file. A small file takes one command. A read returns the
+file size and up to 1 MiB of base64 per command, so a file larger than the
+limit is refused before its contents are transferred. A file that changes
+size between read commands raises an error.
 
 Cancelling the Python coroutine does not guarantee cancellation of an in-flight HTTP request; the remote command has its own deadline. The demo server's Go `CommandContext` does not provide process-group management for shell grandchildren. File operations validate SDK workspace paths, but the shell intentionally has Actor-level access; workspace path validation is not an OS isolation boundary.
 
@@ -78,7 +91,7 @@ conversation, resumes the Actor for each later message, and deletes it with the
 conversation. Different conversations run concurrently in separate Actors and
 cannot see each other's files; turns within one conversation must not overlap
 (see the table above). Files added later, such as user uploads, go through the
-provider's file API (1 MiB per file, chunked writes) into the same volume. The
+provider's file API (10 MiB per file by default) into the same volume. The
 [Document Intelligence UI](../examples/document_intelligence/ui/README.md)
 implements this pattern with ChatKit threads.
 

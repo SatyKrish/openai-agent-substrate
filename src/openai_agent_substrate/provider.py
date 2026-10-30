@@ -27,8 +27,36 @@ from .lifecycle import ActorControl, resource_name
 from .transport import ProcessTransport, ProcessTransportError
 from .instrumentation import operation, traced_operation
 
-MAX_FILE_BYTES = 1024 * 1024
-_WRITE_CHUNK_BYTES = 48 * 1024
+MAX_FILE_BYTES = 10 * 1024 * 1024
+# Each /process round trip costs the same whatever its size, so transfers use as
+# few commands as the limits allow. 90 KiB base64-encodes under Linux's 128 KiB
+# per-argument limit (and a multiple of 3 keeps parts concatenable); seven parts
+# keep a command's arguments under macOS's 1 MiB ARG_MAX for the local simulator.
+_WRITE_PART_BYTES = 90 * 1024
+_WRITE_PARTS_PER_COMMAND = 7
+# A base64 1 MiB read stays under the transport's 4 MiB response limit.
+_READ_CHUNK_BYTES = 1024 * 1024
+_WRITE_SCRIPT = """
+set -e
+umask 077
+target=$1 partial=$2 first=$3 last=$4
+shift 4
+if [ "$first" = 1 ]; then
+  mkdir -p "$(dirname -- "$target")"
+  set -C; : > "$partial"; set +C
+fi
+for part do printf %s "$part"; done | base64 -d >> "$partial"
+if [ "$last" = 1 ]; then
+  if [ -d "$target" ]; then rm -f "$partial"; exit 1; fi
+  mv -f "$partial" "$target"
+fi
+"""
+_READ_SCRIPT = """
+[ -e "$1" ] || exit 44
+[ -f "$1" ] && [ -r "$1" ] || exit 45
+wc -c < "$1"
+dd if="$1" bs="$2" skip="$3" count=1 2>/dev/null | base64
+"""
 
 
 class SubstrateSandboxOptions(BaseSandboxClientOptions):
@@ -81,10 +109,14 @@ class SubstrateSandboxClient(BaseSandboxClient[SubstrateSandboxOptions]):
 
     backend_id = "agent-substrate-poc"
 
-    def __init__(self, *, atespace: str, control: ActorControl, router_url: str | None = None, exec_timeout: float = 30):
+    def __init__(self, *, atespace: str, control: ActorControl, router_url: str | None = None, exec_timeout: float = 30,
+                 max_file_bytes: int = MAX_FILE_BYTES):
         self.atespace = resource_name(atespace)
         self.control = control
         self.exec_timeout = exec_timeout
+        if max_file_bytes <= 0:
+            raise ValueError("max_file_bytes must be positive")
+        self.max_file_bytes = max_file_bytes
         if router_url is None and not callable(getattr(control, "start_proxy", None)):
             raise ValueError("Provide router_url or a control implementation with authenticated start_proxy support")
         self.transport = ProcessTransport(router_url, default_timeout=exec_timeout) if router_url is not None else None
@@ -224,56 +256,70 @@ class _SubstrateSession(BaseSandboxSession):
             return False
         return (await self.exec("true", shell=False)).ok()
 
+    def _limit_error(self) -> ValueError:
+        return ValueError(f"File exceeds the provider's {self.client.max_file_bytes / 1048576:g} MiB file limit")
+
     async def read(self, path: Path, *, user: str | User | None = None) -> io.BytesIO:
-        return io.BytesIO(await self._read_file(path, MAX_FILE_BYTES + 1, user=user, require_complete=True))
+        return io.BytesIO(await self._read_file(path, self.client.max_file_bytes, user=user, require_complete=True))
 
     async def _read_bounded(self, path: Path, *, max_bytes: int) -> bytes:
-        if max_bytes > MAX_FILE_BYTES:
-            raise ValueError("Bounded read exceeds the reference implementation's 1 MiB file limit")
+        if max_bytes > self.client.max_file_bytes:
+            raise self._limit_error()
         return await self._read_file(path, max_bytes, require_complete=False)
+
+    async def _read_chunk(self, target: str, index: int) -> tuple[int, bytes]:
+        """One command returns the file's size and one base64 chunk of it."""
+        result = await self.exec("sh", "-c", _READ_SCRIPT, "sh", target, str(_READ_CHUNK_BYTES), str(index), shell=False)
+        if result.exit_code == 44:
+            raise FileNotFoundError(target)
+        if not result.ok():
+            raise ExecNonZeroError(result, command=("read", target))
+        size, _, encoded = result.stdout.partition(b"\n")
+        return int(size.strip()), base64.b64decode(b"".join(encoded.split()), validate=True)
 
     async def _read_file(self, path: Path, limit: int, *, user: str | User | None = None,
                          require_complete: bool) -> bytes:
         if user is not None:
             raise NotImplementedError("Per-user execution is unsupported")
         target = str(self.normalize_path(path))
-        result = await self.exec(
-            "sh", "-c", 'if [ ! -e "$1" ]; then exit 44; fi; '
-            '[ -f "$1" ] && [ -r "$1" ] || exit 45; head -c "$2" < "$1" | base64',
-            "sh", target, str(limit), shell=False,
-        )
-        if result.exit_code == 44:
-            raise FileNotFoundError(target)
-        if not result.ok():
-            raise ExecNonZeroError(result, command=("read", target))
-        data = base64.b64decode(b"".join(result.stdout.split()), validate=True)
-        if require_complete and len(data) > MAX_FILE_BYTES:
-            raise ValueError("File exceeds the reference implementation's 1 MiB file limit")
-        return data
+        size, data = await self._read_chunk(target, 0)
+        if require_complete and size > self.client.max_file_bytes:
+            raise self._limit_error()
+        wanted = min(size, limit)
+        chunks = [data]
+        received = len(data)
+        while received < wanted:
+            current, data = await self._read_chunk(target, len(chunks))
+            if current != size or not data:
+                raise ValueError(f"{target} changed while it was being read")
+            chunks.append(data)
+            received += len(data)
+        return b"".join(chunks)[:wanted]
 
     async def write(self, path: Path, data: io.IOBase, *, user: str | User | None = None) -> None:
         if user is not None:
             raise NotImplementedError("Per-user execution is unsupported")
         target = self.normalize_path(path, for_write=True)
-        value = data.read(MAX_FILE_BYTES + 1)
+        value = data.read(self.client.max_file_bytes + 1)
         payload = value.encode() if isinstance(value, str) else bytes(value)
-        if len(payload) > MAX_FILE_BYTES:
-            raise ValueError("File exceeds the reference implementation's 1 MiB file limit")
-        temporary = target.parent / f".oas-upload-{uuid.uuid4().hex}"
-        await self._checked("mkdir", "-p", str(target.parent))
-        await self._checked("sh", "-c", 'umask 077; set -C; : > "$1"', "sh", str(temporary))
+        if len(payload) > self.client.max_file_bytes:
+            raise self._limit_error()
+        parts = [base64.b64encode(payload[offset:offset + _WRITE_PART_BYTES]).decode()
+                 for offset in range(0, len(payload), _WRITE_PART_BYTES)]
+        batches = [parts[index:index + _WRITE_PARTS_PER_COMMAND]
+                   for index in range(0, len(parts), _WRITE_PARTS_PER_COMMAND)] or [[]]
+        # The first command creates the partial file; the last renames it into place,
+        # so the target appears complete or not at all. A small file takes one command.
+        partial = target.parent / f".oas-upload-{uuid.uuid4().hex}"
         try:
-            for offset in range(0, len(payload), _WRITE_CHUNK_BYTES):
-                chunk = base64.b64encode(payload[offset:offset + _WRITE_CHUNK_BYTES]).decode()
-                await self._checked("sh", "-c", 'printf %s "$1" | base64 -d >> "$2"', "sh", chunk, str(temporary))
-            await self._checked(
-                "sh", "-c", '[ ! -d "$2" ] || exit 1; exec mv -f "$1" "$2"',
-                "sh", str(temporary), str(target),
-            )
-        finally:
-            # A failed cleanup must not replace the upload result or its original error.
+            for index, batch in enumerate(batches):
+                await self._checked("sh", "-c", _WRITE_SCRIPT, "sh", str(target), str(partial),
+                                    "1" if index == 0 else "0", "1" if index == len(batches) - 1 else "0", *batch)
+        except BaseException:
+            # A failed cleanup must not replace the original error.
             with suppress(Exception):
-                await self._checked("rm", "-f", str(temporary))
+                await self._checked("rm", "-f", str(partial))
+            raise
 
     async def persist_workspace(self) -> io.IOBase:
         raise NotImplementedError("Workspace persistence is provided by Substrate Actor snapshots")

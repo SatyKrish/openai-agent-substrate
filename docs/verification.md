@@ -30,6 +30,7 @@ Date: 2026-10-29.
 | Source distribution and wheel | Built successfully; `twine check` passed |
 | ChatKit UI, multi-turn on Kubernetes | Passed with `gpt-6.1-terra`: three turns on one Actor across a UI server restart, live per-turn traces, and thread deletion removing the Actor |
 | Per-Actor workspace volume | Passed: a `durableDir` mounted at `/workspace` kept a file across suspend and resume; the sample workflow passed on the new template |
+| Batched file transfer on Kubernetes | Passed: 1 MiB writes went from 10.4 s to 0.82 s, files up to 10 MiB round trip, sample staging went from 13.9 s to 5.9 s, and the real-cluster suite passed on the upstream and Document Intelligence images |
 | Uploads and parallel conversations | Passed with `gpt-6.1-terra`: two conversations with different uploaded documents ran concurrently in separate Actors, each saw only its own files, all quotes matched, and follow-ups resumed the right Actor |
 
 The Kubernetes path uses owned loopback `kubectl ate proxy actor` processes and authenticated Substrate ingress. The scripted infrastructure tests exercise the real SDK runner and actual sandbox execution without model calls. The separate live OpenAI run is recorded below.
@@ -246,6 +247,33 @@ with `gpt-6.1-terra` and the local Jaeger collector.
   refuses to start with attachments enabled unless `uploadStrategy` is set, and
   that uploads-only threads must tell the agent not to run the samples-only
   verifier; both are fixed.
+
+## File transfer
+
+The same benchmark ran against one fresh Actor from the Document Intelligence
+template, before and after batching writes and chunking reads. Each `/process`
+round trip took a median of 400 ms on local Kind, and eight concurrent 0.2 s
+commands took 3.4 s: commands to one Actor run one after another, so transfer
+time follows the number of commands. A single command carried 16 arguments of
+120 KiB (1.4 MiB) in the same 0.41 s as an empty one.
+
+| Operation | Before | After |
+| --- | --- | --- |
+| Write 64 KiB | 2.2 s | 0.21 s |
+| Write 1 MiB | 10.4 s (26 commands) | 0.82 s (2 commands) |
+| Write 4 MiB / 10 MiB | over the 1 MiB limit | 2.8 s / 6.7 s |
+| Read 1 MiB | 0.45 s | 0.42 s |
+| Read 4 MiB / 10 MiB | over the 1 MiB limit | 1.6 s / 4.1 s |
+| Stage the sample reports into a new Actor | 13.9 s | 5.9 s |
+
+Every round trip matched byte for byte and no partial files remained. The
+provider suite passed 25 tests against both the Python simulator and the upstream
+Go server, including multi-command round trips, one command for small and empty
+files, the configurable limit, and a failure between write commands leaving no
+partial file. The real-cluster suite passed against the upstream
+`sandbox-template` image (binary write, read and resume) and the Document
+Intelligence image, which shows both provide the `dd`, `wc`, `base64` and
+`dirname` the transfer scripts use. These checks made no model API calls.
 
 ## Limits of this verification
 
