@@ -72,7 +72,7 @@ def main(argv=None):
         context=args.context, kubeconfig=args.kubeconfig, endpoint=args.api_endpoint))
     store = SQLiteStore(args.data_dir / "threads.sqlite3")
     server = DocumentChatServer(store, client, model=args.model, template=args.template,
-                                output_dir=args.data_dir / "threads")
+                                output_dir=args.data_dir / "threads", base_url=f"http://localhost:{args.port}")
     config = {"model": args.model, "context": args.context, "atespace": args.atespace, "template": args.template,
               "tracing": tracing_enabled(), "prompts": [
                   {"label": "Compare ACME and BETA fiscal 2024", "prompt": QUESTION},

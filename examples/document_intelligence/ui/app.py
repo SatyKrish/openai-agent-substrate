@@ -19,7 +19,7 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
 from . import traces
-from .server import DocumentChatServer
+from .server import MAX_UPLOAD_BYTES, DocumentChatServer, UploadRejected
 
 STATIC = Path(__file__).resolve().parent / "static"
 _THREAD_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
@@ -40,10 +40,36 @@ def create_app(server: DocumentChatServer, *, config: dict, port: int, jaeger_ur
     async def chatkit(request: Request):
         if not same_origin(request):
             return JSONResponse({"error": "cross-origin request refused"}, status_code=403)
-        result = await server.process(await request.body(), {})
+        try:
+            result = await server.process(await request.body(), {})
+        except UploadRejected as error:
+            return JSONResponse({"error": str(error)}, status_code=400)
         if isinstance(result, StreamingResult):
             return StreamingResponse(result, media_type="text/event-stream")
         return Response(content=result.json, media_type="application/json")
+
+    async def upload(request: Request):
+        # Second phase of a ChatKit upload: the browser sends the file to the URL we issued.
+        if not same_origin(request):
+            return JSONResponse({"error": "cross-origin request refused"}, status_code=403)
+        declared = request.headers.get("content-length")
+        if declared and declared.isdigit() and int(declared) > MAX_UPLOAD_BYTES + 64 * 1024:
+            return JSONResponse({"error": "Uploads are limited to 1 MiB per file."}, status_code=413)
+        if request.headers.get("content-type", "").lower().startswith("multipart/form-data"):
+            form = await request.form(max_files=1, max_fields=4, max_part_size=MAX_UPLOAD_BYTES + 1)
+            part = form.get("file")
+            if part is None or not hasattr(part, "read"):
+                return JSONResponse({"error": "Multipart uploads need a 'file' field."}, status_code=400)
+            data = await part.read()
+        else:
+            data = await request.body()
+        try:
+            await server.uploads.write_file(request.path_params["attachment_id"], data, {})
+        except NotFoundError:
+            return JSONResponse({"error": "upload not found"}, status_code=404)
+        except UploadRejected as error:
+            return JSONResponse({"error": str(error)}, status_code=400)
+        return JSONResponse({})
 
     async def settings(request: Request):
         return JSONResponse({**config, "jaeger_url": jaeger_url})
@@ -67,7 +93,8 @@ def create_app(server: DocumentChatServer, *, config: dict, port: int, jaeger_ur
         meta = thread.metadata
         state = "running" if thread.id in server.running else ("suspended" if meta.get("substrate") else "not created")
         return JSONResponse({"thread_id": thread.id, "title": thread.title, "actor": meta.get("actor"), "state": state,
-                             "analysis_id": meta.get("analysis_id"), "turns": meta.get("turns", [])},
+                             "analysis_id": meta.get("analysis_id"), "sources": meta.get("sources"),
+                             "uploads": meta.get("uploads", []), "turns": meta.get("turns", [])},
                             headers={"Cache-Control": "no-store"})
 
     async def file(request: Request):
@@ -103,6 +130,7 @@ def create_app(server: DocumentChatServer, *, config: dict, port: int, jaeger_ur
     routes = [
         Route("/", index),
         Route("/chatkit", chatkit, methods=["POST"]),
+        Route("/uploads/{attachment_id}", upload, methods=["PUT", "POST"]),
         Route("/api/config", settings),
         Route("/api/threads/{thread_id}", thread_state),
         Route("/api/threads/{thread_id}/turns/{turn:int}/files/{path:path}", file),

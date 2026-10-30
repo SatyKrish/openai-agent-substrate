@@ -46,6 +46,12 @@ Python sandbox ActorTemplate, builds the trusted harness image, and applies its
 ServiceAccount, RBAC, in-cluster kubeconfig, and artifact PVC. Neither setup
 command calls the OpenAI API.
 
+The ActorTemplate mounts a per-Actor Substrate `durableDir` volume at the agent's
+workspace root, `/workspace`. Inputs, uploads and outputs live on it: Substrate's
+snapshots keep it across suspend and resume, and it is deleted with the Actor.
+Templates are immutable and named by a hash of their content, so a changed
+template is registered under a new name.
+
 The Secret is `openai-agent-substrate/openai-agent-env`. Import uses an in-memory
 manifest passed to `kubectl` over stdin. It does not print values, put credentials
 on command lines, or save a rendered Secret manifest. The pod's configuration is:

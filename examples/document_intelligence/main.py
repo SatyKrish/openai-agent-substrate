@@ -24,7 +24,7 @@ from .agent.agent import build_agent
 from .agent.lib.artifacts import digests
 from .agent.lib.configuration import select_model
 from .agent.lib.verify import OUTPUTS, verify_artifacts
-from .agent.sandbox.sandbox import build_client, build_manifest, stage_inputs
+from .agent.sandbox.sandbox import ACTOR_WORKSPACE, build_client, build_manifest, stage_inputs
 
 TRACE_OPERATIONS = ("document_intelligence.run", "document_intelligence.verify")
 
@@ -44,7 +44,7 @@ async def run(args, local=None):
 
 async def _run(args, local, analysis_id):
     inputs = stage_inputs()
-    manifest = build_manifest(inputs, analysis_id, str(local.root) if local else "/workspace")
+    manifest = build_manifest(inputs, analysis_id, str(local.root) if local else ACTOR_WORKSPACE)
     client = build_client(args, local)
     session = await client.create(manifest=manifest, options=SubstrateSandboxOptions(template=args.template or "document-intelligence"))
     try:

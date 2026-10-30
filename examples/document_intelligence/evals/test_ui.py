@@ -21,7 +21,7 @@ from starlette.testclient import TestClient  # noqa: E402
 from examples.document_intelligence.evals.scripted import DocumentWorkflowModel  # noqa: E402
 from examples.document_intelligence.main import QUESTION  # noqa: E402
 from examples.document_intelligence.ui.app import create_app  # noqa: E402
-from examples.document_intelligence.ui.server import DocumentChatServer, describe_output, fenced  # noqa: E402
+from examples.document_intelligence.ui.server import DocumentChatServer, UploadRejected, describe_output, fenced, upload_name  # noqa: E402
 from examples.document_intelligence.ui.store import SQLiteStore  # noqa: E402
 from examples.document_intelligence.ui.traces import summarize  # noqa: E402
 from openai_agent_substrate import SubstrateSandboxClient  # noqa: E402
@@ -62,7 +62,11 @@ class StreamingScripted(Model):
         return await self._pick(input).get_response(system_instructions, input, *args, **kwargs)
 
     async def stream_response(self, system_instructions, input, *args, **kwargs):
-        response = await self._pick(input).get_response(system_instructions, input, *args, **kwargs)
+        async for event in self.stream(await self._pick(input).get_response(system_instructions, input, *args, **kwargs)):
+            yield event
+
+    @staticmethod
+    async def stream(response):
         sequence = 0
         for index, item in enumerate(response.output):
             yield ResponseOutputItemAddedEvent.model_construct(type="response.output_item.added", item=item,
@@ -74,8 +78,56 @@ class StreamingScripted(Model):
             id=f"resp_{uuid.uuid4().hex}", output=list(response.output), usage=None, object="response", model="scripted"))
 
 
-def message(text):
-    return {"content": [{"type": "input_text", "text": text}], "attachments": [], "inference_options": {}}
+class ShellSteps(Model):
+    """Streams one exec_command per model call, then a final answer."""
+
+    def __init__(self, commands, answer="Done."):
+        self.commands = list(commands)
+        self.answer = answer
+        self.outputs = []
+
+    async def get_response(self, system_instructions, input, *args, **kwargs):
+        if self.commands and isinstance(input[-1], dict) and input[-1].get("type") == "function_call_output":
+            self.outputs.append(input[-1]["output"])
+        if self.commands and len(self.outputs) < len(self.commands):
+            command = self.commands[len(self.outputs)]
+            output = [ResponseFunctionToolCall(id=f"fc_{uuid.uuid4().hex}", call_id=f"call_{uuid.uuid4().hex}", type="function_call",
+                                               name="exec_command", arguments=json.dumps({"cmd": command, "login": False}))]
+        else:
+            output = [ResponseOutputMessage(id=f"msg_{uuid.uuid4().hex}", role="assistant", type="message", status="completed",
+                                            content=[ResponseOutputText(type="output_text", annotations=[], text=self.answer)])]
+        return ModelResponse(output=output, usage=Usage(), response_id=None)
+
+    async def stream_response(self, system_instructions, input, *args, **kwargs):
+        async for event in StreamingScripted.stream(await self.get_response(system_instructions, input, *args, **kwargs)):
+            yield event
+
+
+def message(text, attachments=()):
+    return {"content": [{"type": "input_text", "text": text}], "attachments": list(attachments), "inference_options": {}}
+
+
+NOTES = b"# Gamma notes\n\nGamma revenue was USD 12.5 billion in fiscal 2025.\nHeadcount grew to 4,100.\n"
+
+
+def citations(quote, document="gamma-notes.md"):
+    payload = json.dumps({"citations": [{"document_id": document, "quote": quote}]})
+    return f"printf '%s' '{payload}' > output/result.json && cat output/result.json"
+
+
+def upload(http, name, data, mime_type="text/markdown"):
+    created = post_chatkit(http, {"type": "attachments.create", "params": {"name": name, "size": len(data), "mime_type": mime_type}})
+    url = created["upload_descriptor"]["url"]
+    assert url.startswith("http://localhost:8000/uploads/")
+    response = http.put(url.removeprefix("http://localhost:8000"), content=data)
+    assert response.status_code == 200, response.text
+    return created["id"]
+
+
+def post_chatkit(http, payload):
+    response = http.post("/chatkit", content=json.dumps(payload), headers={"Content-Type": "application/json"})
+    assert response.status_code == 200, response.text
+    return response.json()
 
 
 async def events(chat, payload):
@@ -198,3 +250,71 @@ def test_untrusted_text_is_fenced_and_tool_output_is_trimmed():
     assert fenced("```\nnot markdown") == "````\n```\nnot markdown\n````"
     status, text = describe_output("Chunk ID: x\nProcess exited with code 127\nOutput:\nsh: rg: not found")
     assert status == "exit 127" and text == "sh: rg: not found"
+
+
+def upload_chat(server, tmp_path, model):
+    client = SubstrateSandboxClient(router_url=server.url, atespace="test-space", control=server.control)
+    store = SQLiteStore(tmp_path / "threads.sqlite3")
+    chat = DocumentChatServer(store, client, model=model, template="document-intelligence", output_dir=tmp_path / "threads",
+                              workspace_root=str(server.root), model_label="scripted")
+    return chat, create_app(chat, config={"model": "scripted", "prompts": []}, port=8000, jaeger_url=None)
+
+
+async def test_uploads_reach_the_actor_workspace_and_their_quotes_are_checked(server, tmp_path):
+    model = ShellSteps(["cat inputs/uploads/gamma-notes.md inputs/uploads/MANIFEST.json",
+                        citations("Gamma revenue was USD 12.5 billion in fiscal 2025.")], answer="Gamma revenue: USD 12.5 billion.")
+    chat, app = upload_chat(server, tmp_path, model)
+    with TestClient(app, base_url="http://localhost:8000") as http:
+        attachment = upload(http, "gamma notes.md", NOTES)
+        assert not (tmp_path / "threads/.staged" / attachment).with_suffix(".part").exists()
+        stream = await events(chat, {"type": "threads.create", "params": {"input": message("What was Gamma's revenue?", [attachment])}})
+        assert not [event for event in stream if event["type"] == "error"]
+        thread_id = next(event["thread"]["id"] for event in stream if event["type"] == "thread.created")
+        assert "Copied 1 upload to inputs/uploads/" in task_titles(stream)
+        assert "Gamma revenue was USD 12.5 billion" in model.outputs[0] and '"sha256"' in model.outputs[0]
+        state = http.get(f"/api/threads/{thread_id}").json()
+        assert state["sources"] == "uploads" and [item["name"] for item in state["uploads"]] == ["gamma-notes.md"]
+        turn = state["turns"][0]
+        assert turn["check"] == {"status": "citations_passed", "count": 1, "documents": ["gamma-notes.md"], "unchecked": []}
+        assert "1 quote matches the uploaded documents" in json.dumps(stream)
+        # Only the upload was staged: an uploads thread starts without the sample reports.
+        assert (server.root / "inputs/uploads/gamma-notes.md").read_bytes() == NOTES
+        assert not (server.root / "inputs/acme-2024.md").exists()
+        assert not (tmp_path / "threads/.staged" / attachment).exists()
+        assert http.get(f"/api/threads/{thread_id}/turns/1/files/inputs/uploads/gamma-notes.md").content == NOTES
+
+        assert http.post("/chatkit", content=json.dumps({"type": "threads.delete", "params": {"thread_id": thread_id}})).status_code == 200
+        assert not (tmp_path / "threads" / thread_id).exists()
+        assert server.control.actors == {}
+
+
+async def test_a_quote_missing_from_the_upload_fails_the_check(server, tmp_path):
+    model = ShellSteps([citations("Gamma revenue was USD 99 billion in fiscal 2025.")])
+    chat, app = upload_chat(server, tmp_path, model)
+    with TestClient(app, base_url="http://localhost:8000") as http:
+        attachment = upload(http, "gamma-notes.md", NOTES)
+        stream = await events(chat, {"type": "threads.create", "params": {"input": message("Revenue?", [attachment])}})
+        thread_id = next(event["thread"]["id"] for event in stream if event["type"] == "thread.created")
+        check = http.get(f"/api/threads/{thread_id}").json()["turns"][0]["check"]
+        assert check["status"] == "failed" and "Not found in gamma-notes.md" in check["detail"]
+        assert "Host check failed" in json.dumps(stream)
+
+
+async def test_uploads_are_validated_before_they_reach_a_workspace(server, tmp_path):
+    chat, app = upload_chat(server, tmp_path, ShellSteps([]))
+    assert upload_name("../../etc/Q3 report (final).MD") == "Q3-report-final.md"
+    with pytest.raises(UploadRejected):
+        upload_name("scan.pdf")
+    with TestClient(app, base_url="http://localhost:8000") as http:
+        rejected = http.post("/chatkit", content=json.dumps({"type": "attachments.create", "params": {
+            "name": "big.md", "size": 2 * 1024 * 1024, "mime_type": "text/markdown"}}))
+        assert rejected.status_code == 400 and "1 MiB" in rejected.json()["error"]
+        assert http.post("/chatkit", content=json.dumps({"type": "attachments.create", "params": {
+            "name": "scan.pdf", "size": 10, "mime_type": "application/pdf"}})).status_code == 400
+        attachment = post_chatkit(http, {"type": "attachments.create", "params": {"name": "a.md", "size": 2, "mime_type": "text/markdown"}})
+        url = "/uploads/" + attachment["id"]
+        assert http.put(url, content=b"\xff\xfe").status_code == 400
+        assert http.put(url, content=b"ok", headers={"Origin": "https://attacker.example"}).status_code == 403
+        assert http.put(url, files={"file": ("a.md", b"ok", "text/markdown")}).status_code == 200
+        assert http.put(url, content=b"again").status_code == 400
+        assert http.put("/uploads/../../threads.sqlite3", content=b"x").status_code == 404

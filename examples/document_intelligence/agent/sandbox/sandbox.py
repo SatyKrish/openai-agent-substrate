@@ -13,6 +13,9 @@ from openai_agent_substrate import KubectlActorControl, SubstrateSandboxClient
 from ..lib.artifacts import digests
 
 WORKSPACE = Path(__file__).resolve().parent / "workspace"
+# The Actor's workspace root. The ActorTemplate mounts its durableDir volume here,
+# so staged inputs, uploads and outputs live and die with the Actor.
+ACTOR_WORKSPACE = "/workspace"
 
 
 def stage_inputs():
@@ -21,6 +24,9 @@ def stage_inputs():
 
 
 def build_manifest(inputs, analysis_id, root):
+    """Stage the sample reports; pass no inputs for a workspace that receives uploads instead."""
+    if not inputs:
+        return Manifest(root=root, entries={"inputs": Dir(children={"uploads": Dir()}), "work": Dir(), "output": Dir()})
     return Manifest(root=root, entries={
         "inputs": Dir(children={**{name: File(content=data) for name, data in inputs.items()},
             "manifest.json": File(content=json.dumps(dict(analysis_id=analysis_id, files=digests(inputs))).encode())}),

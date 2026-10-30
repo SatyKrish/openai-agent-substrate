@@ -8,7 +8,25 @@ from pathlib import Path
 
 from deploy.kubernetes.base.resources import checked
 
+from ..agent.sandbox.sandbox import ACTOR_WORKSPACE
+
 ROOT = Path(__file__).resolve().parents[3]
+
+
+def build_template(image, atespace):
+    """The immutable ActorTemplate; its name is a hash of its content."""
+    template = dict(metadata=dict(atespace=atespace),
+        workerSelector=dict(matchLabels=dict(workload="sandbox")),
+        containers=[dict(name="sandbox", image=image, env=[dict(name="PORT", value="80")],
+                         volumeMounts=[dict(name="workspace", mountPath=ACTOR_WORKSPACE)])],
+        # A per-Actor durableDir: created with the Actor, kept across suspend and resume
+        # by every snapshot, and deleted with the Actor.
+        volumes=[dict(name="workspace", durableDir={})],
+        resources=dict(limits=dict(cpuMillicores=2000, memoryBytes=1073741824)),
+        snapshotConfig=dict(preferredFidelity="SNAPSHOT_FIDELITY_MEMORY"))
+    suffix = hashlib.sha256(json.dumps(template, sort_keys=True).encode()).hexdigest()[:12]
+    template["metadata"]["name"] = "document-intelligence-" + suffix
+    return template
 
 
 def deploy(args):
@@ -28,14 +46,8 @@ def deploy(args):
     image = next((d for d in digests if d.startswith(repository + "@sha256:")), None)
     if image is None:
         raise RuntimeError("Push did not produce a digest for the requested image repository")
-    template = dict(metadata=dict(atespace=args.atespace),
-        workerSelector=dict(matchLabels=dict(workload="sandbox")),
-        containers=[dict(name="sandbox", image=image, env=[dict(name="PORT", value="80")])],
-        resources=dict(limits=dict(cpuMillicores=2000, memoryBytes=1073741824)),
-        snapshotConfig=dict(preferredFidelity="SNAPSHOT_FIDELITY_MEMORY"))
-    suffix = hashlib.sha256(json.dumps(template, sort_keys=True).encode()).hexdigest()[:12]
-    name = "document-intelligence-" + suffix
-    template["metadata"]["name"] = name
+    template = build_template(image, args.atespace)
+    name = template["metadata"]["name"]
     args.output_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = args.output_dir / f"{name}.json"
     manifest_path.write_text(json.dumps(template, indent=2) + "\n")

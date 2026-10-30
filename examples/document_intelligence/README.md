@@ -75,7 +75,10 @@ run records both SDK and OpenTelemetry trace IDs in `verification.json`.
 `./scripts/local-kubernetes.sh ui` serves a ChatKit conversation with an artifact
 panel on <http://localhost:8000>. Each thread is one Actor that the server resumes
 for every message and suspends after it, so you can test multi-turn analyses and
-inspect each turn's files and Jaeger trace. See the [UI guide](ui/README.md).
+inspect each turn's files and Jaeger trace. Attach your own `.md`, `.txt` or `.csv`
+documents: they go into the Actor's workspace volume, which lives exactly as long
+as the conversation, and the host checks the agent's quotes against them. See the
+[UI guide](ui/README.md).
 
 ## Skill and tool execution
 

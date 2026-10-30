@@ -1248,6 +1248,7 @@ dev = [
 ui = [
     { name = "openai-chatkit" },
     { name = "opentelemetry-exporter-otlp-proto-http" },
+    { name = "python-multipart" },
     { name = "starlette" },
     { name = "uvicorn" },
 ]
@@ -1272,6 +1273,7 @@ dev = [
 ui = [
     { name = "openai-chatkit", specifier = "==1.6.5" },
     { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.39,<2" },
+    { name = "python-multipart", specifier = ">=0.0.20" },
     { name = "starlette", specifier = ">=1,<2" },
     { name = "uvicorn", specifier = ">=0.30,<1" },
 ]

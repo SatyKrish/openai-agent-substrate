@@ -67,7 +67,8 @@ function applyTheme() {
 function chatkitOptions() {
   const scheme = resolvedScheme();
   return {
-    api: { url: "/chatkit", domainKey: "local-dev" },
+    // two_phase: attachments.create returns our upload URL, then the browser PUTs the file there.
+    api: { url: "/chatkit", domainKey: "local-dev", uploadStrategy: { type: "two_phase" } },
     initialThread: state.threadId,
     theme: {
       colorScheme: scheme,
@@ -81,7 +82,15 @@ function chatkitOptions() {
       greeting: "Compare the synthetic annual reports in an isolated workspace",
       prompts: (state.config?.prompts || []).map((prompt) => ({ label: prompt.label, prompt: prompt.prompt })),
     },
-    composer: { placeholder: "Ask about the reports…" },
+    composer: {
+      placeholder: "Ask about the reports, or attach your own .md, .txt or .csv files…",
+      attachments: {
+        enabled: true,
+        maxCount: 5,
+        maxSize: 1024 * 1024,
+        accept: { "text/markdown": [".md"], "text/plain": [".txt"], "text/csv": [".csv"] },
+      },
+    },
     threadItemActions: { feedback: false, retry: true },
     widgets: {
       async onAction(action) {
@@ -175,7 +184,7 @@ function filesUpTo(turnNumber) {
     if (turn.number > turnNumber) break;
     for (const file of turn.files || []) latest.set(file.path, { ...file, turn: turn.number });
   }
-  const order = (path) => (path.startsWith("output/") ? 0 : 1);
+  const order = (path) => (path.startsWith("output/") ? 0 : path.startsWith("inputs/") ? 1 : 2);
   return [...latest.values()].sort((a, b) => order(a.path) - order(b.path) || a.path.localeCompare(b.path));
 }
 
@@ -242,9 +251,10 @@ function renderPanel() {
     $("artifact-sub").textContent = "Outputs and traces for each turn appear here";
     body.replaceChildren(el("div", { class: "empty" },
       el("h3", {}, "Ask a question to start"),
-      el("p", {}, "Each conversation gets its own Agent Substrate Actor. The agent works there with the shell and patch tools; " +
-        "after every turn the server copies the workspace files here, checks the report against the original documents, " +
-        "and suspends the Actor until your next message."),
+      el("p", {}, "Each conversation gets its own Agent Substrate Actor with its own workspace volume. Start from the sample " +
+        "reports, or attach your own .md, .txt or .csv files: they are copied into the volume, which lives exactly as long " +
+        "as the conversation. After every turn the server copies the workspace files here, checks the results against the " +
+        "original documents, and suspends the Actor until your next message."),
       el("p", {}, state.config?.tracing ? "Each turn also has a trace in Jaeger." : "Tracing is off: set OTEL_EXPORTER_OTLP_ENDPOINT to see traces.")));
     return;
   }
@@ -256,7 +266,8 @@ function renderPanel() {
     tabs.append(el("button", {
       type: "button", "aria-pressed": String(view?.kind === "file" && view.path === file.path),
       onclick: () => openView(turn.number, { kind: "file", path: file.path }),
-    }, file.path.replace(/^output\//, ""), changedHere ? el("span", { class: "badge" }, file.new ? "new" : "changed") : null));
+    }, file.path.replace(/^output\//, "").replace(/^inputs\//, ""),
+      changedHere ? el("span", { class: "badge" }, file.upload ? "uploaded" : file.new ? "new" : "changed") : null));
   }
   if (turn.otel_trace_id) {
     tabs.append(el("button", {
@@ -285,6 +296,7 @@ function turnNotice(turn) {
   if (turn.status === "failed") return el("div", { class: "notice err" }, `Turn ${turn.number} failed (${turn.error}). The workspace was suspended.`);
   if (!check) return null;
   if (check.status === "passed") return el("div", { class: "notice ok" }, "comparison.md, kpis.csv and result.json match the original documents (host check).");
+  if (check.status === "citations_passed") return el("div", { class: "notice ok" }, `${check.count} quotes in result.json match the uploaded documents (host check).`);
   if (check.status === "failed") return el("div", { class: "notice err" }, `Host check failed: ${check.detail}`);
   return null;
 }
@@ -292,9 +304,13 @@ function turnNotice(turn) {
 async function renderFile(turn, file, body, download) {
   const url = `/api/threads/${encodeURIComponent(state.threadId)}/turns/${file.turn}/files/${file.path.split("/").map(encodeURIComponent).join("/")}`;
   const name = file.path.split("/").pop();
-  const unchecked = (turn.check?.unchecked || []).includes(name);
-  const contract = ["comparison.md", "kpis.csv", "result.json"].includes(name) && file.path.startsWith("output/");
-  const checkLabel = contract && turn.check?.status === "passed" ? "checked" : unchecked ? "not host-checked" : "";
+  const output = file.path.startsWith("output/");
+  const unchecked = output && (turn.check?.unchecked || []).includes(name);
+  const contract = ["comparison.md", "kpis.csv", "result.json"].includes(name) && output;
+  const checkLabel = file.upload ? "uploaded · host copy"
+    : contract && turn.check?.status === "passed" ? "checked"
+    : output && name === "result.json" && turn.check?.status === "citations_passed" ? "citations checked"
+    : unchecked ? "not host-checked" : "";
   $("artifact-title").textContent = name;
   $("artifact-sub").textContent = [file.path, file.too_large ? "over 1 MiB" : formatBytes(file.bytes),
     file.turn === turn.number ? `turn ${file.turn}` : `from turn ${file.turn}`, checkLabel].filter(Boolean).join(" · ");
@@ -312,7 +328,10 @@ async function renderFile(turn, file, body, download) {
   if (body.dataset.view !== viewKey) return; // the user switched tabs meanwhile
   const nodes = [];
   if (unchecked && file.turn === turn.number) {
-    nodes.push(el("div", { class: "notice warn" }, `Not checked on the host: ${name} is the agent's own work. The host check covers comparison.md, kpis.csv and result.json.`));
+    const covered = state.thread?.sources === "uploads"
+      ? "The host check covers the quotes in result.json."
+      : "The host check covers comparison.md, kpis.csv and result.json.";
+    nodes.push(el("div", { class: "notice warn" }, `Not checked on the host: ${name} is the agent's own work. ${covered}`));
   }
   if (!response.ok) nodes.push(el("div", { class: "notice err" }, "The file could not be loaded."));
   else if (name.endsWith(".md")) { body.className = "artifact-body document"; nodes.push(renderMarkdown(text)); }
