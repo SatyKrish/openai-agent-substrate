@@ -1,14 +1,19 @@
-.venv/
+# Python bytecode and package build output. pytest, ruff and mypy caches ignore
+# themselves with their own .gitignore.
 __pycache__/
-*.pyc
-.pytest_cache/
 *.egg-info/
-dist/
 build/
-.env
+dist/
+
+# uv writes its own .gitignore here; this covers a venv made another way.
+.venv/
+
+# Local cluster state, credentials, conversations and logs.
 artifacts/
+
+# Settings with secrets; only the example is tracked.
+.env
 .env.*
 !.env.example
+
 .DS_Store
-.ruff_cache/
-.mypy_cache/
