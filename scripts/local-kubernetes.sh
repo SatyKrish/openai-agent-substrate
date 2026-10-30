@@ -67,7 +67,7 @@ case "${1:-help}" in
     fi
     ;;
   test)
-    uv run --locked python -m examples.quickstart --backend substrate --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG" --output-dir "$LOCAL_DIR/results"
+    uv run --locked python -m examples.provider_check --backend substrate --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG" --output-dir "$LOCAL_DIR/results"
     SUBSTRATE_RUN_KUBERNETES_TESTS=1 SUBSTRATE_KUBE_CONTEXT="kind-$CLUSTER" SUBSTRATE_KUBECONFIG="$KUBECONFIG" uv run --locked pytest -q tests/kubernetes
     ;;
   document-intelligence)
@@ -100,7 +100,7 @@ case "${1:-help}" in
   agent-artifacts)
     uv run --locked python -m examples.document_intelligence.deploy collect --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG"
     ;;
-  ui|sre-ui)
+  ui|sre-ui|starter-ui|starter-chat)
     # The UI server is the trusted harness: it runs on this host with .env's OPENAI_* settings.
     UI_ENV=(OPENAI_AGENTS_DISABLE_TRACING=1)
     if kubectl --context "kind-$CLUSTER" -n openai-agent-substrate get service jaeger-all-in-one >/dev/null 2>&1; then
@@ -118,8 +118,16 @@ case "${1:-help}" in
     fi
     UI_MODULE=examples.document_intelligence.ui
     if [[ "$1" == sre-ui ]]; then UI_MODULE=examples.sre.ui; fi
+    if [[ "$1" == starter-ui ]]; then UI_MODULE=examples.starter.ui; fi
+    # The golden path's last step: chat in the terminal; starter-ui shows the same conversations.
+    if [[ "$1" == starter-chat ]]; then UI_MODULE=examples.starter; fi
     env "${UI_ENV[@]}" uv run --locked --group ui python -m "$UI_MODULE" \
       --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG" "${@:2}"
+    ;;
+  starter-setup)
+    # The golden path's one agent step: the starter's sandbox image and ActorTemplate.
+    configure_docker
+    uv run --locked python -m examples.starter.deploy sandbox --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG"
     ;;
   sre-setup)
     # The SRE sandbox image and template, the demo namespace, then the reader's Roles in it.
@@ -138,7 +146,7 @@ case "${1:-help}" in
     colima stop --profile "$PROFILE"
     ;;
   *)
-    echo "Usage: $0 {setup|test|document-intelligence|agent-setup|agent-test|agent-run|agent-artifacts|tracing-setup|tracing-ui|ui|sre-setup|sre-ui|status|stop}"
+    echo "Usage: $0 {setup|test|document-intelligence|agent-setup|agent-test|agent-run|agent-artifacts|tracing-setup|tracing-ui|ui|starter-setup|starter-chat|starter-ui|sre-setup|sre-ui|status|stop}"
     echo "Uses an isolated Kind cluster and project-local kubeconfig. setup reuses an existing cluster."
     ;;
 esac

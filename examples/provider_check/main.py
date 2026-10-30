@@ -107,7 +107,7 @@ async def _run_demo(args, local=None):
 
 
 def parse_args(argv=None):
-    parser = argparse.ArgumentParser(description="OpenAI SandboxAgent + Agent Substrate reference implementation")
+    parser = argparse.ArgumentParser(description="Provider check: run, suspend and resume a SandboxAgent in an Agent Substrate Actor")
     parser.add_argument("--backend", choices=["local", "substrate"], default="substrate")
     parser.add_argument("--router-url", help="Optional trusted HTTP gateway; defaults to an authenticated per-Actor kubectl proxy")
     parser.add_argument("--atespace", default="ate-demo-sandbox")

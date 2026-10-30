@@ -26,7 +26,7 @@ kubectl ate --context YOUR_KUBERNETES_CONTEXT get actor-template sandbox-templat
 Run the scripted SDK workflow:
 
 ```sh
-uv run python -m examples.quickstart --backend substrate \
+uv run python -m examples.provider_check --backend substrate \
   --context YOUR_KUBERNETES_CONTEXT \
   --atespace ate-demo-sandbox --template sandbox-template
 ```

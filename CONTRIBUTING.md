@@ -9,7 +9,7 @@ Fork the repository, clone your fork, and create a branch for your change. Use P
 ```sh
 uv sync --locked --group ui
 uv run pytest -q
-uv run python -m examples.quickstart --backend local
+uv run python -m examples.provider_check --backend local
 ```
 
 The repository is a uv workspace. Provider changes go in `sandbox/` (the

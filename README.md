@@ -13,124 +13,119 @@ This project follows the [harness separate from compute pattern](https://develop
 
 *Diagram from the [official OpenAI documentation](https://developers.openai.com/api/docs/guides/agents/sandboxes).*
 
-`SubstrateSandboxClient` connects the SDK sandbox interface to the Kubernetes execution environment. Agent Substrate manages Actor lifecycle and routes execution requests to each workspace. See the [architecture and supported capabilities](docs/architecture.md).
-
-The Document Intelligence agent uses the configured OpenAI model for normal
-execution. `--test` and `agent-test` select deterministic execution evaluations.
-See [its agent layout and live run guide](examples/document_intelligence/README.md).
-
-The wheel installs the provider library and reusable testing helpers.
-From a checkout, `pip install ./sandbox` installs the provider without the OpenTelemetry
-SDK or OTLP exporter; use `pip install './sandbox[tracing]'` for OTLP export. Run the
-[quickstart](examples/quickstart/README.md) from a source checkout; the former
-`openai-agent-substrate` console command has been removed.
+`SubstrateSandboxClient` connects the SDK sandbox interface to the Kubernetes execution environment. Agent Substrate manages Actor lifecycle and routes execution requests to each workspace. The agents in this repository run on a [shared agent harness](docs/agent-harness.md): it runs each agent's loop and gives each conversation its own Actor. See the [architecture and supported capabilities](docs/architecture.md).
 
 ## Quick start
 
-Requires Python 3.11+, macOS or Linux, and [uv](https://docs.astral.sh/uv/).
+Run an agent in a Kubernetes sandbox on your machine. You need macOS with
+[Colima](https://github.com/abiosoft/colima) or Linux with Docker, plus Git, Go,
+kubectl, [uv](https://docs.astral.sh/uv/), and an OpenAI API key.
+
+**1. Set up a local cluster with Agent Substrate.** This creates a dedicated Kind
+cluster with a local registry and builds the `kubectl ate` plugin; see the
+[local Kubernetes guide](docs/local-kubernetes.md).
 
 ```sh
 git clone https://github.com/SatyKrish/openai-agent-substrate.git
 cd openai-agent-substrate
-uv sync --locked
-uv run python -m examples.quickstart --backend local
+./scripts/local-kubernetes.sh setup
 ```
 
-The key-free demo invokes the real SDK runner with a scripted model, writes a report, serializes the session, reconnects, and verifies that edits survived. Results appear in `artifacts/`.
-
-**Explicit `--backend local` mode is a protocol simulator that executes fixed commands on your host. It provides no sandbox isolation.** It requires no API key or cluster, and the CLI restricts it to the scripted model. The CLI defaults to Substrate and requires an explicit Kubernetes context.
-
-## Run on Kubernetes
-
-For a complete local setup and test, run `./scripts/local-kubernetes.sh setup` followed by `./scripts/local-kubernetes.sh test`. See the [local Kubernetes guide](docs/local-kubernetes.md).
-
-Prepare a Substrate cluster and its upstream `sandbox-template` using the [deployment guide](docs/deployment.md), then run:
-
-```sh
-uv run python -m examples.quickstart --backend substrate \
-  --context YOUR_KUBERNETES_CONTEXT \
-  --atespace ate-demo-sandbox --template sandbox-template
-```
-
-This creates a uniquely named Actor, exercises shell execution and suspend/resume, and deletes the Actor when finished. Add `--keep-actor` to retain the workspace and save session state. For live model execution, set the API key in the host environment and select a model with `--model YOUR_OPENAI_MODEL_ID`.
-
-The provider is pinned to `openai-agents==0.24.0`. Real Actor execution, authenticated routing, suspend/resume, and external snapshot recovery have been verified on local ARM64 Kind with gVisor. A live Document Intelligence run with `gpt-6.1-terra` also passed through a Secret-backed Kubernetes harness and Substrate Actor. On the shared agent harness, nine live conversations started together all passed their checks, the one beyond the cluster's capacity waited for a sandbox worker instead of failing, and the SRE agent's findings matched the evidence it read. Production isolation properties remain unverified. See the [verification record](docs/verification.md).
-
-## OpenAI configuration in a Kubernetes agent pod
-
-Copy `.env.example` to `.env` and set `OPENAI_API_KEY`, `OPENAI_BASE_URL`, and
-`OPENAI_MODEL`, with optional organization/project IDs. During setup, `.env` is
-imported into a Kubernetes Secret. The dedicated agent harness pod receives it as
-environment variables and read-only files; sandbox Actors receive no credentials.
+**2. Add your OpenAI settings.** Set `OPENAI_API_KEY` and `OPENAI_MODEL` in `.env`.
+The key stays on your machine with the harness; sandboxes never receive it.
 
 ```sh
 cp .env.example .env
-# Edit .env locally.
-./scripts/local-kubernetes.sh setup
-./scripts/local-kubernetes.sh agent-setup
-./scripts/local-kubernetes.sh agent-test       # scripted; no model API calls
-./scripts/local-kubernetes.sh agent-run        # live model from .env
-./scripts/local-kubernetes.sh agent-artifacts  # download reports from the PVC
 ```
 
-See the [Kubernetes agent setup guide](examples/document_intelligence/deploy/README.md) for configuration
-semantics, Secret mounting, permissions, and artifact retention. `agent-run`
-refreshes the Secret and starts a fresh Job, applying endpoint and model changes.
-
-## Document Intelligence example
-
-The [Document Intelligence example](examples/document_intelligence/README.md) loads
-an SDK skill, inspects synthetic annual reports, writes and executes Python in the
-sandbox, and generates cited Markdown, CSV, and JSON artifacts. Independent host
-checks reconcile the downloaded results with original inputs.
+**3. Set up the starter agent.** This builds its sandbox image and registers it
+as an ActorTemplate.
 
 ```sh
-# Key-free execution test on the host protocol simulator (no isolation)
-uv run python -m examples.document_intelligence --test
-
-# After local Kubernetes setup: build the Python Actor image, deploy, and test
-./scripts/local-kubernetes.sh document-intelligence
+./scripts/local-kubernetes.sh starter-setup
 ```
 
-Both commands use fixed model decisions with real SDK tool execution. Select a
-live OpenAI model on Kubernetes using the example's documented `--model` option.
-
-For multi-turn testing with the live model, `./scripts/local-kubernetes.sh ui`
-serves a ChatKit conversation beside an artifact panel on <http://localhost:8000>.
-Each conversation is one Actor with its own workspace volume: the first message
-creates it, later messages resume it, and deleting the conversation deletes it.
-Attach PDF, Markdown, text or CSV files and inspect every turn's files and Jaeger
-trace. PDFs are extracted and rendered inside the Actor, and the agent's quotes
-are checked against the cited page. See the
-[UI guide](examples/document_intelligence/ui/README.md).
-
-## More agents on one harness
-
-The UI runs on a [shared agent harness](docs/agent-harness.md): the agent loop
-runs in the trusted harness and tools run in the agent's sandbox, so a new agent
-is a `SandboxAgent`, a small spec, a sandbox image and its own UI. The
-[SRE agent](examples/sre/README.md) is the second one. It reads the cluster
-through read-only harness tools, saves each read as evidence for its sandbox to
-analyze, and the host checks every quote in its findings against that evidence.
+**4. Chat with it** in your terminal.
 
 ```sh
-./scripts/local-kubernetes.sh sre-setup
-./scripts/local-kubernetes.sh sre-ui      # http://localhost:8001
+./scripts/local-kubernetes.sh starter-chat
 ```
+
+Ask it to compute something, for example the primes below 200. You see each
+step as it happens: the agent writes and runs Python in its own Actor, saves the
+results in `output/`, and the host checks them after the turn. The chat prints
+where each saved file is on your machine. The first message creates the Actor,
+later messages resume it, and `/quit` leaves the conversation suspended for
+later (`/list` and `/open` find it again). To ask one question and exit, pass
+it as an argument: `./scripts/local-kubernetes.sh starter-chat "What is 2**100?"`.
+
+**Optional: open the UI.** `./scripts/local-kubernetes.sh starter-ui` serves
+the same conversations in a browser at <http://localhost:8002>, with each turn's
+files beside the chat. Use one or the other for a conversation at a time. For a
+trace of each turn, run `./scripts/local-kubernetes.sh tracing-setup` first; the
+chat and the UI then link each turn to Jaeger.
+
+## Build your own agent
+
+Copy [`examples/starter`](examples/starter/README.md). An agent is four small pieces:
+
+| Piece | File | What you change |
+| --- | --- | --- |
+| The agent | `agent/agent.py`, `instructions.md` | A plain SDK `SandboxAgent`: instructions, tools, skills |
+| Its spec | `agent/spec.py` | The starting workspace, the host check, and optional harness tools and uploads |
+| Its sandbox | `deploy/sandbox.Dockerfile`, `deploy/__main__.py` | The tools in the image, and its CPU and memory |
+| Its front ends | `__main__.py`, `server.py`, `ui/` | The terminal chat, the settings both share, and the optional UI |
+
+The [harness guide](harness/README.md) describes what the harness does each
+turn, and the [design](docs/agent-harness.md) explains the split.
+
+## More agents
+
+- **[Document Intelligence](examples/document_intelligence/README.md)** analyzes
+  reports and your own PDF, Markdown, text or CSV uploads, with quotes checked
+  against the cited page. Deploy its sandbox with
+  `./scripts/local-kubernetes.sh document-intelligence`, then open its UI with
+  `./scripts/local-kubernetes.sh ui` (<http://localhost:8000>). Its command-line
+  workflow also runs as a Kubernetes Job with the harness in a pod:
+  `agent-setup`, then `agent-test` (scripted) or `agent-run` (live); see the
+  [Kubernetes agent setup guide](examples/document_intelligence/deploy/README.md).
+- **[SRE agent](examples/sre/README.md)** investigates unhealthy workloads with
+  read-only cluster access in the harness, analyzes the evidence in its sandbox,
+  and has its findings checked against that evidence:
+  `./scripts/local-kubernetes.sh sre-setup`, then `sre-ui` (<http://localhost:8001>).
+
+## Use the provider in your own application
+
+The provider is the `openai-agent-substrate` package in `sandbox/`. From a
+checkout, `pip install ./sandbox` installs it without the OpenTelemetry SDK or
+OTLP exporter; use `pip install './sandbox[tracing]'` for OTLP export. See
+[SDK integration and session resume](docs/usage.md) and, for a cluster you
+already run, the [deployment guide](docs/deployment.md).
+
+The [provider check](examples/provider_check/README.md) exercises the provider
+alone: it runs a scripted SDK agent in an Actor, suspends, serializes, resumes,
+and confirms the workspace survived. With `--backend local` it needs no cluster
+or API key, but it runs commands on your host: **local mode is a protocol
+simulator with no sandbox isolation.**
+
+```sh
+uv sync --locked
+uv run python -m examples.provider_check --backend local
+./scripts/local-kubernetes.sh test   # the same check, and the provider tests, on the Kind cluster
+```
+
+## Verification
+
+The provider is pinned to `openai-agents==0.24.0`. Real Actor execution, authenticated routing, suspend/resume, and external snapshot recovery have been verified on local ARM64 Kind with gVisor. A live Document Intelligence run with `gpt-6.1-terra` also passed through a Secret-backed Kubernetes harness and Substrate Actor. On the shared agent harness, nine live conversations started together all passed their checks, the one beyond the cluster's capacity waited for a sandbox worker instead of failing, and the SRE agent's findings matched the evidence it read. Production isolation properties remain unverified. See the [verification record](docs/verification.md).
 
 ## Tracing
 
-Export SDK model/tool spans and sandbox execution/lifecycle spans to local Jaeger:
-
-```sh
-./scripts/local-kubernetes.sh tracing-setup
-./scripts/local-kubernetes.sh agent-run
-./scripts/local-kubernetes.sh tracing-ui
-```
-
-The [tracing guide](docs/tracing.md) covers configuration, trace verification,
-span content, and the loopback UI. Rebuild the agent Job image with `agent-setup` after
-updating source. The exporter stays in the trusted harness.
+`./scripts/local-kubernetes.sh tracing-setup` deploys Jaeger. The agent UIs
+then link each turn to its trace, which holds the SDK's model and tool spans
+and the sandbox's execution and lifecycle spans; `tracing-ui` opens Jaeger on
+<http://127.0.0.1:16686>. The [tracing guide](docs/tracing.md) covers
+configuration, span content and verification. The exporter stays in the
+trusted harness.
 
 ## Repository layout
 
@@ -141,7 +136,7 @@ sandbox/                    The provider library (openai-agent-substrate), the o
     testing/                Scripted model and loopback execution helpers
 harness/                    Shared agent harness package: the agent loop, one sandbox per conversation
   src/harness/              ChatKit runtime, uploads, evidence, checks, routes, test helpers
-examples/                   The agents that run on the harness, and the provider quickstart
+examples/                   The starter agent, the other agents, and the provider check
 tests/                      Provider unit and integration tests, deployment and boundary checks
 docs/                       Architecture, deployment, usage, and development guides
   assets/                   Documentation images
@@ -158,7 +153,7 @@ third_party/                Pinned upstream execution server and its license
 - [Existing-cluster setup](docs/deployment.md)
 - [SDK integration and session resume](docs/usage.md)
 - [Tracing with Jaeger](docs/tracing.md)
-- [Runnable examples](examples/README.md), the [Document Intelligence UI](examples/document_intelligence/ui/README.md) and the [SRE agent](examples/sre/README.md)
+- [Starter agent](examples/starter/README.md), [all examples](examples/README.md), the [Document Intelligence UI](examples/document_intelligence/ui/README.md) and the [SRE agent](examples/sre/README.md)
 - [Shared harness package](harness/README.md)
 - [Development](docs/development.md) and the [verification record](docs/verification.md)
 

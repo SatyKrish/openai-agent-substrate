@@ -36,6 +36,7 @@ Date: 2026-10-29.
 | Sandbox size on Kubernetes | Passed: at 0.5 CPU and 480 MiB per Actor, 8 Actors ran at once on two workers instead of 2; four live conversations started together all passed in 38–42 s |
 | Shared agent harness on Kubernetes | Passed with `gpt-6.1-terra`: nine conversations started together all completed and passed their checks, the one beyond capacity waited 41 s for a worker, and two messages sent to one conversation at once both kept their turn |
 | SRE agent on Kubernetes | Passed with `gpt-6.1-terra`: read-only cluster reads ran in the harness, analysis ran in the sandbox, and every quote in its findings matched the host's copy of the evidence |
+| Golden path on Kubernetes | Passed with `gpt-6.1-terra`: `starter-setup` registered the starter's template; `starter-chat` ran a two-turn conversation in one Actor from the terminal (one question, then an interactive follow-up) with passing host checks and traces; `starter-ui`, running at the same time, showed the same conversation |
 
 The Kubernetes path uses owned loopback `kubectl ate proxy actor` processes and authenticated Substrate ingress. The scripted infrastructure tests exercise the real SDK runner and actual sandbox execution without model calls. The separate live OpenAI run is recorded below.
 
@@ -431,6 +432,29 @@ provider from `sandbox/` inside the image), the scripted agent Job completed
 with the host contract verified, both sandbox template names stayed the same,
 and both UIs served their earlier conversations. The full local suite passed
 135 tests and the upstream-server protocol suite 81.
+
+## Golden path: the starter agent
+
+The quick start was followed on the existing local Kind cluster with
+`gpt-6.1-terra`. `starter-setup` built the starter's sandbox image and
+registered `starter-dd6e581f206c` (0.5 CPU, 480 MiB).
+
+- **Terminal, one question:** `starter-chat "Find the primes below 200 …"`
+  created an Actor and streamed each step: the workspace (1.7 s), four tool
+  calls with their commands (one exited 1 and the agent fixed its script), the
+  answer, the passing host check, the host path of `output/primes.csv` (46
+  primes, 2 to 199) and the turn's Jaeger link. 19.7 s in all.
+- **Terminal, interactive:** `starter-chat --thread ID` with a follow-up resumed
+  the same Actor (0.8 s) and saved the count and sum, 46 and 4,227, both
+  correct, in 8.7 s; `/files` and `/list` worked and `/quit` left it suspended.
+- **UI alongside:** `starter-ui` ran at the same time on the same data folder
+  and listed the terminal's conversation with both turns. An earlier
+  conversation started in the UI (14.5 s and 9.4 s turns, same results) showed
+  its cards, files, check and trace link in the browser.
+
+The quickstart, which only exercised the provider, is now the provider check
+(`examples/provider_check`); `./scripts/local-kubernetes.sh test` and CI still
+run it.
 
 ## Limits of this verification
 

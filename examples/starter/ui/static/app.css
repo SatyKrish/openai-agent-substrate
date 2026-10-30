@@ -1,0 +1,43 @@
+/* Copyright 2026 openai-agent-substrate contributors
+   SPDX-License-Identifier: Apache-2.0 */
+:root {
+  --bg: #F7F7F5; --surface: #FFFFFF; --text: #1F1F1C; --muted: #6B6A64; --border: #E2E1DC;
+  --accent: #2F5BD3; --ok: #1E7A46; --ok-bg: #E6F4EC; --err: #B42318; --err-bg: #FDECEA;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #141412; --surface: #1C1C1A; --text: #EDEDEA; --muted: #A09F98; --border: #33322E;
+    --accent: #97ADE9; --ok: #7FD1A2; --ok-bg: #16301F; --err: #F2A097; --err-bg: #3A1B17;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { display: flex; flex-direction: column; background: var(--bg); color: var(--text);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+.bar { display: flex; align-items: center; gap: 16px; padding: 10px 16px; border-bottom: 1px solid var(--border);
+  background: var(--surface); }
+.bar button { margin-left: auto; }
+.muted { color: var(--muted); }
+button { font: inherit; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--text); cursor: pointer; }
+button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+main { flex: 1; display: grid; grid-template-columns: minmax(360px, 1fr) minmax(320px, 1fr); min-height: 0; }
+#chat { position: relative; min-height: 0; border-right: 1px solid var(--border); }
+#chat openai-chatkit { display: block; height: 100%; }
+#panel { display: flex; flex-direction: column; min-height: 0; padding: 12px 16px; gap: 10px; }
+#files { display: flex; flex-wrap: wrap; gap: 6px; }
+#viewer { flex: 1; min-height: 0; overflow: auto; border: 1px solid var(--border); border-radius: 10px;
+  background: var(--surface); padding: 12px; }
+#viewer pre { margin: 0; white-space: pre-wrap; font: 12.5px/1.5 ui-monospace, Menlo, monospace; }
+.notice { margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--surface); border: 1px solid var(--border); }
+.notice.ok { background: var(--ok-bg); color: var(--ok); border-color: transparent; }
+.notice.err { background: var(--err-bg); color: var(--err); border-color: transparent; }
+#chat-error { position: absolute; inset: 16px; color: var(--err); }
+a { color: var(--accent); }
+@media (max-width: 800px) {
+  main { grid-template-columns: 1fr; grid-template-rows: 60vh auto; }
+  #chat { border-right: 0; border-bottom: 1px solid var(--border); }
+  .bar { flex-wrap: wrap; gap: 8px; }
+}

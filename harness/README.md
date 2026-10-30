@@ -18,7 +18,8 @@ the [design](../docs/agent-harness.md) lists what it needs first.
 | `uploads.py`, `steps.py` | ChatKit's two-phase uploads; tool calls as workflow steps |
 | `store.py`, `traces.py` | ChatKit's SQLite store; the Jaeger trace summary for a turn |
 | `http.py` | Routes an agent UI composes: ChatKit, uploads, thread state, recorded files, traces |
-| `settings.py` | `OPENAI_*` settings for UI launchers |
+| `terminal.py` | `TerminalChat`: a terminal front end on the same server and store as an agent's UI |
+| `settings.py` | `OPENAI_*` settings for launchers |
 | `testing.py` | A scripted streaming model and ChatKit request helpers for agents' tests |
 
 An agent's sandbox image and size are deploy-time concerns:
@@ -45,6 +46,9 @@ output as evidence: a host copy, which checks read, and
 `evidence/NNN-label.txt` in the workspace, which code in the sandbox reads.
 
 ## Adding an agent
+
+Start by copying the [starter agent](../examples/starter/README.md), the
+smallest complete agent on the harness. Its spec looks like this:
 
 ```python
 from harness.spec import AgentSpec

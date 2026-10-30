@@ -5,11 +5,11 @@ import sys
 
 import pytest
 
-from examples.quickstart import main as demo
+from examples.provider_check import main as demo
 
 
 def test_default_command_does_not_start_a_host_execution_server(monkeypatch):
-    monkeypatch.setattr(sys, "argv", ["quickstart"])
+    monkeypatch.setattr(sys, "argv", ["provider_check"])
 
     def reject(**kwargs):
         pytest.fail("Host execution requires explicit --backend local")

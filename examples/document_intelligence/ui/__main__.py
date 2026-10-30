@@ -36,7 +36,7 @@ def parse_args(argv=None):
         if deployment.get("context") == args.context:
             args.template = deployment["template"]
     if not args.template:
-        parser.error("Pass --template, or deploy the sandbox image first (local-kubernetes.sh agent-setup)")
+        parser.error("Pass --template, or deploy the sandbox image first (local-kubernetes.sh document-intelligence)")
     try:
         args.model = live_model(args.model)
     except ValueError as error:

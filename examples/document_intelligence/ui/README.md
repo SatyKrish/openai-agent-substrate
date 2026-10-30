@@ -27,7 +27,8 @@ message incurs model API usage.
 ## Run it
 
 After [local Kubernetes setup](../../../docs/local-kubernetes.md), deploy the
-Python sandbox image and template (`agent-setup`) and Jaeger (`tracing-setup`), then:
+Python sandbox image and template (`document-intelligence`) and, for traces,
+Jaeger (`tracing-setup`), then:
 
 ```sh
 ./scripts/local-kubernetes.sh ui

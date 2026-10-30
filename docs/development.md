@@ -24,7 +24,7 @@ The default tests and demo use a deterministic model and temporary local workspa
 uv run ruff check sandbox harness scripts deploy examples tests conftest.py
 uv run mypy
 uv run pytest -q
-uv run python -m examples.quickstart --backend local --output-dir artifacts/local
+uv run python -m examples.provider_check --backend local --output-dir artifacts/local
 ```
 
 Tests cover native skill loading, domain code execution, exact citations and artifact reconciliation, the actual SDK tool loop, filesystem patching, binary files and batched multi-command transfers, shell output/exit codes, routing headers, state serialization and resume, lost Actors, unsupported manifest options, file limits, and non-replay of failed executions.
@@ -42,7 +42,7 @@ For wire compatibility with the actual upstream Go execution server:
 mkdir -p artifacts
 go build -o artifacts/upstream-sandbox-server third_party/substrate-sandbox/main.go
 SUBSTRATE_DEMO_BINARY="$PWD/artifacts/upstream-sandbox-server" uv run pytest -q
-uv run python -m examples.quickstart --backend local \
+uv run python -m examples.provider_check --backend local \
   --upstream-binary "$PWD/artifacts/upstream-sandbox-server" \
   --output-dir artifacts/upstream
 ```
@@ -139,7 +139,7 @@ workspace root with its environment.
 - Keep Actor lifecycle and credentials in the trusted application.
 - Implement backend behavior in `sandbox/src/openai_agent_substrate/`, and agent-runtime behavior in `harness/src/harness/`.
 - Keep domain agent definitions and skills under `examples/DOMAIN/agent/` and their evaluations under sibling `evals/`.
-- Keep runnable session utilities under `examples/quickstart/` and shared Kubernetes setup under `deploy/kubernetes/base/`. `scripts/` contains only the shell bootstrap.
+- Keep runnable session utilities under `examples/provider_check/` and shared Kubernetes setup under `deploy/kubernetes/base/`. `scripts/` contains only the shell bootstrap.
 - Keep provider scripted models and loopback emulation under `sandbox/src/openai_agent_substrate/testing/`, and agent test helpers in `harness.testing`.
 - Put pure lifecycle tests in `tests/unit/` and HTTP/SDK contract tests in `tests/integration/`.
 - Keep unsupported capabilities explicit and preserve saved-session compatibility.

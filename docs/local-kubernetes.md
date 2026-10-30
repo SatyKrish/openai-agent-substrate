@@ -47,13 +47,13 @@ For a retained workspace:
 
 ```sh
 export PATH="$PWD/artifacts/local/bin:$PATH"
-uv run python -m examples.quickstart --backend substrate \
+uv run python -m examples.provider_check --backend substrate \
   --context kind-openai-agent-substrate \
   --kubeconfig artifacts/local/kubeconfig \
   --output-dir artifacts/local/demo --keep-actor
 ```
 
-Use `python -m examples.quickstart.resume` with the same context, kubeconfig, and `artifacts/local/demo/session.json` to inspect the retained Actor. Add `--delete` to delete that Actor when finished.
+Use `python -m examples.provider_check.resume` with the same context, kubeconfig, and `artifacts/local/demo/session.json` to inspect the retained Actor. Add `--delete` to delete that Actor when finished.
 
 ## Jaeger tracing
 
@@ -62,6 +62,10 @@ configure OTLP for new agent Jobs. Run `agent-run` for live model inference, or
 `agent-test` for an explicit scripted evaluation. Start `tracing-ui` in another
 terminal to open a loopback port forward for <http://127.0.0.1:16686>.
 See [tracing and independent verification](tracing.md) for the complete workflow.
+
+The quick start's golden path is `setup`, `.env`, `starter-setup`, then
+`starter-chat`, a terminal chat with the [starter agent](../examples/starter/README.md).
+`starter-ui` optionally serves the same conversations on <http://localhost:8002>.
 
 For multi-turn testing, `./scripts/local-kubernetes.sh ui` serves the
 [Document Intelligence UI](../examples/document_intelligence/ui/README.md) on

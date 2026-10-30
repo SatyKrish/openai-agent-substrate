@@ -32,7 +32,9 @@ flowchart LR
 ```
 
 Each agent example keeps its UI: the page, its HTTP routes and its launcher.
-The harness has no page of its own.
+The harness has no page of its own. It does provide a terminal chat
+(`harness.terminal`), which drives the same server in-process, so a terminal
+conversation is an ordinary thread that the agent's UI also lists.
 
 ## Standards, not a new agent format
 
@@ -122,10 +124,12 @@ harness/                      Harness package (no UI pages): src/harness/
   uploads.py, steps.py        Upload staging; tool calls as workflow steps
   store.py, traces.py         ChatKit's SQLite store; Jaeger trace summary
   http.py                     Routes an agent UI composes
-  settings.py                 OPENAI_* settings for UI launchers
+  terminal.py                 Terminal chat on the same server and store as the UIs
+  settings.py                 OPENAI_* settings for launchers
   testing.py                  Scripted model and ChatKit helpers for agents' tests
 harness/tests/                Lock and reload, capacity waits, history, evidence
 deploy/kubernetes/sandbox.py  Sandbox profile to ActorTemplate (deploy time)
+examples/starter/             The golden path: smallest complete agent, terminal chat and optional UI (port 8002)
 examples/document_intelligence/
   agent/                      SandboxAgent, skills, spec, PDF processor, citation checks
   ui/                         Its page, routes, card and launcher (port 8000)
@@ -149,9 +153,9 @@ In rough order, as the harness grows:
 
 1. **Split the runtime from ChatKit.** `chat.py` holds both the conversation
    runtime and the ChatKit protocol. A runtime that reports progress as plain
-   events would let the chat UIs, a one-shot command line or Kubernetes Job,
-   and alert webhooks share it. The Document Intelligence command line and Job
-   would then drop their own runner.
+   events would let the chat UIs, the terminal chat (which now reads the ChatKit
+   stream), a Kubernetes Job and alert webhooks share it. The Document
+   Intelligence command line and Job would then drop their own runner.
 2. **One launcher.** The two UI launchers repeat argument parsing, client,
    store and tracing setup; a shared `serve` helper would cut each to a few lines.
 3. **Run the harness in the cluster.** Postgres for the ChatKit store and

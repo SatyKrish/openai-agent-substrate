@@ -208,7 +208,7 @@ and revenue gap **USD 117.8 billion**. EBITDA is unavailable.
 
 Actors are deleted by default. Add `--keep-actor` on Substrate to suspend the
 workspace and save `session.json`. Inspect it with
-`uv run python -m examples.quickstart.resume --context CONTEXT --state-file PATH`,
+`uv run python -m examples.provider_check.resume --context CONTEXT --state-file PATH`,
 including the same kubeconfig and atespace when applicable. Do not publish
 credentials or session state from real document workflows.
 
