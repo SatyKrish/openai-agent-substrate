@@ -117,7 +117,7 @@ stay in the repository. `uv sync --locked` installs the provider for development
 `--group ui` adds the harness and its ChatKit dependencies.
 
 The package CI also installs the base wheel in a fresh environment and runs
-`tests/packaging/core_smoke.py`. It verifies provider import and sandbox execution
+`sandbox/tests/packaging/core_smoke.py`. It verifies provider import and sandbox execution
 without the OpenTelemetry SDK or OTLP exporter; the upstream SDK may still bring
 the OpenTelemetry API through MCP. Development dependencies include the exporter
 for tracing tests and source examples.
@@ -125,7 +125,7 @@ for tracing tests and source examples.
 ## Dependency boundaries and manifest contracts
 
 `tests/deploy/` checks reusable base resources and dependency direction. Library
-tests stay under `tests/unit`, `tests/integration` and `tests/kubernetes` and do
+tests stay under `sandbox/tests/` (`unit`, `integration`, `kubernetes`) and do
 not import example applications. Example checks live under their `evals/`
 folders, including the Document Intelligence Kubernetes checks.
 
@@ -144,7 +144,7 @@ workspace root with its environment.
 - Keep domain agent definitions and skills under `examples/DOMAIN/agent/` and their evaluations under sibling `evals/`.
 - Keep runnable session utilities under `examples/provider_check/` and shared Kubernetes setup under `deploy/kubernetes/base/`. `scripts/` contains only the shell bootstrap.
 - Keep provider scripted models and loopback emulation under `sandbox/src/openai_agent_substrate/testing/`, and agent test helpers in `openai_harness.testing`.
-- Put pure lifecycle tests in `tests/unit/` and HTTP/SDK contract tests in `tests/integration/`.
+- Put pure lifecycle tests in `sandbox/tests/unit/` and HTTP/SDK contract tests in `sandbox/tests/integration/`; harness tests go in `harness/tests/`, and repository-wide checks (deployment resources, layer boundaries) in `tests/`.
 - Keep unsupported capabilities explicit and preserve saved-session compatibility.
 - Update [architecture and limits](architecture.md) when behavior changes.
 

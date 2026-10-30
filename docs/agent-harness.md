@@ -121,7 +121,7 @@ and a demo namespace with a crash-looping and an unpullable workload.
 
 ```text
 pyproject.toml                uv workspace root
-sandbox/                      Provider package: src/openai_agent_substrate (ActorCapacityError added)
+sandbox/                      Provider package: src/openai_agent_substrate (ActorCapacityError added), tests/
 harness/                      Harness package openai-harness (no UI pages): src/openai_harness/
   spec.py                     AgentSpec, Conversation, TurnContext
   chat.py                     ChatKit adapter and conversation runtime

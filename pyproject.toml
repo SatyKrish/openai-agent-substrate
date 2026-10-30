@@ -22,7 +22,7 @@ ui = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "harness/tests", "examples/document_intelligence/evals", "examples/sre/evals", "examples/starter/evals", "examples/provider_check/evals"]
+testpaths = ["tests", "sandbox/tests", "harness/tests", "examples/document_intelligence/evals", "examples/sre/evals", "examples/starter/evals", "examples/provider_check/evals"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 

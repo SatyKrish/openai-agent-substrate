@@ -54,7 +54,7 @@ export PATH="$PWD/artifacts/local/bin:$PATH"
 SUBSTRATE_RUN_KUBERNETES_TESTS=1 \
 SUBSTRATE_KUBE_CONTEXT=kind-openai-agent-substrate \
 SUBSTRATE_KUBECONFIG="$PWD/artifacts/local/kubeconfig" \
-uv run --locked pytest -q tests/kubernetes
+uv run --locked pytest -q sandbox/tests/kubernetes
 ```
 
 For a retained workspace:

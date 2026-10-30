@@ -153,10 +153,12 @@ pyproject.toml              uv workspace root: dev tools and test settings, no p
 sandbox/                    The provider library (openai-agent-substrate), the only published wheel
   src/openai_agent_substrate/  SDK provider, transport, lifecycle, tracing
     testing/                Scripted model and loopback execution helpers
+  tests/                    Provider unit, integration, Kubernetes and packaging tests
 harness/                    Shared agent harness package: the agent loop, one sandbox per conversation
   src/openai_harness/       ChatKit runtime, uploads, evidence, checks, routes, test helpers
+  tests/                    Harness tests
 examples/                   The starter agent, the other agents, and the provider check
-tests/                      Provider unit and integration tests, deployment and boundary checks
+tests/                      Repository-wide checks: deployment resources and layer boundaries
 docs/                       Architecture, deployment, usage, and development guides
   assets/                   Documentation images
 scripts/                    Local Kind bootstrap and CLI dispatch
