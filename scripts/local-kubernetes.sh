@@ -56,8 +56,17 @@ case "${1:-help}" in
     else
       (cd "$SOURCE_DIR" && hack/kind.sh export kubeconfig --name "$CLUSTER" --kubeconfig "$KUBECONFIG")
     fi
+    # Agent Substrate's quickstart (docs/get-started/quickstart.md), step by step:
+    # step 1 created the cluster and registry above; step 2 is ATE_INSTALL_KIND, exported at the top.
+    # Step 5's CLI is built into artifacts/local/bin, not `go install`ed, so it matches the pinned commit
+    # and leaves any other kubectl-ate on this machine alone.
     (cd "$SOURCE_DIR" && go build -o "$LOCAL_DIR/bin/kubectl-ate" ./cmd/kubectl-ate)
-    (cd "$SOURCE_DIR" && go run ./cmd/ate-setup --no-dev-env --rollout-timeout 300s deploy ate-system --credential-provider='{"enabled":false}' --ingress-allowed-spiffe-ids=spiffe://cluster.local/ns/ate-system/sa/atenet-client) 2>&1 | tee "$LOCAL_DIR/substrate-setup.log"
+    # Step 3, with the quickstart's flags. The bundled credential provider starts with a default-deny
+    # policy, and no atespace here is granted any namespace, so sandboxes receive no credentials.
+    # --no-dev-env ignores a personal .ate-dev-env.sh in the checkout; Colima needs the longer rollout timeout.
+    (cd "$SOURCE_DIR" && go run ./cmd/ate-setup --no-dev-env --rollout-timeout 300s deploy ate-system --credential-provider='{"name":"k8s.io"}' --ingress-allowed-spiffe-ids=spiffe://cluster.local/ns/ate-system/sa/atenet-client) 2>&1 | tee "$LOCAL_DIR/substrate-setup.log"
+    # Step 4 deploys a sample application. The sandbox demo replaces the counter: its WorkerPool
+    # (workload=sandbox) runs every agent's Actors, and the provider check uses its template.
     (cd "$SOURCE_DIR" && go run ./cmd/ate-setup --no-dev-env --rollout-timeout 300s deploy demo sandbox) 2>&1 | tee "$LOCAL_DIR/sandbox-setup.log"
     uv sync --locked
     if [[ -f "$PROJECT_ROOT/.env" ]]; then
@@ -141,12 +150,18 @@ case "${1:-help}" in
     kubectl --context "kind-$CLUSTER" get pods -n ate-system
     kubectl --context "kind-$CLUSTER" get workerpools,pods -n ate-demo-sandbox
     ;;
+  teardown)
+    # The quickstart's teardown: delete the Kind cluster and its registry. Conversations' Actors go with it.
+    configure_docker
+    (cd "$SOURCE_DIR" && hack/delete-kind-cluster.sh)
+    rm -f "$KUBECONFIG"
+    ;;
   stop)
     [[ "$(uname -s)" == Darwin ]] || { echo "Stop your Linux container runtime manually when appropriate." >&2; exit 1; }
     colima stop --profile "$PROFILE"
     ;;
   *)
-    echo "Usage: $0 {setup|test|document-intelligence|agent-setup|agent-test|agent-run|agent-artifacts|tracing-setup|tracing-ui|ui|starter-setup|starter-chat|starter-ui|sre-setup|sre-ui|status|stop}"
+    echo "Usage: $0 {setup|test|document-intelligence|agent-setup|agent-test|agent-run|agent-artifacts|tracing-setup|tracing-ui|ui|starter-setup|starter-chat|starter-ui|sre-setup|sre-ui|status|stop|teardown}"
     echo "Uses an isolated Kind cluster and project-local kubeconfig. setup reuses an existing cluster."
     ;;
 esac

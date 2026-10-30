@@ -37,8 +37,10 @@ Run an agent in a Kubernetes sandbox on your machine. You need macOS with
 [Colima](https://github.com/abiosoft/colima) or Linux with Docker, plus Git, Go,
 kubectl, [uv](https://docs.astral.sh/uv/), and an OpenAI API key.
 
-**1. Set up a local cluster with Agent Substrate.** This creates a dedicated Kind
-cluster with a local registry and builds the `kubectl ate` plugin; see the
+**1. Set up a local cluster with Agent Substrate.** This follows Agent
+Substrate's own [quickstart](https://ate.dev/docs/get-started/quickstart/): a
+dedicated Kind cluster with a local registry, Substrate itself, its sandbox
+worker pool and the `kubectl ate` plugin. See the
 [local Kubernetes guide](docs/local-kubernetes.md).
 
 ```sh
@@ -74,6 +76,7 @@ where each saved file is on your machine. The first message creates the Actor,
 later messages resume it, and `/quit` leaves the conversation suspended for
 later (`/list` and `/open` find it again). To ask one question and exit, pass
 it as an argument: `./scripts/local-kubernetes.sh starter-chat "What is 2**100?"`.
+When you're done, `./scripts/local-kubernetes.sh teardown` deletes the cluster.
 
 **Optional: open the UI.** `./scripts/local-kubernetes.sh starter-ui` serves
 the same conversations in a browser at <http://localhost:8002>, with each turn's

@@ -37,6 +37,7 @@ Date: 2026-10-29.
 | Shared agent harness on Kubernetes | Passed with `gpt-6.1-terra`: nine conversations started together all completed and passed their checks, the one beyond capacity waited 41 s for a worker, and two messages sent to one conversation at once both kept their turn |
 | SRE agent on Kubernetes | Passed with `gpt-6.1-terra`: read-only cluster reads ran in the harness, analysis ran in the sandbox, and every quote in its findings matched the host's copy of the evidence |
 | Golden path on Kubernetes | Passed with `gpt-6.1-terra`: `starter-setup` registered the starter's template; `starter-chat` ran a two-turn conversation in one Actor from the terminal (one question, then an interactive follow-up) with passing host checks and traces; `starter-ui`, running at the same time, showed the same conversation |
+| Setup aligned with Substrate's quickstart | Passed: rerunning `setup` with the quickstart's bundled `k8s.io` credential provider (default-deny) rolled out cleanly; the provider check and Kubernetes test passed, an existing conversation resumed its Actor, and a new sandbox had no credentials |
 
 The Kubernetes path uses owned loopback `kubectl ate proxy actor` processes and authenticated Substrate ingress. The scripted infrastructure tests exercise the real SDK runner and actual sandbox execution without model calls. The separate live OpenAI run is recorded below.
 
@@ -455,6 +456,25 @@ registered `starter-dd6e581f206c` (0.5 CPU, 480 MiB).
 The quickstart, which only exercised the provider, is now the provider check
 (`examples/provider_check`); `./scripts/local-kubernetes.sh test` and CI still
 run it.
+
+## Setup aligned with Substrate's quickstart
+
+`setup` now runs Agent Substrate's quickstart steps with its flags, including
+the bundled `k8s.io` credential provider in place of `{"enabled":false}`; the
+local Kubernetes guide maps each step. Rerunning it on the existing cluster
+deployed `k8s-credential-provider` and rolled out the other components. Then:
+
+- `./scripts/local-kubernetes.sh test`: the provider check on Agent Substrate
+  passed (workspace survived resume, initial manifest not reapplied), and so
+  did the opt-in Kubernetes test.
+- A starter conversation from before the change resumed its Actor in 0.7 s and
+  answered from its saved files.
+- A new conversation passed the harness's no-credentials check, and the agent
+  reported that `OPENAI_API_KEY` is not set in its sandbox: the provider's
+  default-deny policy grants this repository's atespaces nothing.
+
+`teardown` (the quickstart's `hack/delete-kind-cluster.sh`) was added but not
+run, to keep the cluster.
 
 ## Limits of this verification
 

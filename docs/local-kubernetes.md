@@ -18,9 +18,23 @@ From the repository root:
 ./scripts/local-kubernetes.sh setup
 ```
 
-The script checks out Substrate commit `6949841e9dc98edbd2e0042ef95c19b4ce20aef5`, creates `kind-openai-agent-substrate`, configures the registry on port 5501, installs Substrate and the sandbox template, and builds `kubectl-ate` under `artifacts/local/bin/`. A repeat setup reuses the existing cluster instead of deleting it.
+The script follows Agent Substrate's own
+[quickstart](https://ate.dev/docs/get-started/quickstart/), at Substrate commit
+`6949841e9dc98edbd2e0042ef95c19b4ce20aef5`, which it checks out first:
 
-The cluster enables the PodCertificateRequest and ClusterTrustBundle APIs required by Substrate. gVisor is used on the tested ARM64 Colima VM; microVM/KVM support is not required for this workflow. Egress credential injection is disabled because the harness keeps credentials on the host.
+| Quickstart step | This script |
+| --- | --- |
+| 1. `hack/create-kind-cluster.sh` | Creates `kind-openai-agent-substrate` with its registry on port 5501 |
+| 2. `export ATE_INSTALL_KIND=true` | Exported for every command |
+| 3. `ate-setup deploy ate-system` with the bundled `k8s.io` credential provider and the ingress SPIFFE ID | The same flags, plus a longer rollout timeout for Colima and `--no-dev-env`, which ignores a personal `.ate-dev-env.sh` in the checkout |
+| 4. `ate-setup deploy demo counter` | `ate-setup deploy demo sandbox` instead: its `sandbox-workerpool` (label `workload=sandbox`) runs every agent's Actors, and the provider check uses its `sandbox-template` |
+| 5. `go install ./cmd/kubectl-ate` | Builds it into `artifacts/local/bin/`, matching the pinned commit and leaving any other `kubectl-ate` on the machine alone |
+| 6. and verification: a counter Actor through `kubectl ate proxy` | `./scripts/local-kubernetes.sh test`: the provider check and the Kubernetes tests create Actors, run commands through the authenticated proxy, suspend and resume |
+| Teardown: `hack/delete-kind-cluster.sh` | `./scripts/local-kubernetes.sh teardown` |
+
+A repeat setup reuses the existing cluster instead of deleting it.
+
+The cluster enables the PodCertificateRequest and ClusterTrustBundle APIs required by Substrate. gVisor is used on the tested ARM64 Colima VM; microVM/KVM support is not required for this workflow. The bundled credential provider starts with a default-deny namespace policy, and this repository grants no atespace any namespace, so sandboxes receive no credentials; the harness keeps its own on the host. A Linux host that will run more than about a thousand sandboxes also needs a larger kernel neighbor table, as the quickstart notes.
 
 State, kubeconfig, tool binaries, setup logs, and test results stay under the ignored `artifacts/local/` directory. Do not commit or share that directory as a whole; it contains cluster credentials.
 
@@ -76,13 +90,23 @@ serve the [SRE agent](../examples/sre/README.md) on <http://localhost:8001>
 against a demo namespace with two broken workloads. All three agents run on the
 [shared agent harness](agent-harness.md) and use the live model from `.env`.
 
-## Stop and restart
+## Stop, restart and tear down
 
 ```sh
 ./scripts/local-kubernetes.sh stop
 ```
 
 On macOS this stops only the dedicated Colima profile and preserves its disk. Restart that profile with `colima start --profile openai-agent-substrate --activate=false --ssh-config=false`, or rerun setup. The project-specific kubeconfig selects the cluster explicitly.
+
+```sh
+./scripts/local-kubernetes.sh teardown
+```
+
+This runs the quickstart's `hack/delete-kind-cluster.sh`: it deletes the Kind
+cluster and its registry, and with them every Actor, snapshot and template. It
+also removes the project kubeconfig. Conversations in the agents' local data
+folders then refer to Actors that no longer exist; delete those folders under
+`artifacts/examples/` too. A later `setup` starts from scratch.
 
 ## Verified recovery scope
 
