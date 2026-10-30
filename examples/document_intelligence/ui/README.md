@@ -96,8 +96,9 @@ calculations and CSV; matching quotes cannot bypass a failed sample check.
 - **Trace tab:** the turn's trace from Jaeger: duration, model calls, tokens,
   tool calls and failures, where the time went, and a span timeline. It updates
   live while the turn runs and links to the full trace in Jaeger.
-- **Appearance:** System (default), Light or Dark. ChatKit only accepts light or
-  dark, so the page resolves the system preference and passes it to ChatKit.
+- **Settings (gear button):** Appearance is System (default), Light or Dark; the
+  choice is remembered in the browser. ChatKit only accepts light or dark, so the
+  page resolves the system preference and passes it to ChatKit.
 
 ## How it works
 

@@ -519,9 +519,32 @@ async function renderTrace(turn, body) {
   if (turn.status === "running") setTimeout(() => { if (body.dataset.view === viewKey) renderTrace(currentTurn() || turn, body); }, 3000);
 }
 
+/* ---------- Settings ---------- */
+
+function setUpSettings() {
+  const button = $("settings-button");
+  const panel = $("settings-panel");
+  const setOpen = (open, { returnFocus = false } = {}) => {
+    panel.hidden = !open;
+    button.setAttribute("aria-expanded", String(open));
+    if (open) panel.querySelector('[aria-pressed="true"]')?.focus();
+    else if (returnFocus) button.focus();
+  };
+  button.addEventListener("click", () => setOpen(panel.hidden));
+  document.addEventListener("click", (event) => {
+    if (!panel.hidden && !event.target.closest(".settings")) setOpen(false);
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !panel.hidden) setOpen(false, { returnFocus: true });
+  });
+  // Clicks inside ChatKit's frame never reach this document; focus leaving the window does.
+  window.addEventListener("blur", () => { if (!panel.hidden) setOpen(false); });
+}
+
 /* ---------- Start ---------- */
 
 async function main() {
+  setUpSettings();
   for (const button of document.querySelectorAll("[data-theme-choice]")) {
     button.addEventListener("click", () => {
       state.themeChoice = button.dataset.themeChoice;
@@ -539,10 +562,6 @@ async function main() {
   state.config = config;
   $("model-name").textContent = config.model;
   $("cluster-name").textContent = `${config.context} · ${config.atespace}`;
-  if (config.jaeger_url) {
-    $("jaeger-link").href = config.jaeger_url;
-    $("jaeger-link").hidden = false;
-  }
   state.threadId = readStorage("di-thread");
   render();
   if (state.threadId) refreshThread({ followLatest: true });
