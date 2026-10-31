@@ -24,7 +24,7 @@ def main(argv=None):
 
     server = starter.build(args)
     print(f"Starter agent · model {args.model} · template {args.template}", flush=True)
-    chat = TerminalChat(server, title="Starter agent", jaeger_url=args.jaeger_url)
+    chat = TerminalChat(server, title="Starter agent", jaeger_url=args.jaeger_url, ui_url="http://localhost:8002")
     chat.thread_id = args.thread
     try:
         asyncio.run(chat.run(" ".join(args.question) or None))
@@ -34,7 +34,8 @@ def main(argv=None):
         flush_traces()
         server.store.close()
     if chat.thread_id:
-        print(f"Conversation {chat.thread_id}: continue with --thread {chat.thread_id}, or open it in starter-ui.")
+        print(f"Conversation {chat.thread_id}: continue with --thread {chat.thread_id}, or open "
+              f"http://localhost:8002/?thread={chat.thread_id} while starter-ui runs.")
 
 
 if __name__ == "__main__":

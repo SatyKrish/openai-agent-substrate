@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """ChatKit server for any agent: one thread is one conversation backed by one sandbox session.
 
-Each message takes the conversation's lock and reloads the thread, creates or resumes
+Each message takes the conversation's lock and reloads the thread, refuses to start
+while another process (a terminal chat or another UI) is running a turn of it, creates or resumes
 the sandbox (waiting while no worker has room), copies uploads into its workspace,
 runs the agent loop with the conversation's SDK session history, copies the agent's
 output folders to the host, runs the agent's host check, and suspends the sandbox.
@@ -50,6 +51,33 @@ from .uploads import UploadRejected, UploadStore, upload_name
 logger = logging.getLogger(__name__)
 _MAX_FILES = 40
 _FILE_NAME = r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}"
+# A turn another process started this recently and never finished is treated as still running there.
+_ELSEWHERE_S = 15 * 60
+
+
+def running_elsewhere(metadata: dict, running: set[str], thread_id: str) -> bool:
+    """Whether another process is running a turn of this conversation: the lock only covers one process."""
+    turns = metadata.get("turns") or []
+    if thread_id in running or not turns or turns[-1].get("status") != "running":
+        return False
+    try:
+        started = datetime.fromisoformat(turns[-1]["started_at"])
+    except (KeyError, ValueError):
+        return False
+    return (datetime.now(timezone.utc) - started).total_seconds() < _ELSEWHERE_S
+
+
+def preferred_file(turn: dict, preferred: str | None = None) -> str | None:
+    """The output a UI opens after a turn: a host-checked one first, then the agent's report."""
+    changed = [item["path"] for item in turn["files"]
+               if item.get("changed") and item["path"].startswith("output/") and not item.get("too_large")]
+    status = turn.get("file_status") or {}
+    checked = [path for path in changed if (status.get(path) or {}).get("state") == "checked"]
+    if checked:
+        return preferred if preferred in checked else checked[0]
+    if changed:
+        return preferred if preferred in changed else changed[0]
+    return None
 
 
 class TurnError(Exception):
@@ -65,6 +93,7 @@ class HarnessChatServer(ChatKitServer[dict]):
                  base_url: str = "http://localhost:8000", workspace_root: str = WORKSPACE_ROOT,
                  model_label: str | None = None, max_turns: int = 25, capacity_wait_s: float = 300,
                  card: Callable[[Conversation, dict, set[str]], list[dict]] | None = None,
+                 file_status: Callable[[Conversation, dict], dict[str, dict]] | None = None,
                  preferred_output: str | None = None):
         self.spec = spec
         self.output_dir = Path(output_dir)
@@ -79,6 +108,8 @@ class HarnessChatServer(ChatKitServer[dict]):
         self.max_turns = max_turns
         self.capacity_wait_s = capacity_wait_s
         self.card = card
+        # path -> {"state": "checked" | "unchecked" | "source", "label": ...}: what the host check covered.
+        self.file_status = file_status
         self.preferred_output = preferred_output
         self.history_path = self.output_dir / "history.sqlite3"
         self.running: set[str] = set()
@@ -109,6 +140,12 @@ class HarnessChatServer(ChatKitServer[dict]):
             with contextlib.suppress(NotFoundError):
                 fresh = await self.store.load_thread(thread.id, context)
                 thread.metadata, thread.title = fresh.metadata, fresh.title
+            if running_elsewhere(thread.metadata, self.running, thread.id):
+                # ChatKit stored the message before calling us; a refused one must not stay without a reply.
+                with contextlib.suppress(NotFoundError):
+                    await self.store.delete_thread_item(thread.id, input_user_message.id, context)
+                raise CustomStreamError("A turn of this conversation is running in another window or terminal. "
+                                        "Wait for it to finish, then send again.", allow_retry=True)
             self.running.add(thread.id)
             try:
                 async for event in self._turn(thread, text, attachments, context):
@@ -164,9 +201,8 @@ class HarnessChatServer(ChatKitServer[dict]):
             turn["duration_s"] = round(time.monotonic() - started, 1)
             await self.store.save_thread(thread, context)
         yield self._turn_card(conversation, context, turn)
-        changed = [item["path"] for item in turn["files"] if item["changed"] and item["path"].startswith("output/")]
-        if changed:
-            preferred = self.preferred_output if self.preferred_output in changed else changed[0]
+        preferred = preferred_file(turn, self.preferred_output)
+        if preferred:
             yield ClientEffectEvent(name="open_file", data={"thread_id": thread.id, "turn": turn["number"], "path": preferred})
 
     async def _run_turn(self, conversation: Conversation, context_: AgentContext, turn: dict, text: str, attachments: list):
@@ -174,7 +210,7 @@ class HarnessChatServer(ChatKitServer[dict]):
         created = meta.get("substrate") is None
         step = CustomTask(title="Creating the workspace" if created else "Resuming the workspace", status_indicator="loading")
         workflow = WorkflowItem(id=context_.generate_id("workflow"), created_at=datetime.now(), thread_id=thread.id,
-                                workflow=Workflow(type="custom", tasks=[step]))
+                                workflow=Workflow(type="custom", tasks=[step], expanded=True))
         context_.workflow_item = workflow
         yield ThreadItemAddedEvent(item=workflow)
 
@@ -197,6 +233,7 @@ class HarnessChatServer(ChatKitServer[dict]):
                 if not boundary.ok():
                     raise RuntimeError("The sandbox must not contain the harness API key or Secret mount")
             seconds = time.monotonic() - began
+            turn["start_s"] = round(seconds, 1)
             verb = "Created" if created else "Resumed"
             detail = (f"Actor `{actor}` with its own workspace volume." if created
                       else f"Same Actor `{actor}`; its workspace volume still holds the earlier turns' files.")
@@ -220,6 +257,9 @@ class HarnessChatServer(ChatKitServer[dict]):
                                     status_indicator="complete")
                 workflow.workflow.tasks[index] = copied
                 yield ThreadItemUpdatedEvent(item_id=workflow.id, update=WorkflowTaskUpdated(task=copied, task_index=index))
+                # Show what the sandbox made of the first upload while the model reads it.
+                yield ClientEffectEvent(name="open_file", data={"thread_id": thread.id, "turn": turn["number"],
+                                                                "path": added[0]["path"]})
                 text += "\n\n[Uploaded to the workspace this turn: " + ", ".join(
                     f"{item['path']} ({item['bytes']} bytes" + (f"; {summary}" if summary else "") + ")"
                     for item, summary in described) + "]"
@@ -250,6 +290,8 @@ class HarnessChatServer(ChatKitServer[dict]):
             _, check_operation = self.spec.trace_operations
             with operation(check_operation):
                 turn["check"] = self.spec.check(conversation, turn, files)
+            if self.file_status is not None:
+                turn["file_status"] = self.file_status(conversation, turn)
         meta["substrate"] = self.client.serialize_session_state(session.state)
 
     async def _start(self, session, workflow: WorkflowItem, turn: dict):
@@ -372,14 +414,27 @@ class HarnessChatServer(ChatKitServer[dict]):
         children = []
         if turn["uploads"]:
             children.append({"type": "Text", "size": "sm", "value": "Uploaded to inputs/uploads/: " + ", ".join(turn["uploads"])})
-        if self.card is not None:
-            children += self.card(conversation, turn, changed)
+        rows = self.card(conversation, turn, changed) if self.card is not None else []
+        if not any(_has_badge(row) for row in rows) and turn["status"] == "completed":
+            # Every turn says what the host checked, even when the answer is that nothing was.
+            outputs = any(path.startswith("output/") for path in changed)
+            rows.append({"type": "Row", "children": [{"type": "Badge", "variant": "soft", "color": "warning" if outputs
+                         else "secondary", "label": "Not checked on the host" if outputs
+                         else "No output files changed · nothing to check"}]})
+        children += rows
         buttons = [
             {"type": "Button", "label": item["path"].removeprefix("output/"), "style": "secondary", "size": "sm",
              "onClickAction": {"type": "open_file", "handler": "client",
                                "payload": {"thread_id": thread.id, "turn": turn["number"], "path": item["path"]}}}
             for item in turn["files"] if item.get("changed") and item["path"].startswith("output/") and not item.get("too_large")
         ][:4]
+        check = turn.get("check") or {}
+        quotes = len(check.get("checked_quotes") or []) if check.get("quotes_from", "") in changed else 0
+        if quotes:
+            buttons.append({"type": "Button", "label": f"Show the quote{'s' if quotes != 1 else ''}", "style": "secondary",
+                            "size": "sm", "iconStart": "check-circle",
+                            "onClickAction": {"type": "open_quotes", "handler": "client",
+                                              "payload": {"thread_id": thread.id, "turn": turn["number"]}}})
         if turn.get("otel_trace_id"):
             buttons.append({"type": "Button", "label": "View trace", "style": "secondary", "size": "sm", "iconStart": "chart",
                             "onClickAction": {"type": "open_trace", "handler": "client",
@@ -419,3 +474,7 @@ class HarnessChatServer(ChatKitServer[dict]):
             finally:
                 history.close()
             shutil.rmtree(self.output_dir / thread_id, ignore_errors=True)
+
+
+def _has_badge(node: dict) -> bool:
+    return node.get("type") == "Badge" or any(_has_badge(child) for child in node.get("children") or [])

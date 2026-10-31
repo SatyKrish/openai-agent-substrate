@@ -51,6 +51,7 @@ def main(argv=None):
     import uvicorn
     from agents import flush_traces
 
+    from openai_harness.capacity import WorkerCapacity
     from openai_harness.chat import HarnessChatServer
     from openai_harness.store import SQLiteStore
     from agent_substrate import KubectlActorControl, SubstrateSandboxClient
@@ -59,7 +60,7 @@ def main(argv=None):
     from ..agent.spec import REPORT, SPEC
     from ..main import QUESTION
     from .app import create_app
-    from .card import check_rows
+    from .card import check_rows, file_status
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(name)s: %(message)s")
     configure_tracing(operation_names=SPEC.trace_operations)
@@ -69,13 +70,15 @@ def main(argv=None):
     store = SQLiteStore(args.data_dir / "threads.sqlite3")
     server = HarnessChatServer(SPEC, store, client, model=args.model, template=args.template,
                                output_dir=args.data_dir / "threads", base_url=f"http://localhost:{args.port}",
-                               card=check_rows, preferred_output=REPORT)
+                               card=check_rows, file_status=file_status, preferred_output=REPORT)
     config = {"model": args.model, "context": args.context, "atespace": args.atespace, "template": args.template,
               "tracing": tracing_enabled(), "prompts": [
                   {"label": "Compare ACME and BETA fiscal 2024", "prompt": QUESTION},
                   {"label": "Is EBITDA disclosed?", "prompt": "Is EBITDA disclosed in either report? Cite the exact sources."},
               ]}
-    app = create_app(server, config=config, port=args.port, jaeger_url=args.jaeger_url if tracing_enabled() else None)
+    capacity = WorkerCapacity(client.control, atespace=args.atespace, template=args.template)
+    app = create_app(server, config=config, port=args.port, jaeger_url=args.jaeger_url if tracing_enabled() else None,
+                     capacity=capacity)
     print(f"Document Intelligence UI: http://localhost:{args.port}  (model {args.model}, template {args.template})", flush=True)
     try:
         uvicorn.run(app, host=args.host, port=args.port, log_level="info")

@@ -12,7 +12,7 @@ writing the agent, not another harness.
 | Part | Owns | Code |
 | --- | --- | --- |
 | **Agent example** | Instructions, skills, tools, the starting workspace, the sandbox image and size, host checks of its outputs, and its front ends: a terminal chat, a UI, or both | `examples/starter/`, `examples/document_intelligence/`, `examples/sre/` |
-| **Harness** | The SDK agent loop and history; one sandbox session per conversation; locking, waiting for sandbox capacity, turn records, uploads, collecting outputs, recording tool evidence, running the agent's checks, tracing; the ChatKit protocol, the HTTP helpers that agent UIs build on, and a terminal chat | `harness/` (the `openai-harness` package) |
+| **Harness** | The SDK agent loop and history; one sandbox session per conversation; locking, waiting for sandbox capacity, turn records, uploads, collecting outputs, recording tool evidence, running the agent's checks, tracing; the ChatKit protocol, the UI page every agent shares and its routes, and a terminal chat | `harness/` (the `openai-harness` package) |
 | **Sandbox** | The SDK sandbox client for Agent Substrate, Actor lifecycle, and registering an agent's image and size as an ActorTemplate | `sandbox/` (the `openai-agent-substrate` package), `deploy/kubernetes/sandbox.py` |
 
 ```mermaid
@@ -32,13 +32,24 @@ flowchart LR
     HTools --> Cluster["Read-only Kubernetes API (SRE agent)"]
 ```
 
-Each agent example keeps its UI: the page, its HTTP routes and its launcher.
-The harness has no page of its own. It does provide a terminal chat
-(`openai_harness.terminal`), which drives the same server in-process, so a terminal
-conversation is an ordinary thread that the agent's UI also lists. The starter
-agent uses the terminal chat as the quick start's last step and keeps its UI
-optional. A conversation should be driven from one process at a time: each
-process locks a conversation only for itself.
+Each agent example keeps its UI in its own `ui/` folder: its launcher, its
+settings for the page (title, prompts, follow-ups, starting files) and, when it
+shows its own file types, an `agent.js` renderer. The page itself is the
+harness's (`openai_harness/static/`), so the three agents look and behave the
+same, and a fix lands in all of them: the chat, a side panel that opens when a
+turn writes files (files, the quotes the host checked, the turn's trace as a
+harness/sandbox timeline), suggestions that fill the composer, the turn's result
+under the chat, links to conversations, free sandbox slots, and a delete that
+says what it removes. The [harness guide](../harness/README.md#the-ui) lists the
+settings and behavior.
+
+The harness also provides a terminal chat (`openai_harness.terminal`), which
+drives the same server in-process, so a terminal conversation is an ordinary
+thread that the agent's UI also lists and links to. The starter agent uses the
+terminal chat as the quick start's last step and keeps its UI optional. Each
+process locks a conversation only for itself, so a message for a conversation
+another process is running a turn of is refused: the UI shows that it is
+running elsewhere until the turn ends.
 
 ## Standards, not a new agent format
 
@@ -122,25 +133,27 @@ and a demo namespace with a crash-looping and an unpullable workload.
 ```text
 pyproject.toml                uv workspace root
 sandbox/                      Provider package: src/agent_substrate (ActorCapacityError added), tests/
-harness/                      Harness package openai-harness (no UI pages): src/openai_harness/
+harness/                      Harness package openai-harness: src/openai_harness/
   spec.py                     AgentSpec, Conversation, TurnContext
   chat.py                     ChatKit adapter and conversation runtime
   uploads.py, steps.py        Upload staging; tool calls as workflow steps
   store.py, traces.py         ChatKit's SQLite store; Jaeger trace summary
-  http.py                     Routes an agent UI composes
+  http.py                     The shared UI page's routes (ui_application)
+  static/                     The shared UI page: chat, side panel, trace timeline
+  capacity.py                 Free sandbox slots for the header
   terminal.py                 Terminal chat on the same server and store as the UIs
   settings.py                 OPENAI_* settings for launchers
   testing.py                  Scripted model and ChatKit helpers for agents' tests
-harness/tests/                Lock and reload, capacity waits, history, evidence
+harness/tests/                Lock and reload, capacity waits, history, evidence, the UI's routes
 deploy/kubernetes/sandbox.py  Sandbox profile to ActorTemplate (deploy time)
 examples/starter/             The golden path: smallest complete agent, terminal chat and optional UI (port 8002)
 examples/document_intelligence/
   agent/                      SandboxAgent, skills, spec, PDF processor, citation checks
-  ui/                         Its page, routes, card and launcher (port 8000)
+  ui/                         Its page settings, PDF view, card and launcher (port 8000)
 examples/sre/
   agent/                      SandboxAgent, triage skill, cluster tools, spec, evidence check
   deploy/                     Sandbox image, reader RBAC, demo workloads
-  ui/                         Its page, routes, card and launcher (port 8001)
+  ui/                         Its page settings, card and launcher (port 8001)
 ```
 
 The repository is a uv workspace. The provider (`sandbox/`) and the harness
@@ -168,8 +181,8 @@ In rough order, as the harness grows:
 4. **More harness tools.** MCP servers, SDK tool approvals for write actions,
    and alert-triggered runs for the SRE agent.
 5. **Smaller items.** Recognize a full worker pool from Substrate's structured
-   error rather than its message text, and share UI rendering helpers if a
-   third agent UI appears; each page stays the agent's own.
+   error rather than its message text, and report free slots from a Substrate
+   API rather than `kubectl ate get worker`'s table.
 
 Conversations from before the harness are not migrated: the UIs use new data
 folders.

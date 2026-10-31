@@ -50,6 +50,7 @@ def main(argv=None):
     import uvicorn
     from agents import flush_traces
 
+    from openai_harness.capacity import WorkerCapacity
     from openai_harness.chat import HarnessChatServer
     from openai_harness.store import SQLiteStore
     from agent_substrate import KubectlActorControl, SubstrateSandboxClient
@@ -59,7 +60,7 @@ def main(argv=None):
     from ..agent.tools.cluster import TOOL_NAMES, ClusterAccess
     from ..deploy import access
     from .app import create_app
-    from .card import check_rows
+    from .card import check_rows, file_status
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(name)s: %(message)s")
     reader = args.data_dir / "reader.kubeconfig"
@@ -73,15 +74,18 @@ def main(argv=None):
     store = SQLiteStore(args.data_dir / "threads.sqlite3")
     server = HarnessChatServer(spec, store, client, model=args.model, template=args.template,
                                output_dir=args.data_dir / "threads", base_url=f"http://localhost:{args.port}",
-                               card=check_rows, preferred_output=REPORT)
+                               card=check_rows, file_status=file_status, preferred_output=REPORT)
     scope = ", ".join(sorted(args.namespaces))
     config = {"model": args.model, "context": args.context, "atespace": args.atespace, "template": args.template,
-              "tracing": tracing_enabled(), "namespaces": sorted(args.namespaces), "prompts": [
+              "tracing": tracing_enabled(), "namespaces": sorted(args.namespaces),
+              "scope": f"reads {scope} · {args.context}", "placeholder": f"Ask about workloads in {scope}…", "prompts": [
                   {"label": f"What's unhealthy in {scope}?", "prompt": f"Which workloads in {scope} are unhealthy, and why?"},
                   {"label": "Why is checkout crashing?", "prompt": "Why is the checkout deployment in sre-demo crashing? "
                    "Propose a fix."},
               ]}
-    app = create_app(server, config=config, port=args.port, jaeger_url=args.jaeger_url if tracing_enabled() else None)
+    capacity = WorkerCapacity(client.control, atespace=args.atespace, template=args.template)
+    app = create_app(server, config=config, port=args.port, jaeger_url=args.jaeger_url if tracing_enabled() else None,
+                     capacity=capacity)
     print(f"SRE agent UI: http://localhost:{args.port}  (model {args.model}, template {args.template}, "
           f"namespaces {scope})", flush=True)
     try:

@@ -518,11 +518,53 @@ Checked on 2026-10-30 on ARM64 Colima with the cluster from the earlier sections
   Four ran, and the fifth was refused with `ActorCapacityError`, which the
   harness shows as a wait for a sandbox worker. All five were then deleted.
 
+## Shared UI page
+
+Checked on 2026-10-31 on the small default cluster, with `gpt-6.1-terra`, the
+three agents on the harness's shared page, and the browser at 1280×800, at
+375×812 and in light and dark appearance.
+
+- **Starter.** A suggestion filled the composer without sending. The first turn
+  took 14.1 s. The panel then opened on `primes.csv`, marked host-checked, and
+  the bar under the chat read "Checked on the host: primes.csv". The trace view
+  showed the workspace created in 1.6 s, 4 model calls, the check passed, and
+  each step's lane. With the panel collapsed, the second turn (resumed in
+  0.7 s) left it closed and counted one new file. A `?thread=` link reopened
+  the conversation.
+- **Document Intelligence.** Before the first message the panel listed the
+  four sample reports. The comparison took 38.8 s. The panel moved to
+  `comparison.md`, checked against the original documents, with four checked
+  quotes; "Show in source" highlighted line 7 of `beta-2024.md`. During the turn
+  the header showed 3 of 4 sandbox slots free and the trace updated live.
+- **PDF upload.** A three-page PDF went through ChatKit's own uploader
+  (`setComposerValue` with `files`), since the browser pane cannot use the file
+  picker. While the model worked, the panel showed the pages the sandbox
+  extracted (2 with text, page 2 without a text layer). The answer's two page
+  quotes passed the host check, and "Show in source" scrolled to page 3. Deleting
+  the conversation from the header's menu, after a confirmation naming the
+  Actor, removed the Actor (`NotFound`) and its host copies.
+- **SRE.** The investigation took 63.7 s: 3 findings and 10 quotes checked
+  against the evidence, each opening the evidence file with the quote
+  highlighted. The follow-up suggestion for fixes ran in 29.1 s and was no
+  longer offered afterwards.
+- **Another process.** While `starter-chat` ran a turn of the same
+  conversation, the UI showed it running elsewhere; a message sent from the UI
+  was refused and not stored, and when the terminal's turn ended the UI loaded
+  its answer and card.
+- Dogfooding found and fixed: suggestions rendered as `[object
+  HTMLButtonElement]`; the file list collapsing under a tall file; cached
+  scripts after an edit (the page's files now revalidate); a page quote not
+  scrolling to its page; a header that overlapped at phone width; a refused
+  message that was stored without a reply and shown only in the console; and
+  `local-kubernetes.sh` exiting 1 after a chat when another UI held the
+  port-forward ports.
+- `uv run --locked --group ui pytest -q`: 149 passed, 6 skipped.
+
 ## Limits of this verification
 
 These checks establish local functional execution and snapshot recovery on a single-node Kind cluster. They do not establish production availability, multi-tenant authorization policy, resistance to sandbox escape, host/node-loss durability, or model quality beyond the documented live fixture workflow. The local installation uses upstream development identities; shared deployments need an operator-defined identity and authorization configuration.
 
-The UI checks drove ChatKit's uploader from a script rather than its file picker, used only localhost (ChatKit's `local-dev` domain key), and loaded ChatKit's unversioned script from OpenAI's CDN. Parallel isolation was shown for up to nine conversations on one node, not under sustained load.
+The UI checks drove ChatKit's uploader from a script rather than its file picker, used only localhost (ChatKit's `local-dev` domain key), and loaded ChatKit's unversioned script from OpenAI's CDN, which publishes no versioned build to pin. Parallel isolation was shown for up to nine conversations on one node, not under sustained load.
 
 The PDF checks used generated PDFs, not a corpus of real-world files. Pages that rely on fonts outside the standard set and not embedded in the PDF (for example most CJK text) may still render without text. Text read from page images is not checked by the host; it is shown for review.
 

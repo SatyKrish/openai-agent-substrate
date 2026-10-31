@@ -26,7 +26,7 @@ from examples.document_intelligence.agent.spec import REPORT, SPEC  # noqa: E402
 from examples.document_intelligence.evals.scripted import DocumentWorkflowModel  # noqa: E402
 from examples.document_intelligence.main import QUESTION  # noqa: E402
 from examples.document_intelligence.ui.app import create_app  # noqa: E402
-from examples.document_intelligence.ui.card import check_rows  # noqa: E402
+from examples.document_intelligence.ui.card import check_rows, file_status  # noqa: E402
 from openai_harness.chat import HarnessChatServer  # noqa: E402
 from openai_harness.steps import describe_output, fenced  # noqa: E402
 from openai_harness.store import SQLiteStore  # noqa: E402
@@ -163,7 +163,7 @@ def chat_server(server, tmp_path, model, control=None):
     store = SQLiteStore(tmp_path / "threads.sqlite3")
     return HarnessChatServer(SPEC, store, client, model=model, template="document-intelligence",
                              output_dir=tmp_path / "threads", workspace_root=str(server.root), model_label="scripted",
-                             card=check_rows, preferred_output=REPORT)
+                             card=check_rows, file_status=file_status, preferred_output=REPORT)
 
 
 @pytest.fixture
@@ -181,7 +181,7 @@ async def test_two_turns_share_one_actor_and_the_thread_delete_removes_it(chat, 
     titles = task_titles(first)
     assert any(title.startswith("Created the workspace") for title in titles)
     assert {"load_skill", "apply_patch"} <= {title.split(" · ")[0] for title in titles}
-    assert "exec_command · exit 0" in titles
+    assert "exec_command · exit 0 · sandbox" in titles
     widgets = [event["item"] for event in first if event["type"] == "thread.item.done" and event["item"]["type"] == "widget"]
     assert "Checked against the original documents" in json.dumps(widgets)
     assert any(event["type"] == "client_effect" and event["data"]["path"] == "output/comparison.md" for event in first)
@@ -287,8 +287,19 @@ async def test_uploads_reach_the_actor_workspace_and_their_quotes_are_checked(se
         assert state["sources"] == "uploads" and [item["name"] for item in state["uploads"]] == ["gamma-notes.md"]
         turn = state["turns"][0]
         assert turn["check"] == {"status": "citations_passed", "count": 1, "visual": 0, "documents": ["gamma-notes.md"],
-                                 "citations": [], "unchecked": [], "scope": "citations"}
+                                 "citations": [], "unchecked": [], "scope": "citations", "quotes_from": "output/result.json",
+                                 "checked_quotes": [{"source": "inputs/uploads/gamma-notes.md",
+                                                     "quote": "Gamma revenue was USD 12.5 billion in fiscal 2025."}]}
         assert "1 quote matches the source documents" in json.dumps(stream)
+        # The panel opens the upload as soon as it is in the workspace, before the model's first event.
+        effects = [index for index, event in enumerate(stream) if event["type"] == "client_effect"
+                   and event["data"]["path"] == "inputs/uploads/gamma-notes.md"]
+        first_model_text = next(index for index, event in enumerate(stream) if event["type"] == "thread.item.added"
+                                and event["item"]["type"] == "assistant_message")
+        assert effects and effects[0] < first_model_text
+        assert turn["file_status"]["inputs/uploads/gamma-notes.md"]["state"] == "source"
+        assert turn["file_status"]["output/result.json"] == {"state": "checked", "label": "quotes checked against the sources"}
+        assert "Show the quote\"" in json.dumps(stream)
         # Only the upload was staged: an uploads thread starts without the sample reports.
         assert (server.root / "inputs/uploads/gamma-notes.md").read_bytes() == NOTES
         assert not (server.root / "inputs/acme-2024.md").exists()

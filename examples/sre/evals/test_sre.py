@@ -18,7 +18,7 @@ from examples.sre.agent.lib import findings  # noqa: E402
 from examples.sre.agent.spec import REPORT, make_spec  # noqa: E402
 from examples.sre.agent.tools import cluster  # noqa: E402
 from examples.sre.deploy import access, demo  # noqa: E402
-from examples.sre.ui.card import check_rows  # noqa: E402
+from examples.sre.ui.card import check_rows, file_status  # noqa: E402
 from agent_substrate import SubstrateSandboxClient  # noqa: E402
 
 TRIAGE = Path(__file__).resolve().parents[1] / "agent/skills/kubernetes-triage/scripts/triage.py"
@@ -96,7 +96,9 @@ def test_findings_quotes_are_checked_against_the_host_copy_of_the_evidence(tmp_p
     quote = {"file": "evidence/001-logs-checkout.txt", "quote": "FATAL: DATABASE_URL is not set;   cannot connect"}
     passed = findings.check(conversation, findings_file(quote))
     assert passed == {"status": "evidence_passed", "findings": 1, "quotes": 1, "resources": ["deployment/checkout"],
-                      "unchecked": ["findings.md"]}
+                      "unchecked": ["findings.md"], "quotes_from": "output/findings.json",
+                      "checked_quotes": [{"source": "evidence/001-logs-checkout.txt", "context": "deployment/checkout",
+                                          "quote": "FATAL: DATABASE_URL is not set;   cannot connect"}]}
     invented = findings.check(conversation, findings_file({**quote, "quote": "OOMKilled"}))
     assert invented["status"] == "failed" and "Not found in evidence/001-logs-checkout.txt" in invented["detail"]
     unrecorded = findings.check(conversation, findings_file({**quote, "file": "evidence/999-made-up.txt"}))
@@ -129,7 +131,8 @@ async def test_an_investigation_reads_in_the_harness_and_is_checked(server, tmp_
     client = SubstrateSandboxClient(router_url=server.url, atespace="test-space", control=server.control)
     store = SQLiteStore(tmp_path / "threads.sqlite3")
     chat = HarnessChatServer(make_spec(reader), store, client, model=model, template="sre", output_dir=tmp_path / "threads",
-                             workspace_root=str(server.root), model_label="scripted", card=check_rows, preferred_output=REPORT)
+                             workspace_root=str(server.root), model_label="scripted", card=check_rows,
+                             file_status=file_status, preferred_output=REPORT)
     try:
         stream = await events(chat, {"type": "threads.create", "params": {"input": message("Why is checkout crashing?")}})
         assert not [event for event in stream if event["type"] == "error"], stream
@@ -145,5 +148,9 @@ async def test_an_investigation_reads_in_the_harness_and_is_checked(server, tmp_
         assert turn["check"]["status"] == "evidence_passed" and turn["check"]["quotes"] == 1
         assert "1 finding · 1 quote match the evidence" in json.dumps(stream, ensure_ascii=False)
         assert [tool["where"] for tool in turn["tools"]].count("harness") == 5
+        assert turn["file_status"]["output/findings.json"]["state"] == "checked"
+        assert turn["file_status"]["evidence/001-pods-sre-demo.txt"]["state"] == "source"
+        assert turn["check"]["checked_quotes"][0]["source"] == "evidence/003-logs-checkout-6d8f9c7b5d-x2k4p-previous.txt"
+        assert "fixes are proposals" in json.dumps(stream)
     finally:
         store.close()

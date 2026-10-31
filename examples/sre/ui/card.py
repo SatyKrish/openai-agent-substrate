@@ -1,6 +1,6 @@
 # Copyright 2026 openai-agent-substrate contributors
 # SPDX-License-Identifier: Apache-2.0
-"""The rows this UI adds to the harness's turn card: what the evidence check found."""
+"""What this agent's UI says about a turn's evidence check: the rows on the turn card and each file's status."""
 
 from __future__ import annotations
 
@@ -20,7 +20,8 @@ def check_rows(conversation, turn: dict, changed: set[str]) -> list[dict]:
                      f"{count} finding{'s' if count != 1 else ''} · {quotes} quote{'s' if quotes != 1 else ''} match the evidence"}]})
         rows.append({"type": "Text", "size": "sm", "color": "secondary", "value":
                      "Every quote in findings.json appears in the host's copy of the evidence it cites. "
-                     "Causes and fixes are the agent's own reasoning."})
+                     "Causes and fixes are the agent's own reasoning, and fixes are proposals: "
+                     "this agent cannot change the cluster."})
     elif check.get("status") == "evidence_passed":
         rows.append({"type": "Row", "children": [{"type": "Badge", "variant": "soft", "color": "secondary",
                      "label": "No new findings this turn"}]})
@@ -32,3 +33,22 @@ def check_rows(conversation, turn: dict, changed: set[str]) -> list[dict]:
         rows.append({"type": "Row", "children": [{"type": "Badge", "variant": "soft", "color": "warning",
                      "label": "No findings.json to check"}]})
     return rows
+
+
+def file_status(conversation, turn: dict) -> dict[str, dict]:
+    """Which of this turn's files the host checked, for the file list."""
+    check = turn.get("check") or {}
+    status = {}
+    for item in turn["files"]:
+        path = item["path"]
+        if item.get("evidence"):
+            status[path] = {"state": "source", "label": "read by the harness · host copy"}
+        elif not path.startswith("output/"):
+            continue
+        elif path == "output/findings.json" and check.get("status") == "evidence_passed":
+            status[path] = {"state": "checked", "label": "quotes checked against the evidence"}
+        elif path == "output/findings.json" and check.get("status") == "failed":
+            status[path] = {"state": "failed", "label": "evidence check failed"}
+        else:
+            status[path] = {"state": "unchecked", "label": "not checked on the host · fixes are proposals"}
+    return status

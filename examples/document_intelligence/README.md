@@ -49,7 +49,7 @@ examples/document_intelligence/
     test_configuration.py          Live defaults and explicit test-mode checks
     test_ui.py, test_pdf.py        ChatKit protocol, upload, and PDF checks on the shared harness
   ui/
-    app.py, card.py, static/       Routes, PDF page images, the turn card and the page
+    app.py, card.py, static/       Settings for the shared page, PDF page images, the turn card, the PDF view
     __main__.py                    Launcher on the shared harness
   main.py                          Host CLI and workflow orchestration
   deploy/                          Example images, entrypoint, Job, and CLI

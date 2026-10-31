@@ -79,8 +79,10 @@ it as an argument: `./scripts/local-kubernetes.sh starter-chat "What is 2**100?"
 When you're done, `./scripts/local-kubernetes.sh teardown` deletes the cluster.
 
 **Optional: open the UI.** `./scripts/local-kubernetes.sh starter-ui` serves
-the same conversations in a browser at <http://localhost:8002>, with each turn's
-files beside the chat. Use one or the other for a conversation at a time. For a
+the same conversations in a browser at <http://localhost:8002>; the terminal
+chat prints each conversation's link. A side panel opens when a turn writes
+files and shows them, the quotes the host checked, and the turn's trace. A turn
+running in one is refused in the other until it ends. For a
 trace of each turn, run `./scripts/local-kubernetes.sh tracing-setup` first; the
 chat and the UI then link each turn to Jaeger.
 

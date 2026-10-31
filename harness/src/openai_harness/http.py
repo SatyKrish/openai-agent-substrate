@@ -1,17 +1,21 @@
 # Copyright 2026 openai-agent-substrate contributors
 # SPDX-License-Identifier: Apache-2.0
-"""HTTP routes an agent UI composes: the ChatKit endpoint, uploads, and its panel's API.
+"""The HTTP side of an agent UI: the shared page, the ChatKit endpoint, uploads and the panel's API.
 
-The server runs a paid model and holds cluster access, so it serves loopback only,
-refuses cross-site requests, and serves only files it recorded itself.
+Every agent's UI is the same page (``static/`` here), configured by the agent's ``ui/``
+folder: its title, prompts, labels and an optional ``agent.js`` that renders its own
+file types. The server runs a paid model and holds cluster access, so it serves
+loopback only, refuses cross-site requests, and serves only files it recorded itself.
 """
 
 from __future__ import annotations
 
+import html
+import logging
 import re
 import urllib.error
 from pathlib import Path
-from typing import Callable
+from typing import Awaitable, Callable
 
 from chatkit.server import StreamingResult
 from chatkit.store import NotFoundError
@@ -20,20 +24,35 @@ from starlette.middleware import Middleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, Response, StreamingResponse
-from starlette.routing import Route
+from starlette.routing import Mount, Route
+from starlette.staticfiles import StaticFiles
 
 from . import traces
-from .chat import HarnessChatServer
+from .chat import HarnessChatServer, running_elsewhere
 from .spec import MIB
 from .uploads import UploadRejected
 
+logger = logging.getLogger(__name__)
+SHELL = Path(__file__).resolve().parent / "static"
 _THREAD_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
 FILE_HEADERS = {"X-Content-Type-Options": "nosniff", "Content-Security-Policy": "sandbox", "Cache-Control": "no-store"}
 
 
-def chat_routes(server: HarnessChatServer, *, index: Path, config: dict, port: int, jaeger_url: str | None,
-                state_fields: tuple[str, ...] = (), derived_file: Callable | None = None) -> list[Route]:
-    """Routes for one agent's UI. ``derived_file(thread, path)`` may serve files the agent derived from uploads."""
+class _Revalidated(StaticFiles):
+    """Static files the browser revalidates on every load, so an edited page is never served stale."""
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
+def chat_routes(server: HarnessChatServer, *, config: dict, port: int, jaeger_url: str | None, index: Path = SHELL / "index.html",
+                state_fields: tuple[str, ...] = (), derived_file: Callable | None = None,
+                starting_files: dict[str, bytes] | None = None,
+                capacity: Callable[[], Awaitable[dict]] | None = None) -> list[Route]:
+    """Routes for one agent's UI. ``derived_file(thread, path)`` may serve files the agent derived from uploads;
+    ``starting_files`` are the workspace's initial files, shown before the first message."""
     origins = {f"http://localhost:{port}", f"http://127.0.0.1:{port}"}
     max_upload = server.spec.uploads.max_bytes if server.spec.uploads else 0
 
@@ -43,7 +62,12 @@ def chat_routes(server: HarnessChatServer, *, index: Path, config: dict, port: i
         return (origin is None or origin in origins) and site in (None, "same-origin", "none")
 
     async def page(request: Request):
-        return FileResponse(index, headers={"Cache-Control": "no-store"})
+        title = html.escape(str(config.get("title") or "Agent"))
+        return Response(index.read_text(encoding="utf-8").replace("{{title}}", title), media_type="text/html",
+                        headers={"Cache-Control": "no-store"})
+
+    async def icon(request: Request):
+        return FileResponse(SHELL / "favicon.svg", media_type="image/svg+xml")
 
     async def chatkit(request: Request):
         if not same_origin(request):
@@ -101,7 +125,9 @@ def chat_routes(server: HarnessChatServer, *, index: Path, config: dict, port: i
         if thread is None:
             return JSONResponse({"error": "thread not found"}, status_code=404)
         meta = thread.metadata
-        state = "running" if thread.id in server.running else ("suspended" if meta.get("substrate") else "not created")
+        state = ("running" if thread.id in server.running
+                 else "elsewhere" if running_elsewhere(meta, server.running, thread.id)
+                 else "suspended" if meta.get("substrate") else "not created")
         return JSONResponse({"thread_id": thread.id, "title": thread.title, "actor": meta.get("actor"), "state": state,
                              **{field: meta.get(field) for field in state_fields},
                              "uploads": meta.get("uploads", []), "turns": meta.get("turns", [])},
@@ -129,6 +155,24 @@ def chat_routes(server: HarnessChatServer, *, index: Path, config: dict, port: i
             headers["Content-Disposition"] = f'attachment; filename="{Path(path).name}"'
         return FileResponse(target, media_type="text/plain; charset=utf-8", headers=headers)
 
+    async def starting_file(request: Request):
+        path = request.path_params["path"]
+        if path not in (starting_files or {}):
+            return JSONResponse({"error": "file not found"}, status_code=404)
+        headers = dict(FILE_HEADERS)
+        if request.query_params.get("download"):
+            headers["Content-Disposition"] = f'attachment; filename="{Path(path).name}"'
+        return Response(starting_files[path], media_type="text/plain; charset=utf-8", headers=headers)
+
+    async def free_slots(request: Request):
+        if capacity is None:
+            return JSONResponse({"status": "disabled"}, status_code=404)
+        try:
+            return JSONResponse({"status": "ok", **await capacity()}, headers={"Cache-Control": "no-store"})
+        except Exception as error:  # the cluster may be busy or unreachable; the UI hides the count
+            logger.debug("capacity unavailable: %s", error)
+            return JSONResponse({"status": "unavailable"}, status_code=503)
+
     async def trace(request: Request):
         thread = await load(request)
         turn = find_turn(thread, request.path_params["turn"]) if thread else None
@@ -147,6 +191,10 @@ def chat_routes(server: HarnessChatServer, *, index: Path, config: dict, port: i
 
     return [
         Route("/", page),
+        Route("/favicon.svg", icon),
+        Route("/favicon.ico", icon),
+        Route("/api/starting-files/{path:path}", starting_file),
+        Route("/api/capacity", free_slots),
         Route("/chatkit", chatkit, methods=["POST"]),
         Route("/uploads/{attachment_id}", upload, methods=["PUT", "POST"]),
         Route("/api/config", settings),
@@ -154,6 +202,29 @@ def chat_routes(server: HarnessChatServer, *, index: Path, config: dict, port: i
         Route("/api/threads/{thread_id}/turns/{turn:int}/files/{path:path}", file),
         Route("/api/threads/{thread_id}/turns/{turn:int}/trace", trace),
     ]
+
+
+def ui_application(server: HarnessChatServer, *, config: dict, port: int, jaeger_url: str | None,
+                   static: Path | None = None, starting_files: dict[str, bytes] | None = None, **routes) -> Starlette:
+    """An agent's UI: the shared page configured by ``config``, plus the agent's own ``static`` folder.
+
+    ``static/agent.js`` (an ES module) and ``static/agent.css`` load into the page when present.
+    """
+    uploads = server.spec.uploads
+    full = {"name": server.spec.name, "title": server.spec.name, **config,
+            "uploads": {"types": uploads.types, "hint": uploads.hint, "max_bytes": uploads.max_bytes,
+                        "max_count": uploads.max_count} if uploads else None,
+            "starting_files": [{"path": path, "bytes": len(data)} for path, data in (starting_files or {}).items()],
+            "capacity": routes.get("capacity") is not None, "preferred_output": server.preferred_output}
+    mounts = [Mount("/harness", _Revalidated(directory=SHELL), name="harness")]
+    if static is not None:
+        mounts.append(Mount("/static", _Revalidated(directory=static), name="static"))
+        if (static / "agent.js").is_file():
+            full["extension"] = "/static/agent.js"
+        if (static / "agent.css").is_file():
+            full["stylesheet"] = "/static/agent.css"
+    return application([*chat_routes(server, config=full, port=port, jaeger_url=jaeger_url,
+                                      starting_files=starting_files, **routes), *mounts])
 
 
 def application(routes: list) -> Starlette:

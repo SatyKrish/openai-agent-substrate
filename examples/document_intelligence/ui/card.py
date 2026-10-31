@@ -1,6 +1,6 @@
 # Copyright 2026 openai-agent-substrate contributors
 # SPDX-License-Identifier: Apache-2.0
-"""The rows this UI adds to the harness's turn card: what the host check found."""
+"""What this agent's UI says about a turn's host check: the rows on the turn card and each file's status."""
 
 from __future__ import annotations
 
@@ -54,3 +54,26 @@ def check_rows(conversation, turn: dict, changed: set[str]) -> list[dict]:
                      ", ".join(unchecked) + " is the agent's own work; " + ("the host checked quotes in result.json only."
                      if check.get("scope") == "citations" else "the host check covers the three contract outputs only.")})
     return rows
+
+
+def file_status(conversation, turn: dict) -> dict[str, dict]:
+    """Which of this turn's files the host checked, for the file list."""
+    check = turn.get("check") or {}
+    passed = check.get("status") == "passed"
+    failed = check.get("status") == "failed"
+    status = {}
+    for item in turn["files"]:
+        path = item["path"]
+        if item.get("upload"):
+            status[path] = {"state": "source", "label": "uploaded · host copy"}
+        elif not path.startswith("output/"):
+            continue
+        elif failed and (path.removeprefix("output/") in OUTPUTS or check.get("scope") == "citations"):
+            status[path] = {"state": "failed", "label": "host check failed"}
+        elif passed and path.removeprefix("output/") in OUTPUTS:
+            status[path] = {"state": "checked", "label": "checked against the original documents"}
+        elif path == "output/result.json" and check.get("status") == "citations_passed":
+            status[path] = {"state": "checked", "label": "quotes checked against the sources"}
+        else:
+            status[path] = {"state": "unchecked", "label": "not checked on the host"}
+    return status

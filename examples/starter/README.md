@@ -38,11 +38,10 @@ deploy/
   __main__.py         Its profile (name, CPU, memory) and the `sandbox` deploy action
 __main__.py         The terminal chat (starter-chat), on the harness's TerminalChat
 server.py           Settings and the harness server, shared by the chat and the UI
-card.py             This agent's rows on the turn card, shown by both
+card.py             The turn card's check rows and each file's check status, shown by both
 ui/
   __main__.py       The optional UI's launcher (starter-ui)
-  app.py            Routes from the harness
-  static/           The page: chat beside the conversation's files
+  app.py            This agent's settings for the harness's shared page: title, prompts, follow-ups
 evals/              A turn end to end with a scripted model, and the check
 ```
 
@@ -50,8 +49,11 @@ evals/              A turn end to end with a scripted model, and the check
 
 1. Copy the folder (for example to `examples/my_agent`) and rename `starter` in
    `spec.py` (`name`), `deploy/__main__.py` (profile and image names),
-   `server.py` (deployment and data folders) and the UI's port. The UI is
-   optional: delete `ui/` if the terminal chat is enough.
+   `server.py` (deployment and data folders) and the UI's port and title in
+   `ui/`. The UI is the harness's shared page, configured by `ui/app.py`; it is
+   optional: delete `ui/` if the terminal chat is enough. To show a file type
+   the page does not render, add `ui/static/agent.js` (Document Intelligence's
+   renders PDF pages).
 2. **Agent:** edit `instructions.md`; add SDK capabilities such as `Skills` in
    `agent.py` (see the Document Intelligence agent for a skill).
 3. **Workspace and check:** stage input files in `spec.py`'s `start`, and check

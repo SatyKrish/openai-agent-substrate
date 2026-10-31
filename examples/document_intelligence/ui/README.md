@@ -1,9 +1,10 @@
 # Document Intelligence UI
 
-A ChatKit conversation beside an artifact panel, for testing multi-turn
-analyses and their traces against Agent Substrate. It runs on the
-[shared harness](../../../harness/README.md), which runs the agent loop and owns the
-sandbox lifecycle; this folder holds the page, its routes and the turn card.
+A ChatKit conversation with a side panel for the analysis's files, checked
+quotes and traces, for testing multi-turn analyses against Agent Substrate. It
+runs on the [shared harness](../../../harness/README.md), which runs the agent
+loop, owns the sandbox lifecycle and serves the page every agent's UI shares;
+this folder configures that page and adds its PDF view.
 Each ChatKit thread is one analysis backed by one Actor and its workspace volume:
 
 | ChatKit | Provider and Substrate |
@@ -110,23 +111,32 @@ counts it as a quote to review and the panel shows it beside its page.
 
 ## What you see
 
+- **Before the first message:** the panel shows the sample reports every new
+  analysis starts with. Suggestions under the chat fill the composer, so you
+  can read and edit a question before sending it.
 - **Conversation (ChatKit):** each turn starts with a workspace step (created or
   resumed, with the Actor name) and, when files are attached, a step listing
   what was copied into `inputs/uploads/`. Then come the agent's messages and its
-  sandbox tool calls as collapsible workflow steps showing commands, exit codes
-  and output. A card closes the turn: the host check result, buttons for the
-  files the turn wrote, and **View trace**.
-- **Artifact panel:** a tab for every file in `output/`, `inputs/uploads/` and
-  `work/`, rendered by type (Markdown report, CSV table, JSON, code), with the
-  turn's version picker and a download link. Files the host check does not cover
-  are marked as not checked. A PDF shows its rendered pages, each with the
-  quotes cited from it (checked or to review) and its extracted text on request.
-- **Trace tab:** the turn's trace from Jaeger: duration, model calls, tokens,
-  tool calls and failures, where the time went, and a span timeline. It updates
-  live while the turn runs and links to the full trace in Jaeger.
-- **Settings (gear button):** Appearance is System (default), Light or Dark; the
-  choice is remembered in the browser. ChatKit only accepts light or dark, so the
-  page resolves the system preference and passes it to ChatKit.
+  tool calls, each tagged with where it ran (`· sandbox` here; this agent has no
+  harness tools). A card closes the turn: the host check result, buttons for the
+  files the turn wrote, **Show the quotes** and **View trace**.
+- **The turn's result**, under the chat: what the host checked, and buttons to
+  open the checked file, the quotes and the trace.
+- **Side panel**, opened when a turn writes files and closed for good once you
+  collapse it (the panel button then counts new files):
+  - **Files:** outputs, inputs and work files with the turn's version picker
+    and a download link. A green dot marks a host-checked file, amber one the
+    check did not cover. A new upload opens as soon as it is in the workspace:
+    a PDF shows its rendered pages, which have a text layer, and later the quotes
+    cited from each page.
+  - **Quotes:** every quote the host checked, by source; **Show in source**
+    opens the host's copy with the quote highlighted, or a PDF at the cited page.
+  - **Trace:** the turn from Jaeger as a timeline of the workspace, the harness
+    (model calls, the host check) and the sandbox (commands), live while the
+    turn runs, with a link to the full trace.
+- **Header:** free sandbox slots on the cluster, a menu to copy a link to the
+  conversation (`?thread=…`) or delete it after a confirmation that names its
+  Actor, and Appearance (System, Light or Dark).
 
 ## How it works
 
@@ -137,16 +147,19 @@ counts it as a quote to review and the panel shows it beside its page.
   agent's host check, and suspends the Actor. See the
   [design](../../../docs/agent-harness.md).
 - The agent's side lives in `../agent/`: `spec.py` (starting workspace, upload
-  types and the PDF processor, the check), `lib/pdf.py` and `lib/citations.py`.
-- `app.py` composes the harness's routes with this UI's PDF page route;
-  `card.py` adds the check's rows to the harness's turn card.
+  types and the PDF processor, the check), `lib/pdf.py` and `lib/citations.py`,
+  whose result lists the quotes it checked for the panel.
+- `app.py` holds this UI's settings for the shared page (title, prompts,
+  follow-ups, the sample reports to show) and its PDF page route; `card.py` adds
+  the check's rows to the turn card and says which files the check covered;
+  `static/agent.js` renders a PDF's pages in the panel.
 - Threads are kept in SQLite (`conversations/threads.sqlite3`), so threads and
   their Actors survive a server restart. Each turn is one SDK trace with a known
   ID, grouped by the thread. Conversations from before the shared harness stay
   in `artifacts/examples/document_intelligence/ui/` and are not loaded.
-- `static/` is plain HTML, CSS and JavaScript. ChatKit's web component loads from
-  `cdn.platform.openai.com`; self-hosted mode uses `domainKey: "local-dev"`, which
-  covers localhost, and the `two_phase` upload strategy.
+- ChatKit's web component loads from `cdn.platform.openai.com`; self-hosted
+  mode uses `domainKey: "local-dev"`, which covers localhost, and the `two_phase`
+  upload strategy.
 
 ## Security
 
@@ -168,7 +181,8 @@ and the Actor receives neither (the first turn checks this).
   page images as `image/jpeg`, both with a sandbox CSP; an uploaded PDF is only
   offered as a download. Only paths the server recorded can be fetched.
 - Thread metadata (Actor state) and the SDK session history stay on the
-  server; ChatKit never sends them to the browser.
+  server; ChatKit never sends them to the browser. The sample reports shown
+  before the first message are served read-only from the server's own copies.
 - Traces carry timing, tool names, exit codes and token counts only.
 
 ## Tests
@@ -185,7 +199,8 @@ their quotes are checked (and a missing quote fails); filename collisions are
 resolved without shadowing another source; retries restore original bytes after
 a restart; mixed sample/upload reports check both sets of quotes while sample
 calculations remain strictly checked; upload limits are enforced; deleting a
-thread deletes its Actor and host copies. They also cover
+thread deletes its Actor and host copies; an upload opens in the panel before
+the model runs; each file's check status and the listed quotes. They also cover
 the HTTP guards and the trace summary. The PDF tests cover validation of the
 sandbox's output, page-level citation checks (right page, wrong page, quotes to
 review) and the page routes; one more test sends a generated PDF through the

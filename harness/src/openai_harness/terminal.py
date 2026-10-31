@@ -4,7 +4,8 @@
 
 It drives the same HarnessChatServer in-process, so a terminal conversation is
 an ordinary ChatKit thread in the agent's store: its UI lists it, and either
-front end can continue it (one at a time). Text from the model and the sandbox
+front end can continue it (one at a time: a turn running in one is refused in the
+other). With ``ui_url`` it prints the link that opens the conversation in the UI. Text from the model and the sandbox
 is untrusted, so control characters are removed before it reaches the terminal.
 """
 
@@ -50,11 +51,12 @@ def _default_write(text: str) -> None:
 
 
 class TerminalChat:
-    def __init__(self, server: HarnessChatServer, *, title: str, jaeger_url: str | None = None,
+    def __init__(self, server: HarnessChatServer, *, title: str, jaeger_url: str | None = None, ui_url: str | None = None,
                  read: Callable[[], Awaitable[str | None]] = _default_read, write: Callable[[str], None] = _default_write):
         self.server = server
         self.title = title
         self.jaeger_url = jaeger_url
+        self.ui_url = ui_url
         self.read = read
         self.write = write
         self.thread_id: str | None = None
@@ -97,6 +99,7 @@ class TerminalChat:
                 if kind == "thread.created":
                     self.thread_id = event["thread"]["id"]
                     self.line(f"  conversation {self.thread_id}")
+                    self._link()
                 elif kind == "error":
                     if speaking:
                         self.line()
@@ -207,6 +210,11 @@ class TerminalChat:
             return
         self.thread_id = thread.id
         self.line(f"  continuing {thread.id}: {clean(thread.title or '(untitled)')}")
+        self._link()
+
+    def _link(self) -> None:
+        if self.ui_url and self.thread_id:
+            self.line(f"  in the UI: {self.ui_url.rstrip('/')}/?thread={self.thread_id}")
 
     async def recent(self) -> None:
         page = await self.server.store.load_threads(10, None, "desc", {})

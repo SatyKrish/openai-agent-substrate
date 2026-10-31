@@ -15,6 +15,8 @@ from . import pdf
 from .verify import OUTPUTS, verify_artifacts
 
 TEXT_TYPES = {".md", ".txt", ".csv"}
+# Checked quotes listed for the UI, which shows each one in the host's copy of its source.
+MAX_LISTED = 80
 
 
 def clipped(text: str, limit: int) -> str:
@@ -25,6 +27,10 @@ def check_turn(conversation, files: dict[str, bytes], inputs: dict[str, bytes]) 
     outputs = {name.removeprefix("output/"): data for name, data in files.items() if name.startswith("output/")}
     samples = conversation.metadata["sources"] == "samples"
     sample_check = check_samples(outputs, inputs, conversation.metadata["analysis_id"]) if samples else None
+    if sample_check and sample_check["status"] == "passed":
+        # The contract check compared result.json's citations with the reports; list them for the UI.
+        sample_check.update(quotes_from="output/result.json",
+                            checked_quotes=listed_quotes(outputs["result.json"], citation_sources(conversation, inputs)))
     if sample_check and (sample_check["status"] == "passed" or not conversation.uploads):
         return sample_check
     sources = citation_sources(conversation, inputs if samples else None)
@@ -67,6 +73,26 @@ def citation_sources(conversation, inputs: dict[str, bytes] | None = None) -> di
     return sources
 
 
+def listed_quotes(result: bytes, sources: dict) -> list[dict]:
+    """result.json's citations as source path and quote, for a contract that already passed."""
+    try:
+        citations = json.loads(result)["citations"]
+    except (ValueError, KeyError, TypeError):
+        return []
+    listed = []
+    for citation in citations if isinstance(citations, list) else []:
+        if not isinstance(citation, dict) or not isinstance(citation.get("quote"), str):
+            continue
+        try:
+            source = resolve_source(citation.get("document_id"), sources)
+        except ValueError:
+            continue
+        if source is not None:
+            listed.append({"source": source, "quote": clipped(citation["quote"], 240),
+                           "context": citation.get("section") if isinstance(citation.get("section"), str) else None})
+    return listed[:MAX_LISTED]
+
+
 def resolve_source(document, sources: dict) -> str | None:
     """Paths and exact filenames take priority; stems must resolve uniquely."""
     if not isinstance(document, str):
@@ -97,6 +123,7 @@ def check_citations(conversation, outputs: dict[str, bytes], *, sources=None) ->
     documents = set()
     checked = visual = 0
     pages = []  # page-level PDF citations, for the panel
+    listed = []  # every checked quote and its source, for the panel
     for citation in citations:
         document = citation.get("document_id") if isinstance(citation, dict) else None
         quote = citation.get("quote") if isinstance(citation, dict) else None
@@ -126,12 +153,16 @@ def check_citations(conversation, outputs: dict[str, bytes], *, sources=None) ->
             checked += not is_visual
             pages.append({"document": source["name"], "page": page, "kind": "visual" if is_visual else "text",
                           "quote": clipped(quote, 240)})
+            listed.append({"source": source_id, "page": page, "kind": "visual" if is_visual else "text",
+                           "quote": clipped(quote, 240)})
         elif not isinstance(quote, str) or not quote.strip() or " ".join(quote.split()) not in source["text"]:
             return {"status": "failed", "detail": f"Not found in {document}: {shown}", "unchecked": unchecked}
         else:
             checked += 1
+            listed.append({"source": source_id, "quote": clipped(quote, 240)})
         documents.add(document)
     if not documents:
         return {"status": "no_citations", "unchecked": unchecked}
     return {"status": "citations_passed" if checked else "visual_only", "count": checked, "visual": visual,
-            "documents": sorted(documents), "citations": pages, "unchecked": unchecked}
+            "documents": sorted(documents), "citations": pages, "unchecked": unchecked,
+            "checked_quotes": listed[:MAX_LISTED], "quotes_from": "output/result.json"}

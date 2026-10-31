@@ -47,7 +47,7 @@ def build(args, *, base_url: str = "http://localhost"):
     from agent_substrate.tracing import configure_tracing, tracing_enabled
 
     from .agent.spec import SPEC
-    from .card import check_rows
+    from .card import check_rows, file_status
 
     configure_tracing(operation_names=SPEC.trace_operations)
     args.jaeger_url = args.jaeger_url if tracing_enabled() else None
@@ -55,4 +55,5 @@ def build(args, *, base_url: str = "http://localhost"):
                                     control=KubectlActorControl(context=args.context, kubeconfig=args.kubeconfig))
     store = SQLiteStore(args.data_dir / "threads.sqlite3")
     return HarnessChatServer(SPEC, store, client, model=args.model, template=args.template,
-                             output_dir=args.data_dir / "threads", base_url=base_url, card=check_rows)
+                             output_dir=args.data_dir / "threads", base_url=base_url, card=check_rows,
+                             file_status=file_status)

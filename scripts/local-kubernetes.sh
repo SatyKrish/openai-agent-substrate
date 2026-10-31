@@ -143,7 +143,8 @@ case "${1:-help}" in
           --address 127.0.0.1 >>"$LOCAL_DIR/ui-port-forward.log" 2>&1 &
         FORWARD_PIDS+=("$!")
       done
-      trap 'kill "${FORWARD_PIDS[@]}" 2>/dev/null' EXIT
+      # A forward whose port another UI already holds has exited; under set -e a failed kill would fail the script.
+      trap 'kill "${FORWARD_PIDS[@]}" 2>/dev/null || true' EXIT
       UI_ENV=(OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318 OTEL_SERVICE_NAME=openai-agent-substrate)
     else
       echo "Jaeger is not deployed; run tracing-setup for per-turn traces. Starting without tracing." >&2

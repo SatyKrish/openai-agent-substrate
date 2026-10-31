@@ -58,6 +58,6 @@ agent/
   lib/findings.py           Host check of findings.json
   spec.py                   AgentSpec for the harness
 deploy/                     Sandbox image, reader access, demo workloads
-ui/                         Page, routes, card and launcher
+ui/                         Settings for the harness's shared page, the turn card and launcher
 evals/                      Tool scope, RBAC, check and end-to-end tests
 ```

@@ -67,7 +67,8 @@ async def test_one_question_streams_steps_tools_answer_and_files(chat_server):
     output = "".join(written)
     assert thread_id and f"conversation {thread_id}" in output
     assert "… Creating the workspace" in output and "· Created the workspace" in output
-    assert "· read_logs" in output and "· exec_command · exit 0  cat evidence/001-logs-checkout.txt > output/notes.md" in output
+    assert "· read_logs · harness" in output
+    assert "· exec_command · exit 0 · sandbox  cat evidence/001-logs-checkout.txt > output/notes.md" in output
     # The model's escape sequence reaches the terminal as plain text.
     assert "agent> checkout is missing DATABASE_URL.[2J\n" in output and "\x1b" not in output
     assert "✓ Checked on the host" in output and "1 in the harness" in output

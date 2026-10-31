@@ -1,0 +1,15 @@
+/* Copyright 2026 openai-agent-substrate contributors
+   SPDX-License-Identifier: Apache-2.0 */
+.pdf-view { padding: 20px 24px 28px; display: flex; flex-direction: column; gap: 16px; }
+.pdf-summary { margin: 0; font-size: 13px; color: var(--muted); }
+.pages { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; align-items: start; }
+.page-card { margin: 0; display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.page-card.cited { border-color: var(--accent-ink); box-shadow: 0 0 0 3px var(--accent-ring); }
+.page-card img { width: 100%; height: auto; border: 1px solid var(--border-soft); border-radius: 6px; background: #FFFFFF; }
+.page-card figcaption { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; }
+.page-number { font-weight: 600; margin-right: auto; }
+.page-quote { margin: 0; padding: 8px 10px; border-radius: 8px; font-size: 12.5px; line-height: 1.5; background: var(--sunken); }
+.page-quote.text { background: var(--ok-bg); color: var(--ok-ink); }
+.page-quote.visual { background: var(--warn-bg); }
+.quote-kind { display: block; font-size: 11px; font-weight: 600; margin-bottom: 2px; }
+.page-text { margin: 0; max-height: 280px; overflow: auto; padding: 8px 10px; border-radius: 8px; background: var(--sunken); font: 12px/1.5 "IBM Plex Mono", monospace; white-space: pre-wrap; }

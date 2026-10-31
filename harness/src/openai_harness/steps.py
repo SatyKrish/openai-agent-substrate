@@ -6,12 +6,15 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime
 
 from chatkit.agents import AgentContext
-from chatkit.types import CustomTask, UserMessageItem, WorkflowItem
+from chatkit.types import CustomTask, UserMessageItem, Workflow, WorkflowItem
 
 _EXIT_CODE = re.compile(r"Process exited with code (-?\d+)")
 _TASK_TEXT = 1600
+# Where a tool ran, shown on its step: harness tools hold credentials, sandbox tools run in the Actor.
+ICONS = {"harness": "keys", "sandbox": "cube"}
 
 
 def fenced(text: str, language: str = "") -> str:
@@ -52,6 +55,11 @@ def describe_call(raw) -> tuple[str, str, str]:
     return str(name), str(call_id), str(arguments)
 
 
+def step_title(name: str, where: str, status: str = "") -> str:
+    """``exec_command · exit 0 · sandbox``: the tool first, so a terminal can recognize it."""
+    return " · ".join(part for part in (name, status, where) if part)
+
+
 def describe_output(output) -> tuple[str, str]:
     """A status suffix (exit code) and the readable part of a tool's output."""
     text = output if isinstance(output, str) else json.dumps(output, default=str)
@@ -81,22 +89,29 @@ class ToolSteps:
             if getattr(event, "type", None) == "run_item_stream_event":
                 if event.name == "tool_called":
                     name, call_id, arguments = describe_call(event.item.raw_item)
-                    task = CustomTask(title=name, content=fenced(clipped(arguments)), status_indicator="loading")
+                    where = "harness" if name in self.harness_tools else "sandbox"
+                    task = CustomTask(title=step_title(name, where), icon=ICONS[where], content=fenced(clipped(arguments)),
+                                      status_indicator="loading")
+                    if self.context.workflow_item is None:
+                        # Open while the agent works; ChatKit collapses it into "Worked for …" when it ends.
+                        self.context.workflow_item = WorkflowItem(
+                            id=self.context.generate_id("workflow"), created_at=datetime.now(),
+                            thread_id=self.context.thread.id, workflow=Workflow(type="custom", tasks=[], expanded=True))
                     await self.context.add_workflow_task(task)
                     workflow = self.context.workflow_item
-                    pending[call_id] = (workflow, workflow.workflow.tasks.index(task), name, arguments)
-                    self.record.append({"tool": name, "status": "running",
-                                        "where": "harness" if name in self.harness_tools else "sandbox"})
+                    pending[call_id] = (workflow, workflow.workflow.tasks.index(task), name, where)
+                    self.record.append({"tool": name, "status": "running", "where": where})
                 elif event.name == "tool_output":
                     call_id = _field(event.item.raw_item, "call_id") or ""
                     if call_id in pending:
-                        workflow, index, name, arguments = pending.pop(call_id)
+                        workflow, index, name, where = pending.pop(call_id)
                         status, text = describe_output(event.item.output)
-                        title = f"{name} · {status}" if status else name
-                        content = fenced(clipped(arguments))
+                        # The call's arguments are already in the task; the output follows them.
+                        content = workflow.workflow.tasks[index].content or ""
                         if text:
                             content += "\n\n" + fenced(clipped(text))
-                        task = CustomTask(title=title, content=content, status_indicator="complete")
+                        task = CustomTask(title=step_title(name, where, status), icon=ICONS[where], content=content,
+                                          status_indicator="complete")
                         for entry in reversed(self.record):
                             if entry["tool"] == name and entry["status"] == "running":
                                 entry["status"] = status or "done"
