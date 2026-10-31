@@ -84,8 +84,10 @@ The page:
 - **Files, Quotes, Trace.** Files are grouped by folder and marked checked or
   not. Quotes lists every quote the host check verified (`checked_quotes` in
   the check's result, with `quotes_from` naming the file they came from); each
-  opens its source with the quote highlighted. Trace is the turn as a timeline:
-  the workspace's lifecycle, what ran in the harness, and what ran in the sandbox.
+  opens its source with the quote highlighted. Trace is where the turn's time
+  went (model, workspace, sandbox commands, harness tools), where each step ran
+  (the workspace's lifecycle, the harness, the sandbox) and every step on one time
+  axis: in order, slowest first, or only the tool calls, slowest first.
 - **The turn's result** stays under the chat (ChatKit's own scrolling cannot be
   controlled from the page): what was checked, the file to open, the quotes, the trace.
 - **Links.** `?thread=thr_…` opens a conversation, and reloading reopens the

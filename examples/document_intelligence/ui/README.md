@@ -131,9 +131,11 @@ counts it as a quote to review and the panel shows it beside its page.
     cited from each page.
   - **Quotes:** every quote the host checked, by source; **Show in source**
     opens the host's copy with the quote highlighted, or a PDF at the cited page.
-  - **Trace:** the turn from Jaeger as a timeline of the workspace, the harness
-    (model calls, the host check) and the sandbox (commands), live while the
-    turn runs, with a link to the full trace.
+  - **Trace:** the turn from Jaeger: where the time went, a timeline of the
+    workspace, the harness (model calls, the host check) and the sandbox
+    (commands), and every step with its duration, in order or slowest first.
+    The tool calls view answers which command took longest. It is live while
+    the turn runs and links to the full trace.
 - **Header:** free sandbox slots on the cluster, a menu to copy a link to the
   conversation (`?thread=…`) or delete it after a confirmation that names its
   Actor, and Appearance (System, Light or Dark).

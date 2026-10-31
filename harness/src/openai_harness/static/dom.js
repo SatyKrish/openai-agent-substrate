@@ -42,7 +42,7 @@ export function formatBytes(bytes) {
 }
 
 export function seconds(ms) {
-  return ms >= 1000 ? `${(ms / 1000).toFixed(ms >= 10000 ? 1 : 2)} s` : `${Math.round(ms)} ms`;
+  return ms > 0 && ms < 1 ? "<1 ms" : ms >= 1000 ? `${(ms / 1000).toFixed(ms >= 10000 ? 1 : 2)} s` : `${Math.round(ms)} ms`;
 }
 
 export function plural(count, word, many = `${word}s`) {
