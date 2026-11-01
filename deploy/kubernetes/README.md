@@ -1,8 +1,9 @@
 # Kubernetes deployment components
 
-[base/](base/README.md) contains reusable provider permissions, the application
-service account, in-cluster kubeconfig and artifact PVC. It does not import any
-example or SDK agent. Applications own their images, entrypoint and Job.
+[base/](base/README.md) gives an in-cluster harness its own identity: the
+ServiceAccount, its Substrate access grant and credentials volume, an in-cluster
+kubeconfig and an artifact PVC. It does not import any example or SDK agent.
+Applications own their images, entrypoint and Job.
 
 [sandbox.py](sandbox.py) turns an agent's sandbox profile (its Dockerfile, CPU
 and memory) into an image and an immutable ActorTemplate whose name is a hash of

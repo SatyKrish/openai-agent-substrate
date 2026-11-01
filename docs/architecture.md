@@ -18,12 +18,13 @@ flowchart LR
         Router --> Actor
     end
     Adapter -->|"kubectl ate: Actor lifecycle"| Control
-    Adapter -->|"POST /process"| Proxy["Owned loopback kubectl Actor proxy"]
+    Adapter -->|"POST /process, outside the cluster"| Proxy["Owned loopback kubectl Actor proxy"]
     Proxy -->|"Authenticated tunnel"| Router
+    Adapter -->|"POST /process in the cluster: mutual TLS, pod certificate"| Router
     Harness --> API[OpenAI API]
 ```
 
-The adapter sends `POST /process` with `command`, `cwd`, and a Go-duration `timeout`, plus `ate-target-actor: ATESPACE/ACTOR_NAME`. By default it owns a `kubectl ate proxy actor` process per session; the proxy obtains the required Pod Identity certificate and authenticates to Substrate ingress. It listens only on an ephemeral loopback port and is closed when the session closes. This local port has no application authentication: any process able to connect to it can execute commands in that Actor. Loopback binding limits network exposure, but does not isolate users or processes sharing a host or pod network namespace. An explicit `router_url` selects a trusted external gateway instead. Control-plane credentials and the router endpoint are bound to the client, rather than restored from saved session state. Commands are never automatically retried, including on malformed responses, HTTP errors, or redirects: an ambiguous failure may have already executed a side effect.
+The adapter sends `POST /process` with `command`, `cwd`, and a Go-duration `timeout`, plus `ate-target-actor: ATESPACE/ACTOR_NAME`. By default it owns a `kubectl ate proxy actor` process per session; the proxy obtains the required Pod Identity certificate and authenticates to Substrate ingress. It listens only on an ephemeral loopback port and is closed when the session closes. This local port has no application authentication: any process able to connect to it can execute commands in that Actor. Loopback binding limits network exposure, but does not isolate users or processes sharing a host or pod network namespace. A harness in the cluster skips the proxy: `router_url` names Substrate's router and `router_tls` presents the pod's own certificate, so there is no local port at all. An explicit `router_url` without TLS selects a trusted external gateway instead. Control-plane credentials and the router endpoint are bound to the client, rather than restored from saved session state. Commands are never automatically retried, including on malformed responses, HTTP errors, or redirects: an ambiguous failure may have already executed a side effect.
 
 The upstream demo has no application authorization and buffers command output in memory. Use it only behind a trusted private ingress. Substrate provides the sandbox boundary; this adapter does not add authentication or make the demo production-ready.
 
@@ -67,14 +68,23 @@ untrusted execution Actor is a separate workload with its own image and workspac
 A preflight check confirms the Actor has neither the harness API key nor its
 Secret mount before document processing begins.
 
-The harness calls the in-cluster API service directly at `api.ate-system.svc:443`.
-The pinned upstream Actor proxy still uses a Kubernetes port-forward for its
-router CONNECT tunnel, even when a direct API endpoint is configured. Its Role
-therefore allows forwarding only to the router pod names discovered during
-setup. Namespace-wide pod listing remains necessary for the upstream router
-selector; direct pod reads and forwarding are restricted to the named routers.
-The local run helpers refresh this allowlist before each Job. Direct helper users
-should run `python -m deploy.kubernetes.base resources` after router rollouts.
+The harness pod calls Substrate as its own ServiceAccount, `openai-agent`, the
+way Substrate expects an in-cluster client to:
+
+- Actor lifecycle goes to the API service at `api.ate-system.svc:443` with a
+  projected token for that account. An access policy makes it `editor` of its
+  atespace and nothing more.
+- Commands go to the router at `atenet-router.ate-system.svc` over mutual TLS
+  with the pod's own certificate, which the router admits because the install
+  lists the account's SPIFFE ID.
+- Its only Kubernetes permission is reading ClusterTrustBundles, which
+  `kubectl ate` uses to verify the API.
+
+It cannot port-forward, request certificates in Substrate's namespace, or mint
+tokens for the shared `ate-client` account, which a default install makes a
+global owner. Earlier versions ran `kubectl ate proxy` in the pod and needed all
+three. The UIs that run on a developer's machine still use the proxy under the
+operator's own kubeconfig. See [deployment](deployment.md#a-harness-in-the-cluster).
 
 ## Workspace persistence and conversations
 

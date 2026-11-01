@@ -55,13 +55,19 @@ def test_env_secret_mount_and_endpoint_model_configuration(tmp_path):
         agent.kubectl(args, "delete", "secret", args.secret_name, "-n", agent.NAMESPACE, "--ignore-not-found", capture_output=True)
 
 
-def test_harness_cannot_forward_to_control_plane_pods():
+def test_harness_holds_no_rights_in_substrates_namespace():
+    # The harness reaches Substrate as itself: a token for its API and a pod certificate for its
+    # router. It cannot port-forward, request certificates for Substrate's own components, or
+    # borrow the shared ate-client owner.
     args = argparse.Namespace(context=os.environ["SUBSTRATE_KUBE_CONTEXT"], kubeconfig=Path(os.environ["SUBSTRATE_KUBECONFIG"]))
     assert args.context.startswith("kind-")
     identity = "system:serviceaccount:openai-agent-substrate:openai-agent"
     pods = json.loads(agent.kubectl(args, "get", "pods", "-n", "ate-system", "-o", "json", capture_output=True).stdout)["items"]
-    for app, expected in [("atenet-router", True), ("ate-api-server", False)]:
+    prefix = ["kubectl", "--context", args.context, "--kubeconfig", str(args.kubeconfig), "auth", "can-i", "-n", "ate-system", "--as", identity]
+    checks = [["create", "podcertificaterequests.certificates.k8s.io"], ["create", "serviceaccounts/ate-client", "--subresource=token"]]
+    for app in ("atenet-router", "ate-api-server"):
         name = next(p["metadata"]["name"] for p in pods if p["metadata"].get("labels", {}).get("app") == app)
-        prefix = ["kubectl", "--context", args.context, "--kubeconfig", str(args.kubeconfig)]
-        result = subprocess.run(prefix + ["auth", "can-i", "create", "pods/" + name, "--subresource=portforward", "-n", "ate-system", "--as", identity], capture_output=True, text=True)
-        assert (result.returncode == 0) == expected
+        checks.append(["create", "pods/" + name, "--subresource=portforward"])
+    for check in checks:
+        assert subprocess.run(prefix + check, capture_output=True, text=True).returncode != 0, check
+    assert subprocess.run(prefix + ["list", "clustertrustbundles.certificates.k8s.io"], capture_output=True).returncode == 0

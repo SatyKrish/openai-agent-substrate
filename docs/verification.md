@@ -560,9 +560,43 @@ three agents on the harness's shared page, and the browser at 1280×800, at
   port-forward ports.
 - `uv run --locked --group ui pytest -q`: 149 passed, 6 skipped.
 
+## Harness identity in the cluster
+
+Checked on 2026-10-31 on the small default cluster (Kubernetes 1.37, Substrate
+at the pinned commit).
+
+- A pod running as `openai-agent` with a projected token for
+  `api.ate-system.svc` was refused `can_list_actors` until an access policy made
+  it `editor` of `ate-demo-sandbox`. It could then list Actors there, and it was
+  still refused `can_list_workers` on the global scope.
+- The same pod's certificate named
+  `spiffe://cluster.local/ns/openai-agent-substrate/sa/openai-agent` and was
+  valid for 24 hours. With no client certificate the router closed the TLS
+  handshake (`certificate required`); with the certificate but before the ID was
+  on the router's allowlist, it refused it (`certificate unknown`). Once listed,
+  `POST /process` to `atenet-router.ate-system.svc` resumed a suspended Actor and
+  returned its output.
+- `agent-setup` rebuilt the harness image; its resources step deleted the old
+  `openai-agent-client` Role and RoleBinding from `ate-system`. `agent-test`
+  ran the scripted Document Intelligence Job in the cluster and passed its host
+  check. Substrate's API logged that Job's `CreateActor`, `ResumeActor`,
+  `SuspendActor` and `DeleteActor` as
+  `system:serviceaccount:openai-agent-substrate:openai-agent`, not `ate-client`.
+- The live tests passed (4), including a check that the harness cannot
+  port-forward to the router or API pods, request pod certificates in
+  `ate-system`, or mint `ate-client` tokens, and can still list
+  ClusterTrustBundles. The laptop path, `examples.provider_check` through
+  `kubectl ate proxy`, also passed.
+- A local mutual-TLS server confirmed the transport presents the pod
+  certificate, refuses a router it cannot verify, and presents the new
+  certificate after the bundle file is replaced.
+- On this cluster the router's allowlist was changed with `kubectl patch` to
+  match what `setup` now passes to `ate-setup`. A fresh `setup` with the new
+  flag was not rerun here.
+
 ## Limits of this verification
 
-These checks establish local functional execution and snapshot recovery on a single-node Kind cluster. They do not establish production availability, multi-tenant authorization policy, resistance to sandbox escape, host/node-loss durability, or model quality beyond the documented live fixture workflow. The local installation uses upstream development identities; shared deployments need an operator-defined identity and authorization configuration.
+These checks establish local functional execution and snapshot recovery on a single-node Kind cluster. They do not establish production availability, multi-tenant authorization policy, resistance to sandbox escape, host/node-loss durability, or model quality beyond the documented live fixture workflow. The in-cluster harness uses its own ServiceAccount; the operator's commands and the laptop UIs still use the shared `ate-client` development identity, and shared deployments need operator-defined principals. Substrate's router lets any allowlisted identity reach any Actor.
 
 The UI checks drove ChatKit's uploader from a script rather than its file picker, used only localhost (ChatKit's `local-dev` domain key), and loaded ChatKit's unversioned script from OpenAI's CDN, which publishes no versioned build to pin. Parallel isolation was shown for up to nine conversations on one node, not under sustained load.
 

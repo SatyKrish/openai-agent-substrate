@@ -5,10 +5,12 @@
 
 from .lifecycle import ActorCapacityError, KubectlActorControl
 from .provider import SubstrateSandboxClient, SubstrateSandboxOptions, SubstrateSessionState
+from .transport import RouterTLS
 
 __all__ = [
     "ActorCapacityError",
     "KubectlActorControl",
+    "RouterTLS",
     "SubstrateSandboxClient",
     "SubstrateSandboxOptions",
     "SubstrateSessionState",

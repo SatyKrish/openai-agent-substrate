@@ -29,6 +29,24 @@ async def test_upstream_cli_lifecycle_contract(monkeypatch):
     ]
 
 
+async def test_a_token_file_replaces_the_shared_ate_client_identity(monkeypatch):
+    commands = []
+
+    async def capture(argv):
+        commands.append(argv)
+
+    control = KubectlActorControl(context="in-cluster", kubeconfig="/etc/agent/kubeconfig",
+                                  endpoint="api.ate-system.svc:443", token_file="/var/run/substrate/api-token")
+    monkeypatch.setattr(control, "_run", capture)
+    await control.resume("space", "actor")
+    assert commands == [[
+        "kubectl", "ate", "--context", "in-cluster", "--kubeconfig", "/etc/agent/kubeconfig",
+        "--endpoint", "api.ate-system.svc:443", "--token-file", "/var/run/substrate/api-token",
+        "resume", "actor", "actor", "--atespace", "space",
+    ]]
+    assert control.base_command() == commands[0][:10]
+
+
 @pytest.mark.parametrize(("stderr", "expected"), [
     (b"Error: rpc error: code = ResourceExhausted desc = workflow failed at step AssignWorker: no worker has room "
      b"for the actor", ActorCapacityError),

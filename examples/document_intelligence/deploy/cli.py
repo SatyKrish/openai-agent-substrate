@@ -164,12 +164,11 @@ def main():
     parser.add_argument("--image", help="Registry/repository:tag; defaults depend on the selected image build")
     parser.add_argument("--docker-context")
     parser.add_argument("--state-file", type=Path, default=ROOT / "artifacts/local/agent-deployment.json")
-    parser.add_argument("--atespace", default="ate-demo-sandbox")
     parser.add_argument("--template", help="Python-capable ActorTemplate; required for run")
     parser.add_argument("--model", help="Override the mounted OPENAI_MODEL; scripted performs no model inference")
     parser.add_argument("--wait", action="store_true")
     parser.add_argument("--output-dir", type=Path, help="Artifact collection or sandbox deployment output directory")
-    base.add_arguments(parser)
+    base.add_arguments(parser)  # Includes --atespace, where the harness is granted access and runs its Actors.
     args = parser.parse_args()
     if args.action != "sandbox" and not args.kubeconfig:
         parser.error("this action requires --kubeconfig")

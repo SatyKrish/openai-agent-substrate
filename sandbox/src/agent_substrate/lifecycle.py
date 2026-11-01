@@ -35,9 +35,16 @@ class ActorControl(Protocol):
 
 
 class KubectlActorControl:
-    """Use the upstream kubectl-ate plugin, always with an explicit cluster context."""
+    """Use the upstream kubectl-ate plugin, always with an explicit cluster context.
 
-    def __init__(self, *, context: str, endpoint: str | None = None, kubeconfig: str | Path | None = None, timeout: float = 120):
+    Without ``token_file``, kubectl-ate mints a token for Substrate's shared ``ate-client``
+    ServiceAccount, which a default install makes a global owner. In the cluster, pass the
+    pod's own ServiceAccount token (audience ``api.ate-system.svc``) and the API ``endpoint``
+    so calls run as the harness, limited to what its atespace access policy grants.
+    """
+
+    def __init__(self, *, context: str, endpoint: str | None = None, kubeconfig: str | Path | None = None,
+                 token_file: str | Path | None = None, timeout: float = 120):
         if not context or context.startswith("-"):
             raise ValueError("An explicit Kubernetes context is required")
         if timeout <= 0:
@@ -45,15 +52,21 @@ class KubectlActorControl:
         self.context = context
         self.endpoint = endpoint
         self.kubeconfig = kubeconfig
+        self.token_file = token_file
         self.timeout = timeout
 
-    def command(self, verb: str, atespace: str, name: str, *extra: str) -> list[str]:
+    def base_command(self) -> list[str]:
         argv = ["kubectl", "ate", "--context", self.context]
         if self.kubeconfig is not None:
             argv += ["--kubeconfig", str(self.kubeconfig)]
         if self.endpoint:
             argv += ["--endpoint", self.endpoint]
-        return argv + [verb, "actor", resource_name(name), "--atespace", resource_name(atespace), *extra]
+        if self.token_file is not None:
+            argv += ["--token-file", str(self.token_file)]
+        return argv
+
+    def command(self, verb: str, atespace: str, name: str, *extra: str) -> list[str]:
+        return self.base_command() + [verb, "actor", resource_name(name), "--atespace", resource_name(atespace), *extra]
 
     async def _run(self, argv: list[str]) -> None:
         process = await asyncio.create_subprocess_exec(

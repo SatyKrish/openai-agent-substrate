@@ -68,6 +68,26 @@ finally:
 
 The example belongs inside an async function. Set the host API key and a model available to your account when using a live model.
 
+That client runs `kubectl ate` with your kubeconfig and reaches each Actor through `kubectl ate proxy`, the path for a harness outside the cluster. A harness in a pod calls Substrate as its own ServiceAccount instead, with the credentials [`substrate_volume()`](../deploy/kubernetes/base/README.md) mounts:
+
+```python
+from pathlib import Path
+from agent_substrate import RouterTLS
+
+credentials = Path("/var/run/substrate")
+client = SubstrateSandboxClient(
+    atespace="ate-demo-sandbox",
+    router_url="https://atenet-router.ate-system.svc",
+    router_tls=RouterTLS(credential_bundle=credentials / "credential-bundle.pem",
+                         ca_bundle=credentials / "router-ca.pem"),
+    control=KubectlActorControl(context="in-cluster", kubeconfig="/etc/agent/kubeconfig",
+                                endpoint="api.ate-system.svc:443",
+                                token_file=credentials / "api-token"),
+)
+```
+
+Lifecycle calls go straight to Substrate's API with the pod's token, and commands go straight to its router over mutual TLS with the pod's certificate. Neither borrows the shared `ate-client` identity or needs a port-forward. See [deployment](deployment.md#a-harness-in-the-cluster) for the grants it needs.
+
 For retained sessions, omit deletion, serialize **after** closing, and reconnect using the same configured client:
 
 ```python

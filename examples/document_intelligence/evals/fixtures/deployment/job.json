@@ -54,6 +54,10 @@
               {
                 "name": "SUBSTRATE_TEMPLATE",
                 "value": "python-template"
+              },
+              {
+                "name": "SUBSTRATE_ATESPACE",
+                "value": "ate-demo-sandbox"
               }
             ],
             "securityContext": {
@@ -87,6 +91,11 @@
                 "readOnly": true
               },
               {
+                "name": "substrate",
+                "mountPath": "/var/run/substrate",
+                "readOnly": true
+              },
+              {
                 "name": "artifacts",
                 "mountPath": "/artifacts"
               },
@@ -112,6 +121,38 @@
             "name": "kubeconfig",
             "configMap": {
               "name": "openai-agent-kubeconfig"
+            }
+          },
+          {
+            "name": "substrate",
+            "projected": {
+              "sources": [
+                {
+                  "serviceAccountToken": {
+                    "audience": "api.ate-system.svc",
+                    "expirationSeconds": 3600,
+                    "path": "api-token"
+                  }
+                },
+                {
+                  "podCertificate": {
+                    "signerName": "podidentity.podcert.ate.dev/identity",
+                    "keyType": "ECDSAP256",
+                    "credentialBundlePath": "credential-bundle.pem"
+                  }
+                },
+                {
+                  "clusterTrustBundle": {
+                    "signerName": "servicedns.podcert.ate.dev/identity",
+                    "path": "router-ca.pem",
+                    "labelSelector": {
+                      "matchLabels": {
+                        "podcert.ate.dev/canarying": "live"
+                      }
+                    }
+                  }
+                }
+              ]
             }
           },
           {

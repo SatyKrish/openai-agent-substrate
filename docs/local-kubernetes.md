@@ -26,7 +26,7 @@ The script follows Agent Substrate's own
 | --- | --- |
 | 1. `hack/create-kind-cluster.sh` | Creates `kind-openai-agent-substrate` with its registry on port 5501 |
 | 2. `export ATE_INSTALL_KIND=true` | Exported for every command |
-| 3. `ate-setup deploy ate-system` with the bundled `k8s.io` credential provider and the ingress SPIFFE ID | The same flags, plus a longer rollout timeout for Colima and `--no-dev-env`, which ignores a personal `.ate-dev-env.sh` in the checkout |
+| 3. `ate-setup deploy ate-system` with the bundled `k8s.io` credential provider and the ingress SPIFFE ID | The same flags, plus a longer rollout timeout for Colima and `--no-dev-env`, which ignores a personal `.ate-dev-env.sh` in the checkout. The router's allowlist also names the in-cluster harness's ServiceAccount, so its Jobs reach Actors with their own pod certificates |
 | 4. `ate-setup deploy demo counter` | `ate-setup deploy demo sandbox` instead: its `sandbox-workerpool` (label `workload=sandbox`) runs every agent's Actors, and the provider check uses its `sandbox-template` |
 | 5. `go install ./cmd/kubectl-ate` | Builds it into `artifacts/local/bin/`, matching the pinned commit and leaving any other `kubectl-ate` on the machine alone |
 | 6. and verification: a counter Actor through `kubectl ate proxy` | `./scripts/local-kubernetes.sh test`: the provider check and the Kubernetes tests create Actors, run commands through the authenticated proxy, suspend and resume |

@@ -58,14 +58,14 @@ def free_slots(workers: list[dict], used: dict[str, tuple[int, int]], template: 
 
 
 class WorkerCapacity:
-    """Calls ``kubectl ate`` with the same context as the agent's ``KubectlActorControl``; results are cached briefly."""
+    """Calls ``kubectl ate`` as the agent's ``KubectlActorControl`` does; results are cached briefly.
+
+    Listing workers needs the global viewer role. A harness running as its own identity with
+    only an atespace grant cannot read them, so the UI shows no capacity there.
+    """
 
     def __init__(self, control, *, atespace: str, template: str, ttl: float = 5.0, timeout: float = 20.0):
-        self.base = ["kubectl", "ate", "--context", control.context]
-        if getattr(control, "kubeconfig", None):
-            self.base += ["--kubeconfig", str(control.kubeconfig)]
-        if getattr(control, "endpoint", None):
-            self.base += ["--endpoint", control.endpoint]
+        self.base = control.base_command()
         self.atespace = atespace
         self.template_name = template
         self.ttl = ttl

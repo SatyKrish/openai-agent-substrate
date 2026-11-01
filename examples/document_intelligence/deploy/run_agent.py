@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 
 from agents import flush_traces
+from agent_substrate import RouterTLS
 from agent_substrate.tracing import configure_tracing
 
 from examples.document_intelligence.main import TRACE_OPERATIONS, run
@@ -24,8 +25,15 @@ def configuration():
         args.model = select_model(args.model, test=args.test)
     except ValueError as error:
         parser.error(str(error))
+    # The pod calls Substrate as its own ServiceAccount: the API with a token for that account,
+    # the router with the pod's certificate. The Job mounts both from a projected volume.
+    credentials = Path("/var/run/substrate")
     args.api_endpoint = os.environ.get("SUBSTRATE_API_ENDPOINT", "api.ate-system.svc:443")
+    args.token_file = credentials / "api-token"
+    args.router_url = os.environ.get("SUBSTRATE_ROUTER_URL", "https://atenet-router.ate-system.svc")
+    args.router_tls = RouterTLS(credential_bundle=credentials / "credential-bundle.pem", ca_bundle=credentials / "router-ca.pem")
     args.context = "in-cluster"
+    # Used only to read the ClusterTrustBundle that verifies Substrate's API.
     args.kubeconfig = Path("/etc/agent/kubeconfig")
     args.atespace = os.environ.get("SUBSTRATE_ATESPACE", "ate-demo-sandbox")
     args.template = os.environ["SUBSTRATE_TEMPLATE"]

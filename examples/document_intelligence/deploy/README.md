@@ -43,8 +43,8 @@ contains placeholders.
 
 `setup` imports `.env` when it exists. `agent-setup` imports it again, prepares the
 Python sandbox ActorTemplate, builds the trusted harness image, and applies its
-ServiceAccount, RBAC, in-cluster kubeconfig, and artifact PVC. Neither setup
-command calls the OpenAI API.
+ServiceAccount, Substrate access grant, in-cluster kubeconfig, and artifact PVC.
+Neither setup command calls the OpenAI API.
 
 The ActorTemplate mounts a per-Actor Substrate `durableDir` volume at the agent's
 workspace root, `/workspace`. Inputs, uploads and outputs live on it: Substrate's
@@ -76,19 +76,23 @@ volumes:
 
 The complete [Job builder](job.py) also configures a non-root user,
 read-only root filesystem, bounded resources, and `backoffLimit: 0` to avoid
-automatic workflow replays. The [resource builders](../../../deploy/kubernetes/base/resources.py) grants the
-dedicated harness ServiceAccount the operations needed by the pinned development
-Substrate CLI, including API token requests, trust bundles, certificate requests,
-and forwarding restricted to the current router pod names. Pod listing remains
-namespace-wide because the pinned upstream router client uses a label selector;
-it cannot be removed merely by setting a direct API endpoint. It grants no Secret-read verbs or cluster-admin. The API itself uses the direct
-in-cluster Service address `api.ate-system.svc:443`; forwarding to API and database
-pods is denied. Setup discovers router pods from the router Service selector
-and builds their exact Role grant. Empty discovery is rejected. Run
-`python -m deploy.kubernetes.base resources` after router rollouts, or use the local run helpers,
-which refresh the allowlist automatically.
-Substrate API/router identities remain the upstream shared development identities
-described in the [verification limits](../../../docs/verification.md#limits-of-this-verification).
+automatic workflow replays.
+
+The pod calls Substrate as its own ServiceAccount, `openai-agent`, with
+credentials from a projected volume at `/var/run/substrate`:
+
+- `api-token`, a token with audience `api.ate-system.svc`, for Actor lifecycle
+  calls to `api.ate-system.svc:443`. An access policy makes the account `editor`
+  of `ate-demo-sandbox` and nothing more.
+- `credential-bundle.pem` and `router-ca.pem`, the pod's certificate and the
+  router's CA, for commands sent straight to `atenet-router.ate-system.svc` over
+  mutual TLS. Setup adds the account's SPIFFE ID to the router's allowlist.
+
+Its only Kubernetes permission is reading ClusterTrustBundles. It cannot
+port-forward, request certificates in `ate-system`, mint tokens for the shared
+`ate-client` account, or read Secrets. The
+[resource builders](../../../deploy/kubernetes/base/README.md) apply and check
+all of this.
 
 ## Test, then run a live model
 

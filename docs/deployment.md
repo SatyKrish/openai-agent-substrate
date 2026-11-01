@@ -14,7 +14,21 @@ Allow the CLI proxy's Pod Identity SPIFFE principal at Substrate ingress when in
 spiffe://cluster.local/ns/ate-system/sa/atenet-client
 ```
 
-The caller also needs the upstream CLI's API permissions and permissions to create, read, and delete PodCertificateRequests in the system namespace. The upstream local installation uses shared development identities; operators should configure their own principals and authorization for shared deployments.
+The caller also needs the upstream CLI's API permissions and permissions to create, read, and delete PodCertificateRequests in the system namespace. That right can request a certificate for any identity in Substrate's namespace, including its own components, so keep it to operators. The upstream local installation uses shared development identities; operators should configure their own principals and authorization for shared deployments.
+
+### A harness in the cluster
+
+A harness in a pod needs none of that. It calls Substrate as its own ServiceAccount (the [usage example](usage.md) shows the client):
+
+- **API.** A projected ServiceAccount token with audience `api.ate-system.svc`, passed as `kubectl ate --token-file`, with `--endpoint api.ate-system.svc:443`. Substrate's API names the caller `system:serviceaccount:NAMESPACE:NAME`. An atespace access policy makes that principal `editor` there, enough to create, resume, suspend and delete Actors and nothing else. It cannot list workers, which needs global viewer, so a UI running this way shows no capacity.
+- **Router.** A `podCertificate` from the `podidentity.podcert.ate.dev/identity` signer and the `servicedns.podcert.ate.dev/identity` ClusterTrustBundle for the router's CA. The router admits the pod's SPIFFE ID, `spiffe://cluster.local/ns/NAMESPACE/sa/NAME`, only if the install lists it in `--ingress-allowed-spiffe-ids`. Any listed identity can reach any Actor: Substrate has no per-Actor ingress authorization yet.
+- **Kubernetes.** Read access to ClusterTrustBundles, which `kubectl ate` uses to verify Substrate's API. No other Kubernetes permission.
+
+`python -m deploy.kubernetes.base resources` applies the ServiceAccount and that one ClusterRole, grants the atespace access as the operator, and stops with an error if the router does not admit the harness. The router allowlist is an install flag, so add the harness's SPIFFE ID when you install Substrate, as `scripts/local-kubernetes.sh setup` does:
+
+```text
+--ingress-allowed-spiffe-ids=spiffe://cluster.local/ns/ate-system/sa/atenet-client,spiffe://cluster.local/ns/openai-agent-substrate/sa/openai-agent
+```
 
 Inspect the intended context and template:
 
@@ -33,7 +47,7 @@ uv run python -m examples.provider_check --backend substrate \
 
 Pass `--kubeconfig PATH` for a separate kubeconfig. The provider owns an ephemeral loopback `kubectl ate proxy actor` for each session. The CLI authenticates to Substrate's router; a plain HTTP port-forward to the router does not provide that authentication. No separate port-forward is needed for the default path.
 
-An explicit `--router-url` selects a trusted HTTP gateway you operate, bypassing the owned CLI proxy. Such a gateway must provide the cluster's required upstream authentication and authorization. This option is also used by the local protocol simulator.
+An explicit `--router-url` selects a trusted HTTP gateway you operate, bypassing the owned CLI proxy. Such a gateway must provide the cluster's required upstream authentication and authorization. This option is also used by the local protocol simulator. In the cluster, `router_url` names Substrate's router itself and `router_tls` supplies the pod's certificate; see [a harness in the cluster](#a-harness-in-the-cluster).
 
 An application gateway can implement the four lifecycle methods in `ActorControl`. Supply a trusted `router_url`, or provide an async `start_proxy(atespace, name)` method returning an object with a loopback `url` and async `aclose()` lifecycle.
 

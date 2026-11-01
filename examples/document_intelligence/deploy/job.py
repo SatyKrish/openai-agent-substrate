@@ -4,7 +4,7 @@
 
 import uuid
 
-from deploy.kubernetes.base.resources import ApplicationResources
+from deploy.kubernetes.base.resources import SUBSTRATE_MOUNT, ApplicationResources, substrate_volume
 
 SECRET = "openai-agent-env"
 
@@ -14,12 +14,14 @@ def make_job(image, template, model=None, secret_name=SECRET, *, name=None, reso
     container = {
         "name": "agent", "image": image, "imagePullPolicy": "IfNotPresent",
         "envFrom": [{"configMapRef": {"name": "openai-agent-tracing", "optional": True}}, {"secretRef": {"name": secret_name}}],
-        "env": [{"name": "SUBSTRATE_TEMPLATE", "value": template}],
+        # The atespace where configure_resources granted this ServiceAccount access.
+        "env": [{"name": "SUBSTRATE_TEMPLATE", "value": template}, {"name": "SUBSTRATE_ATESPACE", "value": resources.atespace}],
         "securityContext": {"allowPrivilegeEscalation": False, "readOnlyRootFilesystem": True, "capabilities": {"drop": ["ALL"]}},
         "resources": {"requests": {"cpu": "100m", "memory": "256Mi"}, "limits": {"cpu": "1", "memory": "1Gi"}},
         "volumeMounts": [
             {"name": "agent-config", "mountPath": "/var/run/agent-config", "readOnly": True},
             {"name": "kubeconfig", "mountPath": "/etc/agent", "readOnly": True},
+            {"name": "substrate", "mountPath": SUBSTRATE_MOUNT, "readOnly": True},
             {"name": "artifacts", "mountPath": "/artifacts"}, {"name": "tmp", "mountPath": "/tmp"},
         ],
     }
@@ -42,6 +44,7 @@ def make_job(image, template, model=None, secret_name=SECRET, *, name=None, reso
                          "volumes": [
                              {"name": "agent-config", "secret": {"secretName": secret_name, "defaultMode": 288}},
                              {"name": "kubeconfig", "configMap": {"name": resources.kubeconfig_name}},
+                             substrate_volume(),
                              {"name": "artifacts", "persistentVolumeClaim": {"claimName": resources.artifacts_claim}},
                              {"name": "tmp", "emptyDir": {}},
                          ],

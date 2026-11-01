@@ -1,6 +1,6 @@
 # Copyright 2026 openai-agent-substrate contributors
 # SPDX-License-Identifier: Apache-2.0
-"""Reusable Kubernetes resource builders, router discovery and server-side apply."""
+"""Reusable Kubernetes resource builders, the harness's Substrate access grant and server-side apply."""
 
 from dataclasses import dataclass, fields
 import json
@@ -10,6 +10,10 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[3]
 NAMESPACE = "openai-agent-substrate"
+# The in-cluster harness reads its Substrate credentials here; see substrate_volume().
+SUBSTRATE_MOUNT = "/var/run/substrate"
+API_AUDIENCE = "api.ate-system.svc"
+ROUTER = "atenet-router"
 
 
 def dns_name(value):
@@ -25,9 +29,8 @@ class ApplicationResources:
     resource_prefix: str = "openai-agent"
     artifacts_claim: str = "openai-agent-artifacts"
     artifact_storage: str = "1Gi"
+    atespace: str = "ate-demo-sandbox"
     control_namespace: str = "ate-system"
-    router_service: str = "atenet-router"
-    upstream_identity: str = "ate-client"
 
     def __post_init__(self):
         for field in fields(self):
@@ -37,6 +40,16 @@ class ApplicationResources:
     @property
     def kubeconfig_name(self):
         return self.resource_prefix + "-kubeconfig"
+
+    @property
+    def principal(self):
+        """The ID Substrate's API derives from this ServiceAccount's tokens."""
+        return f"system:serviceaccount:{self.namespace}:{self.service_account}"
+
+    @property
+    def spiffe_id(self):
+        """The ID in this ServiceAccount's pod certificates, which Substrate's router must allow."""
+        return f"spiffe://cluster.local/ns/{self.namespace}/sa/{self.service_account}"
 
 
 def configuration(args):
@@ -66,39 +79,35 @@ def in_cluster_kubeconfig():
             "current-context": "in-cluster"}
 
 
-def build_resources(router_pods, config=None):
+def substrate_volume(name="substrate"):
+    """The pod's own Substrate credentials, mounted at SUBSTRATE_MOUNT; the kubelet rotates all three.
+
+    ``api-token`` authenticates to Substrate's API as the ServiceAccount. ``credential-bundle.pem``
+    (the pod's key and certificate) and ``router-ca.pem`` authenticate both ends of mutual TLS to
+    the router.
+    """
+    return {"name": name, "projected": {"sources": [
+        {"serviceAccountToken": {"audience": API_AUDIENCE, "expirationSeconds": 3600, "path": "api-token"}},
+        {"podCertificate": {"signerName": "podidentity.podcert.ate.dev/identity", "keyType": "ECDSAP256",
+                            "credentialBundlePath": "credential-bundle.pem"}},
+        {"clusterTrustBundle": {"signerName": "servicedns.podcert.ate.dev/identity", "path": "router-ca.pem",
+                                "labelSelector": {"matchLabels": {"podcert.ate.dev/canarying": "live"}}}},
+    ]}}
+
+
+def build_resources(config=None):
     config = config or ApplicationResources()
-    names = sorted({dns_name(name) for name in router_pods})
-    if not names:
-        raise ValueError("Router pod names are required; refusing unrestricted forwarding")
-    role_name = config.resource_prefix + "-client"
     trust_name = config.resource_prefix + "-trust-bundles"
-
-    def binding(kind, name, role_kind, namespace=None):
-        metadata = {"name": name}
-        if namespace:
-            metadata["namespace"] = namespace
-        return {"apiVersion": "rbac.authorization.k8s.io/v1", "kind": kind, "metadata": metadata,
-                "subjects": [{"kind": "ServiceAccount", "name": config.service_account, "namespace": config.namespace}],
-                "roleRef": {"apiGroup": "rbac.authorization.k8s.io", "kind": role_kind, "name": name}}
-
+    subject = {"kind": "ServiceAccount", "name": config.service_account, "namespace": config.namespace}
     return {"apiVersion": "v1", "kind": "List", "items": [
         namespace_resource(config.namespace),
         {"apiVersion": "v1", "kind": "ServiceAccount", "metadata": {"name": config.service_account, "namespace": config.namespace}},
-        {"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "Role",
-         "metadata": {"name": role_name, "namespace": config.control_namespace},
-         "rules": [
-             {"apiGroups": [""], "resources": ["services"], "resourceNames": [config.router_service], "verbs": ["get"]},
-             {"apiGroups": [""], "resources": ["pods"], "verbs": ["list"]},
-             {"apiGroups": [""], "resources": ["pods"], "resourceNames": names.copy(), "verbs": ["get"]},
-             {"apiGroups": [""], "resources": ["pods/portforward"], "resourceNames": names.copy(), "verbs": ["get", "create"]},
-             {"apiGroups": [""], "resources": ["serviceaccounts/token"], "resourceNames": [config.upstream_identity], "verbs": ["create"]},
-             {"apiGroups": ["certificates.k8s.io"], "resources": ["podcertificaterequests"], "verbs": ["create", "get", "delete"]},
-         ]},
-        binding("RoleBinding", role_name, "Role", config.control_namespace),
+        # kubectl-ate verifies Substrate's API against the servicedns ClusterTrustBundle, read with this.
+        # It is the harness's only Kubernetes permission: its Substrate rights come from the access policy.
         {"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "ClusterRole", "metadata": {"name": trust_name},
          "rules": [{"apiGroups": ["certificates.k8s.io"], "resources": ["clustertrustbundles"], "verbs": ["get", "list"]}]},
-        binding("ClusterRoleBinding", trust_name, "ClusterRole"),
+        {"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "ClusterRoleBinding", "metadata": {"name": trust_name},
+         "subjects": [subject], "roleRef": {"apiGroup": "rbac.authorization.k8s.io", "kind": "ClusterRole", "name": trust_name}},
         {"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": config.kubeconfig_name, "namespace": config.namespace},
          "data": {"kubeconfig": json.dumps(in_cluster_kubeconfig(), separators=(",", ":"))}},
         {"apiVersion": "v1", "kind": "PersistentVolumeClaim", "metadata": {"name": config.artifacts_claim, "namespace": config.namespace},
@@ -112,6 +121,16 @@ def checked(command, **kwargs):
 
 def kubectl(args, *command, **kwargs):
     return checked(["kubectl", "--context", args.context, "--kubeconfig", str(args.kubeconfig), *command], **kwargs)
+
+
+def ate(args, *command, **kwargs):
+    # The operator's own identity: changing an atespace's access policy needs its owner.
+    try:
+        return checked(["kubectl", "ate", "--context", args.context, "--kubeconfig", str(args.kubeconfig), *command],
+                       capture_output=True, **kwargs)
+    except subprocess.CalledProcessError as error:
+        detail = error.stderr.decode(errors="replace").strip()[-1000:]
+        raise RuntimeError(f"kubectl ate {' '.join(command[:2])} failed: {detail}") from None
 
 
 def apply(args, resource):
@@ -144,22 +163,57 @@ def import_secret(args):
     print(f"Imported configuration into {namespace}/{args.secret_name}; values omitted.")
 
 
-def prepare_resources(args):
-    config = configuration(args)
-    service = json.loads(kubectl(args, "get", "service", config.router_service, "-n", config.control_namespace,
-                                 "-o", "json", capture_output=True).stdout)
-    selector = service["spec"].get("selector", {})
-    if not selector:
-        raise RuntimeError("The router service has no selector; refusing an unrestricted forwarding grant")
-    labels = ",".join(f"{key}={value}" for key, value in sorted(selector.items()))
-    pods = json.loads(kubectl(args, "get", "pods", "-n", config.control_namespace, "-l", labels,
-                              "-o", "json", capture_output=True).stdout)
-    names = sorted(pod["metadata"]["name"] for pod in pods["items"] if not pod["metadata"].get("deletionTimestamp"))
-    if not names:
-        raise RuntimeError("No router pods found; refusing an unrestricted forwarding grant")
-    return build_resources(names, config)
+def grant_access(args, config):
+    """Make the harness an editor of its atespace and nothing more, keeping the policy's other bindings.
+
+    Editors create, resume, suspend and delete Actors there. Returns whether the policy changed.
+    """
+    member = "user:" + config.principal
+    stdout = ate(args, "get", "access-policy", "-a", config.atespace, "-o", "json").stdout
+    # An atespace without a policy prints nothing: no policy grants nothing.
+    policy = json.loads(stdout) if stdout.strip() else None
+    verb = "create" if policy is None else "update"
+    policy = policy or {"bindings": []}
+    bindings = policy.setdefault("bindings", [])
+    if any(binding.get("role") in {"editor", "owner"} and member in binding.get("members", []) for binding in bindings):
+        return False
+    editor = next((binding for binding in bindings if binding.get("role") == "editor"), None)
+    if editor is None:
+        bindings.append({"role": "editor", "members": [member]})
+    else:
+        editor.setdefault("members", []).append(member)
+    # update sends back the uid and version read above, so it fails if the policy changed in between.
+    ate(args, verb, "access-policy", "-a", config.atespace, "-f", "-", input=json.dumps(policy).encode())
+    return True
+
+
+def router_allows(args, config):
+    """Whether Substrate's router admits this ServiceAccount's pod certificates; None if it cannot tell.
+
+    The allowlist is the router's --ingress-allowed-spiffe-ids install flag, so only an install can change it.
+    """
+    router = json.loads(kubectl(args, "get", "deployment", ROUTER, "-n", config.control_namespace, "-o", "json",
+                                capture_output=True).stdout)
+    for container in router["spec"]["template"]["spec"]["containers"]:
+        for arg in container.get("args", []):
+            if arg.startswith("--ingress-allowed-spiffe-ids="):
+                return config.spiffe_id in arg.split("=", 1)[1].split(",")
+    return None
 
 
 def configure_resources(args):
-    apply(args, prepare_resources(args))
-    print("Configured application resources with forwarding restricted to current router pods.")
+    config = configuration(args)
+    apply(args, build_resources(config))
+    # Earlier versions let the harness port-forward to the router, request pod certificates in
+    # Substrate's namespace and mint tokens for the shared ate-client owner. Remove that grant.
+    kubectl(args, "delete", "rolebinding,role", config.resource_prefix + "-client", "-n", config.control_namespace,
+            "--ignore-not-found", capture_output=True)
+    changed = grant_access(args, config)
+    print(f"Configured application resources. The harness acts as {config.principal}, "
+          f"{'now' if changed else 'already'} an editor of atespace {config.atespace} and nothing else.")
+    allowed = router_allows(args, config)
+    if allowed is False:
+        raise RuntimeError(f"Substrate's router does not admit {config.spiffe_id}. Add it to the router's "
+                           "--ingress-allowed-spiffe-ids when installing Substrate; scripts/local-kubernetes.sh setup does.")
+    if allowed is None:
+        print(f"Could not read the router's ingress allowlist; make sure it admits {config.spiffe_id}.")

@@ -11,7 +11,7 @@
 | [Development](development.md) | Run tests, verify the upstream server, and build distributions |
 | [Verification record](verification.md) | Tested versions, results, and unverified infrastructure properties |
 | [Shared harness package](../harness/README.md) | The harness modules, a turn step by step, and how to add an agent |
-| [Kubernetes deployment components](../deploy/kubernetes/README.md) | Reusable permissions, service account, in-cluster kubeconfig, artifact PVC and sandbox templates |
+| [Kubernetes deployment components](../deploy/kubernetes/README.md) | The in-cluster harness's identity and Substrate access, kubeconfig, artifact PVC and sandbox templates |
 | [Document Intelligence deployment](../examples/document_intelligence/deploy/README.md) | .env import, Secret mounting, endpoint/model settings, the sandbox template and agent Jobs |
 | [Document Intelligence UI](../examples/document_intelligence/ui/README.md) | ChatKit conversations with uploads, per-turn files and Jaeger traces |
 | [SRE agent](../examples/sre/README.md) | Read-only Kubernetes investigation with evidence-checked findings |

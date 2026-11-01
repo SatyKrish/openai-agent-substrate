@@ -35,6 +35,11 @@ def build_manifest(inputs, analysis_id, root):
 
 
 def build_client(args, local=None):
+    if local:
+        return SubstrateSandboxClient(atespace=args.atespace, router_url=local.url, control=local.control)
+    # In the cluster, args carries the harness's own token and router TLS; outside it, neither, and
+    # each session reaches its Actor through `kubectl ate proxy` as the operator.
     return SubstrateSandboxClient(atespace=args.atespace,
-        router_url=local.url if local else None,
-        control=local.control if local else KubectlActorControl(context=args.context, kubeconfig=args.kubeconfig, endpoint=getattr(args, "api_endpoint", None)))
+        router_url=getattr(args, "router_url", None), router_tls=getattr(args, "router_tls", None),
+        control=KubectlActorControl(context=args.context, kubeconfig=args.kubeconfig,
+            endpoint=getattr(args, "api_endpoint", None), token_file=getattr(args, "token_file", None)))

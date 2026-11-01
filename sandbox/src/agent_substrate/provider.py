@@ -24,7 +24,7 @@ from agents.sandbox.snapshot import NoopSnapshot, SnapshotBase, SnapshotSpec
 from agents.sandbox.types import ExecResult, User
 
 from .lifecycle import ActorControl, resource_name
-from .transport import ProcessTransport, ProcessTransportError
+from .transport import ProcessTransport, ProcessTransportError, RouterTLS
 from .instrumentation import operation, traced_operation
 
 MAX_FILE_BYTES = 10 * 1024 * 1024
@@ -105,12 +105,16 @@ class SubstrateSandboxClient(BaseSandboxClient[SubstrateSandboxOptions]):
     Create owns a fresh Actor. Closing suspends it; delete is explicit. Resume never
     silently creates a replacement if the Actor is lost. Portable SDK tar snapshots
     are intentionally unsupported; Substrate owns memory/filesystem persistence.
+
+    In the cluster, pass the router's ``router_url`` and ``router_tls`` so commands go
+    straight to the router under the pod's own certificate. Without ``router_url``, each
+    session starts ``kubectl ate proxy``, the path for a harness outside the cluster.
     """
 
     backend_id = "agent-substrate-poc"
 
-    def __init__(self, *, atespace: str, control: ActorControl, router_url: str | None = None, exec_timeout: float = 30,
-                 max_file_bytes: int = MAX_FILE_BYTES):
+    def __init__(self, *, atespace: str, control: ActorControl, router_url: str | None = None,
+                 router_tls: RouterTLS | None = None, exec_timeout: float = 30, max_file_bytes: int = MAX_FILE_BYTES):
         self.atespace = resource_name(atespace)
         self.control = control
         self.exec_timeout = exec_timeout
@@ -119,7 +123,10 @@ class SubstrateSandboxClient(BaseSandboxClient[SubstrateSandboxOptions]):
         self.max_file_bytes = max_file_bytes
         if router_url is None and not callable(getattr(control, "start_proxy", None)):
             raise ValueError("Provide router_url or a control implementation with authenticated start_proxy support")
-        self.transport = ProcessTransport(router_url, default_timeout=exec_timeout) if router_url is not None else None
+        if router_tls is not None and router_url is None:
+            raise ValueError("router_tls needs the router_url it authenticates to")
+        self.transport = (ProcessTransport(router_url, default_timeout=exec_timeout, tls=router_tls)
+                          if router_url is not None else None)
 
     @traced_operation("sandbox.create")
     async def create(self, *, options: SubstrateSandboxOptions, manifest: Manifest | None = None,

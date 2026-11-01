@@ -48,7 +48,13 @@ def test_pod_reads_model_from_environment_and_explicit_override(monkeypatch):
     monkeypatch.setenv("SUBSTRATE_TEMPLATE", "python-template")
     monkeypatch.setattr(sys, "argv", ["run_agent.py"])
     assert configuration().model == "project-model"
-    assert configuration().api_endpoint == "api.ate-system.svc:443"
+    args = configuration()
+    assert args.api_endpoint == "api.ate-system.svc:443"
+    # Its own ServiceAccount, not the shared ate-client owner, for both the API and the router.
+    assert str(args.token_file) == "/var/run/substrate/api-token"
+    assert args.router_url == "https://atenet-router.ate-system.svc"
+    assert str(args.router_tls.credential_bundle) == "/var/run/substrate/credential-bundle.pem"
+    assert str(args.router_tls.ca_bundle) == "/var/run/substrate/router-ca.pem"
     monkeypatch.setattr(sys, "argv", ["run_agent.py", "--test"])
     assert configuration().model == "scripted"
 
@@ -75,4 +81,8 @@ def test_job_mounts_config_only_into_trusted_harness():
     ]
     assert pod["volumes"][0]["secret"]["secretName"] == "smoke-config"
     assert pod["containers"][0]["volumeMounts"][0]["readOnly"] is True
+    mounts = {mount["name"]: mount for mount in pod["containers"][0]["volumeMounts"]}
+    assert mounts["substrate"] == {"name": "substrate", "mountPath": "/var/run/substrate", "readOnly": True}
+    sources = next(volume for volume in pod["volumes"] if volume["name"] == "substrate")["projected"]["sources"]
+    assert sources[0]["serviceAccountToken"]["audience"] == "api.ate-system.svc"
     assert job["spec"]["backoffLimit"] == 0

@@ -17,6 +17,8 @@ COLIMA_CPUS="${COLIMA_CPUS:-4}"
 COLIMA_MEMORY="${COLIMA_MEMORY:-8}"
 SANDBOX_WORKERS="${SANDBOX_WORKERS:-1}"
 CONTROL_PLANE_REPLICAS="${CONTROL_PLANE_REPLICAS:-1}"
+# The in-cluster harness's pod certificates name its ServiceAccount (deploy/kubernetes/base).
+HARNESS_SPIFFE_ID=spiffe://cluster.local/ns/openai-agent-substrate/sa/openai-agent
 export KUBECONFIG="$LOCAL_DIR/kubeconfig"
 export KIND_CLUSTER_NAME="$CLUSTER"
 export KIND_REGISTRY_PORT=5501
@@ -85,8 +87,10 @@ case "${1:-help}" in
     (cd "$SOURCE_DIR" && go build -o "$LOCAL_DIR/bin/kubectl-ate" ./cmd/kubectl-ate)
     # Step 3, with the quickstart's flags. The bundled credential provider starts with a default-deny
     # policy, and no atespace here is granted any namespace, so sandboxes receive no credentials.
+    # The router admits two client identities: atenet-client, which `kubectl ate proxy` presents for
+    # the UIs on this machine, and the in-cluster harness's own ServiceAccount.
     # --no-dev-env ignores a personal .ate-dev-env.sh in the checkout; Colima needs the longer rollout timeout.
-    (cd "$SOURCE_DIR" && go run ./cmd/ate-setup --no-dev-env --rollout-timeout 300s deploy ate-system --credential-provider='{"name":"k8s.io"}' --ingress-allowed-spiffe-ids=spiffe://cluster.local/ns/ate-system/sa/atenet-client) 2>&1 | tee "$LOCAL_DIR/substrate-setup.log"
+    (cd "$SOURCE_DIR" && go run ./cmd/ate-setup --no-dev-env --rollout-timeout 300s deploy ate-system --credential-provider='{"name":"k8s.io"}' --ingress-allowed-spiffe-ids="spiffe://cluster.local/ns/ate-system/sa/atenet-client,$HARNESS_SPIFFE_ID") 2>&1 | tee "$LOCAL_DIR/substrate-setup.log"
     # Step 4 deploys a sample application. The sandbox demo replaces the counter: its WorkerPool
     # (workload=sandbox) runs every agent's Actors, and the provider check uses its template.
     (cd "$SOURCE_DIR" && go run ./cmd/ate-setup --no-dev-env --rollout-timeout 300s deploy demo sandbox) 2>&1 | tee "$LOCAL_DIR/sandbox-setup.log"

@@ -49,52 +49,117 @@ def test_environment_parser_failures_do_not_disclose_input(monkeypatch, tmp_path
     assert "canary-value" not in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("names", [[], ["router-a", "router-b"]])
-def test_forwarding_is_restricted_to_discovered_router_pods(monkeypatch, names):
-    def kubectl(args, *command, **kwargs):
-        if command[:2] == ("get", "service"):
-            result = {"spec": {"selector": {"app": "atenet-router"}}}
-        else:
-            assert "app=atenet-router" in command
-            result = {"items": [{"metadata": {"name": name}} for name in names]}
-        return subprocess.CompletedProcess(command, 0, stdout=json.dumps(result).encode())
-
-    monkeypatch.setattr(resources, "kubectl", kubectl)
-    if not names:
-        with pytest.raises(RuntimeError, match="router pods"):
-            resources.prepare_resources(SimpleNamespace())
-        return
-    manifest = resources.prepare_resources(SimpleNamespace())
-    role = next(item for item in manifest["items"] if item["kind"] == "Role")
-    forwards = [rule for rule in role["rules"] if "pods/portforward" in rule["resources"]]
-    assert forwards and all(rule["resourceNames"] == names for rule in forwards)
-    assert not any("pods" in rule["resources"] and "get" in rule["verbs"] and "resourceNames" not in rule for rule in role["rules"])
+def test_harness_holds_no_kubernetes_rights_in_substrates_namespace():
+    manifest = resources.build_resources()
+    kinds = [item["kind"] for item in manifest["items"]]
+    assert "Role" not in kinds and "RoleBinding" not in kinds
+    role = next(item for item in manifest["items"] if item["kind"] == "ClusterRole")
+    assert role["rules"] == [{"apiGroups": ["certificates.k8s.io"], "resources": ["clustertrustbundles"], "verbs": ["get", "list"]}]
+    text = json.dumps(manifest)
+    assert not any(grant in text for grant in ("pods/portforward", "serviceaccounts/token", "podcertificaterequests", "ate-client"))
 
 
-def test_base_matches_pre_refactor_deployment():
+def test_base_matches_deployment_fixture():
     from pathlib import Path
     expected = json.loads((Path(__file__).parent / "fixtures/base.json").read_text())
-    assert resources.build_resources(["router-b", "router-a", "router-a"]) == expected
+    assert resources.build_resources() == expected
 
 
-def test_independent_application_permissions_and_connection_settings():
-    config = resources.ApplicationResources(namespace="invoice-app", service_account="invoice-agent", resource_prefix="invoice", artifacts_claim="invoice-reports", control_namespace="substrate-system")
-    manifest = resources.build_resources(["router-a"], config)
-    by_kind = {item["kind"]: item for item in manifest["items"]}
+def test_independent_application_identity_and_resources():
+    config = resources.ApplicationResources(namespace="invoice-app", service_account="invoice-agent", resource_prefix="invoice",
+                                            artifacts_claim="invoice-reports", atespace="invoices")
+    by_kind = {item["kind"]: item for item in resources.build_resources(config)["items"]}
     assert by_kind["Namespace"]["metadata"]["name"] == "invoice-app"
-    assert by_kind["Role"]["metadata"] == {"name": "invoice-client", "namespace": "substrate-system"}
-    assert by_kind["RoleBinding"]["subjects"] == [{"kind": "ServiceAccount", "name": "invoice-agent", "namespace": "invoice-app"}]
     assert by_kind["ClusterRoleBinding"]["metadata"]["name"] == "invoice-trust-bundles"
+    assert by_kind["ClusterRoleBinding"]["subjects"] == [{"kind": "ServiceAccount", "name": "invoice-agent", "namespace": "invoice-app"}]
     assert by_kind["ConfigMap"]["metadata"]["name"] == "invoice-kubeconfig"
     assert by_kind["PersistentVolumeClaim"]["metadata"]["name"] == "invoice-reports"
+    assert config.principal == "system:serviceaccount:invoice-app:invoice-agent"
+    assert config.spiffe_id == "spiffe://cluster.local/ns/invoice-app/sa/invoice-agent"
 
 
-def test_empty_forwarding_grant_is_never_built():
-    with pytest.raises(ValueError, match="Router pod names"):
-        resources.build_resources([])
+def test_substrate_volume_projects_the_pods_own_credentials():
+    sources = resources.substrate_volume()["projected"]["sources"]
+    token, certificate, router_ca = sources
+    assert token["serviceAccountToken"]["audience"] == "api.ate-system.svc"
+    assert certificate["podCertificate"]["signerName"] == "podidentity.podcert.ate.dev/identity"
+    assert router_ca["clusterTrustBundle"]["signerName"] == "servicedns.podcert.ate.dev/identity"
+    assert {token["serviceAccountToken"]["path"], certificate["podCertificate"]["credentialBundlePath"],
+            router_ca["clusterTrustBundle"]["path"]} == {"api-token", "credential-bundle.pem", "router-ca.pem"}
+
+
+def fake_ate(monkeypatch, current):
+    calls = []
+
+    def ate(args, *command, **kwargs):
+        calls.append((command, json.loads(kwargs["input"]) if "input" in kwargs else None))
+        return subprocess.CompletedProcess(command, 0, stdout=json.dumps(current).encode() if current else b"")
+
+    monkeypatch.setattr(resources, "ate", ate)
+    return calls
+
+
+MEMBER = "user:system:serviceaccount:openai-agent-substrate:openai-agent"
+
+
+def test_access_is_granted_as_atespace_editor_when_there_is_no_policy(monkeypatch):
+    calls = fake_ate(monkeypatch, None)
+    assert resources.grant_access(SimpleNamespace(), resources.ApplicationResources()) is True
+    assert calls[1] == (("create", "access-policy", "-a", "ate-demo-sandbox", "-f", "-"),
+                        {"bindings": [{"role": "editor", "members": [MEMBER]}]})
+
+
+def test_access_grant_keeps_other_bindings_and_the_policy_version(monkeypatch):
+    current = {"metadata": {"name": "default", "uid": "u-1", "version": "7"}, "bindings": [
+        {"role": "owner", "members": ["user:alice"]}, {"role": "editor", "members": ["user:bob"]}]}
+    calls = fake_ate(monkeypatch, current)
+    assert resources.grant_access(SimpleNamespace(), resources.ApplicationResources()) is True
+    command, policy = calls[1]
+    assert command[0] == "update"
+    assert policy["metadata"] == {"name": "default", "uid": "u-1", "version": "7"}
+    assert policy["bindings"] == [{"role": "owner", "members": ["user:alice"]}, {"role": "editor", "members": ["user:bob", MEMBER]}]
+
+
+def test_existing_access_is_left_alone(monkeypatch):
+    calls = fake_ate(monkeypatch, {"metadata": {"uid": "u-1", "version": "1"}, "bindings": [{"role": "editor", "members": [MEMBER]}]})
+    assert resources.grant_access(SimpleNamespace(), resources.ApplicationResources()) is False
+    assert len(calls) == 1
+
+
+def router(args):
+    return {"spec": {"template": {"spec": {"containers": [{"name": "atenet-router", "args": args}]}}}}
+
+
+@pytest.mark.parametrize(("args", "expected"), [
+    (["--port-connect-tls=8444", "--ingress-allowed-spiffe-ids=spiffe://cluster.local/ns/ate-system/sa/atenet-client,"
+      "spiffe://cluster.local/ns/openai-agent-substrate/sa/openai-agent"], True),
+    (["--ingress-allowed-spiffe-ids=spiffe://cluster.local/ns/ate-system/sa/atenet-client"], False),
+    (["--port-connect-tls=8444"], None),
+])
+def test_router_allowlist_is_read_from_its_install_flag(monkeypatch, args, expected):
+    monkeypatch.setattr(resources, "kubectl", lambda *a, **k: subprocess.CompletedProcess(a, 0, stdout=json.dumps(router(args)).encode()))
+    assert resources.router_allows(SimpleNamespace(), resources.ApplicationResources()) is expected
+
+
+def test_configure_removes_the_old_grant_and_refuses_a_router_that_rejects_the_harness(monkeypatch, capsys):
+    applied, commands = [], []
+
+    def kubectl(args, *command, **kwargs):
+        commands.append(command)
+        stdout = json.dumps(router(["--ingress-allowed-spiffe-ids=spiffe://cluster.local/ns/ate-system/sa/atenet-client"]))
+        return subprocess.CompletedProcess(command, 0, stdout=stdout.encode())
+
+    monkeypatch.setattr(resources, "apply", lambda args, value: applied.append(value))
+    monkeypatch.setattr(resources, "kubectl", kubectl)
+    fake_ate(monkeypatch, None)
+    with pytest.raises(RuntimeError, match="does not admit spiffe://cluster.local/ns/openai-agent-substrate/sa/openai-agent"):
+        resources.configure_resources(SimpleNamespace())
+    assert applied == [resources.build_resources()]
+    assert commands[0] == ("delete", "rolebinding,role", "openai-agent-client", "-n", "ate-system", "--ignore-not-found")
+    assert "now an editor of atespace ate-demo-sandbox" in capsys.readouterr().out
 
 
 def test_resource_builders_return_independent_objects():
-    first = resources.build_resources(["router-a"])
+    first = resources.build_resources()
     first["items"].clear()
-    assert resources.build_resources(["router-a"])["items"]
+    assert resources.build_resources()["items"]

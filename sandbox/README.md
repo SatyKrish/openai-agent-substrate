@@ -54,8 +54,14 @@ finally:
 
 Run it inside an async function, with `OPENAI_API_KEY` set in the host environment.
 
+That client reaches Actors through `kubectl ate proxy` with your kubeconfig. A
+harness running in the cluster passes `router_url`, `router_tls=RouterTLS(...)`
+and `KubectlActorControl(..., endpoint=..., token_file=...)` instead, so it calls
+Substrate's API and router directly as its own ServiceAccount; see
+[Usage](https://github.com/SatyKrish/openai-agent-substrate/blob/main/docs/usage.md).
+
 The package contains the provider (`SubstrateSandboxClient`, Actor lifecycle
-through `kubectl ate`, the authenticated Actor proxy, tracing) and testing
+through `kubectl ate`, the authenticated Actor proxy, direct router mutual TLS, tracing) and testing
 helpers: a scripted model and a local protocol simulator. It is pinned to
 `openai-agents==0.24.0`.
 

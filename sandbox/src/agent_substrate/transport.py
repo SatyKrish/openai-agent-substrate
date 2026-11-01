@@ -8,10 +8,13 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+import os
+import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 
 
 class ProcessTransportError(RuntimeError):
@@ -30,19 +33,55 @@ class ProcessResult:
     exit_code: int
 
 
+@dataclass(frozen=True)
+class RouterTLS:
+    """Mutual TLS to Substrate's router from a pod in the cluster.
+
+    ``credential_bundle`` is the pod's private key and certificate chain from a
+    ``podCertificate`` projected volume; the router admits the SPIFFE ID it names only if
+    that ID is on its ingress allowlist. ``ca_bundle`` is the router's serving CA from a
+    ``clusterTrustBundle`` projected volume. The kubelet rotates both files, so they are
+    read again whenever they change.
+    """
+
+    credential_bundle: Path
+    ca_bundle: Path
+
+
 class ProcessTransport:
-    def __init__(self, router_url: str, *, default_timeout: float = 30, max_response_bytes: int = 4 * 1024 * 1024):
+    def __init__(self, router_url: str, *, default_timeout: float = 30, max_response_bytes: int = 4 * 1024 * 1024,
+                 tls: RouterTLS | None = None):
         url = urllib.parse.urlsplit(router_url)
         if (url.scheme not in {"http", "https"} or not url.hostname
                 or url.username or url.password or url.query or url.fragment):
             raise ValueError("router_url must be an HTTP(S) URL without credentials, query, or fragment")
+        if tls is not None and url.scheme != "https":
+            raise ValueError("Router TLS needs an https:// router_url")
         if not math.isfinite(default_timeout) or default_timeout <= 0 or max_response_bytes <= 0:
             raise ValueError("Timeout and response limit must be positive")
         self.url = router_url.rstrip("/") + "/process"
         self.default_timeout = default_timeout
         self.max_response_bytes = max_response_bytes
+        self.tls = tls
+        self._tls_opener: tuple[tuple[int, ...], urllib.request.OpenerDirector] | None = None
         # Deliberately avoid inheriting HTTP_PROXY and avoid replaying POST on redirects.
         self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _RejectRedirect())
+        if tls is not None:
+            self._current_opener()  # Fail at construction, not on the first command, if the files are unusable.
+
+    def _current_opener(self) -> urllib.request.OpenerDirector:
+        if self.tls is None:
+            return self._opener
+        stamp = tuple(os.stat(path).st_mtime_ns for path in (self.tls.credential_bundle, self.tls.ca_bundle))
+        cached = self._tls_opener
+        if cached is None or cached[0] != stamp:
+            context = ssl.create_default_context(cafile=self.tls.ca_bundle)
+            context.load_cert_chain(self.tls.credential_bundle)
+            opener = urllib.request.build_opener(
+                urllib.request.ProxyHandler({}), _RejectRedirect(), urllib.request.HTTPSHandler(context=context))
+            # One assignment, so a concurrent command never pairs a new stamp with an old opener.
+            cached = self._tls_opener = (stamp, opener)
+        return cached[1]
 
     async def execute(self, actor_ref: str, command: list[str], *, cwd: str, timeout: float | None = None) -> ProcessResult:
         seconds = self.default_timeout if timeout is None else timeout
@@ -59,7 +98,7 @@ class ProcessTransport:
         })
         try:
             # Allow routing/resumption overhead in addition to the remote command deadline.
-            with self._opener.open(request, timeout=seconds + 15) as response:
+            with self._current_opener().open(request, timeout=seconds + 15) as response:
                 raw = response.read(self.max_response_bytes + 1)
             if len(raw) > self.max_response_bytes:
                 raise ProcessTransportError("Execution response exceeded the configured byte limit")
