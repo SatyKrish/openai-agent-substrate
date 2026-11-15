@@ -21,7 +21,6 @@ import logging
 import re
 import shutil
 import time
-from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
@@ -40,31 +39,19 @@ from chatkit.types import (
 )
 from chatkit.widgets import DynamicWidgetRoot
 
-from agent_substrate import ActorCapacityError, SubstrateSandboxOptions
+from agent_substrate import ActorCapacityError, ActorNotFoundError, SubstrateSandboxOptions
+from agent_substrate.eviction import ActorEvicted, eviction_watch
 from agent_substrate.instrumentation import operation
 from agent_substrate.tracing import otel_trace_id, tracing_enabled
 
 from .spec import WORKSPACE_ROOT, AgentSpec, Conversation, TurnContext
 from .steps import ToolSteps, fenced, user_text
+from .store import ThreadBusyError
 from .uploads import UploadRejected, UploadStore, upload_name
 
 logger = logging.getLogger(__name__)
 _MAX_FILES = 40
 _FILE_NAME = r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}"
-# A turn another process started this recently and never finished is treated as still running there.
-_ELSEWHERE_S = 15 * 60
-
-
-def running_elsewhere(metadata: dict, running: set[str], thread_id: str) -> bool:
-    """Whether another process is running a turn of this conversation: the lock only covers one process."""
-    turns = metadata.get("turns") or []
-    if thread_id in running or not turns or turns[-1].get("status") != "running":
-        return False
-    try:
-        started = datetime.fromisoformat(turns[-1]["started_at"])
-    except (KeyError, ValueError):
-        return False
-    return (datetime.now(timezone.utc) - started).total_seconds() < _ELSEWHERE_S
 
 
 def preferred_file(turn: dict, preferred: str | None = None) -> str | None:
@@ -113,7 +100,6 @@ class HarnessChatServer(ChatKitServer[dict]):
         self.preferred_output = preferred_output
         self.history_path = self.output_dir / "history.sqlite3"
         self.running: set[str] = set()
-        self._locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
     def conversation(self, thread: ThreadMetadata) -> Conversation:
         return Conversation(thread, self.output_dir / thread.id)
@@ -122,6 +108,20 @@ class HarnessChatServer(ChatKitServer[dict]):
         """The SDK session that holds this conversation's agent history."""
         self.history_path.parent.mkdir(parents=True, exist_ok=True)
         return SQLiteSession(thread_id, self.history_path)
+
+    @contextlib.asynccontextmanager
+    async def _turn_history(self, thread_id: str):
+        history = self.history(thread_id)
+        try:
+            kept = len(await history.get_items())
+            try:
+                yield history
+            except BaseException:
+                while len(await history.get_items()) > kept:
+                    await history.pop_item()
+                raise
+        finally:
+            history.close()
 
     async def respond(self, thread: ThreadMetadata, input_user_message: UserMessageItem | None, context: dict):
         if input_user_message is None:
@@ -135,23 +135,26 @@ class HarnessChatServer(ChatKitServer[dict]):
         if not text and not attachments:
             raise CustomStreamError("Type a question to send.", allow_retry=False)
         text = text or self.spec.default_question
-        async with self._locks[thread.id]:
-            # ChatKit loaded this thread before the lock: a turn that finished meanwhile must not be overwritten.
-            with contextlib.suppress(NotFoundError):
+        try:
+            async with self.store.claim_thread(thread.id):
+                # ChatKit loaded this thread before the claim. Re-read after competing turns or deletion.
                 fresh = await self.store.load_thread(thread.id, context)
                 thread.metadata, thread.title = fresh.metadata, fresh.title
-            if running_elsewhere(thread.metadata, self.running, thread.id):
-                # ChatKit stored the message before calling us; a refused one must not stay without a reply.
-                with contextlib.suppress(NotFoundError):
-                    await self.store.delete_thread_item(thread.id, input_user_message.id, context)
-                raise CustomStreamError("A turn of this conversation is running in another window or terminal. "
-                                        "Wait for it to finish, then send again.", allow_retry=True)
-            self.running.add(thread.id)
-            try:
-                async for event in self._turn(thread, text, attachments, context):
-                    yield event
-            finally:
-                self.running.discard(thread.id)
+                if thread.metadata.get("delete_pending"):
+                    raise NotFoundError("Conversation deletion is pending")
+                self.running.add(thread.id)
+                try:
+                    async with contextlib.aclosing(self._turn(thread, text, attachments, context)) as events:
+                        async for event in events:
+                            yield event
+                finally:
+                    self.running.discard(thread.id)
+        except (ThreadBusyError, NotFoundError) as error:
+            # ChatKit already stored the message before asking the harness to respond.
+            await self.store.delete_thread_item(thread.id, input_user_message.id, context)
+            if isinstance(error, ThreadBusyError):
+                raise CustomStreamError(f"{error} Wait for it to finish, then send again.", allow_retry=True) from error
+            raise CustomStreamError("This conversation was deleted or is awaiting deletion.", allow_retry=False) from error
 
     async def _turn(self, thread: ThreadMetadata, text: str, attachments: list, context: dict):
         conversation = self.conversation(thread)
@@ -159,13 +162,16 @@ class HarnessChatServer(ChatKitServer[dict]):
         if not thread.title:
             thread.title = text if len(text) <= 60 else text[:57].rstrip() + "…"
         turns = meta.setdefault("turns", [])
+        if turns and turns[-1].get("status") == "running":
+            # The previous process exited while it owned this conversation.
+            turns[-1]["status"] = "stopped"
         sdk_trace_id = gen_trace_id()
         traced = tracing_enabled()
         turn = {
             "number": len(turns) + 1, "status": "running", "started_at": datetime.now(timezone.utc).isoformat(),
             "sdk_trace_id": sdk_trace_id if traced else None,
             "otel_trace_id": otel_trace_id(sdk_trace_id) if traced else None,
-            "lifecycle": "resumed" if meta.get("substrate") else "created",
+            "lifecycle": "resumed" if meta.get("substrate") and not meta.get("pending_actor_template") else "created",
             "model": self.model_label, "tools": [], "files": [], "uploads": [], "check": None,
         }
         turns.append(turn)
@@ -176,10 +182,11 @@ class HarnessChatServer(ChatKitServer[dict]):
         try:
             with trace(f"{self.spec.name} turn", trace_id=sdk_trace_id, group_id=thread.id, disabled=not traced):
                 with operation(turn_operation):
-                    async for event in self._run_turn(conversation, context_, turn, text, attachments):
-                        yield event
+                    async with contextlib.aclosing(self._run_turn(conversation, context_, turn, text, attachments)) as events:
+                        async for event in events:
+                            yield event
             turn["status"] = "completed"
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, GeneratorExit):
             turn["status"] = "stopped"
             raise
         except Exception as error:
@@ -190,6 +197,9 @@ class HarnessChatServer(ChatKitServer[dict]):
                 context_.workflow_item = None
             if isinstance(error, UploadRejected):
                 raise CustomStreamError(str(error), allow_retry=False) from error
+            if isinstance(error, ActorEvicted):
+                turn["status"] = "stopped"
+                raise CustomStreamError(str(error), allow_retry=True) from error
             if isinstance(error, TurnError):
                 logger.warning("Turn %s of %s failed: %s", turn["number"], thread.id, error)
                 raise CustomStreamError(str(error), allow_retry=error.retry) from error
@@ -207,7 +217,7 @@ class HarnessChatServer(ChatKitServer[dict]):
 
     async def _run_turn(self, conversation: Conversation, context_: AgentContext, turn: dict, text: str, attachments: list):
         thread, meta = conversation.thread, conversation.metadata
-        created = meta.get("substrate") is None
+        created = meta.get("substrate") is None or bool(meta.get("pending_actor_template"))
         step = CustomTask(title="Creating the workspace" if created else "Resuming the workspace", status_indicator="loading")
         workflow = WorkflowItem(id=context_.generate_id("workflow"), created_at=datetime.now(), thread_id=thread.id,
                                 workflow=Workflow(type="custom", tasks=[step], expanded=True))
@@ -215,23 +225,42 @@ class HarnessChatServer(ChatKitServer[dict]):
         yield ThreadItemAddedEvent(item=workflow)
 
         began = time.monotonic()
-        if created:
+        first_allocation = meta.get("substrate") is None
+        if first_allocation:
             manifest = self.spec.start(conversation, bool(attachments), self.workspace_root)
-            session = await self.client.create(manifest=manifest, options=SubstrateSandboxOptions(template=self.template))
-            # Save immediately: a failed first turn must still be deletable.
-            meta["substrate"] = self.client.serialize_session_state(session.state)
-            meta["actor"] = f"{session.state.atespace}/{session.state.actor_name}"
+            state = self.client.prepare_session_state(manifest=manifest, options=SubstrateSandboxOptions(template=self.template))
+            # Persist the identity before sending a create that can outlive its caller.
+            meta["substrate"] = self.client.serialize_session_state(state)
+            meta["actor"] = f"{state.atespace}/{state.actor_name}"
+            meta["pending_actor_template"] = self.template
+            meta["actor_boundary_checked"] = False
             await self.store.save_thread(thread, context_.request_context)
         else:
-            session = await self.client.resume(self.client.deserialize_session_state(meta["substrate"]))
-        actor = meta["actor"]
-        async for event in self._start(session, workflow, turn):
-            yield event
-        async with contextlib.aclosing(session):
-            if created:
+            state = self.client.deserialize_session_state(meta["substrate"])
+
+        async with contextlib.AsyncExitStack() as cleanup:
+            history = await cleanup.enter_async_context(self._turn_history(thread.id))
+            if pending_template := meta.get("pending_actor_template"):
+                session = await self.client.create_from_state(state, SubstrateSandboxOptions(template=pending_template),
+                                                              recover=not first_allocation)
+            else:
+                session = await self.client.resume(state)
+            await cleanup.enter_async_context(contextlib.aclosing(session))
+            if pending_template:
+                del meta["pending_actor_template"]
+                await self.store.save_thread(thread, context_.request_context)
+            actor = meta["actor"]
+            initialize = not session.state.workspace_initialized or meta.get("actor_boundary_checked") is False
+            async for event in self._start(session, workflow, turn):
+                yield event
+            await cleanup.enter_async_context(eviction_watch(self.client, session))
+            if initialize:
                 boundary = await session.exec('test -z "${OPENAI_API_KEY:-}" && test ! -d /var/run/agent-config')
                 if not boundary.ok():
                     raise RuntimeError("The sandbox must not contain the harness API key or Secret mount")
+                meta["actor_boundary_checked"] = True
+            meta["substrate"] = self.client.serialize_session_state(session.state)
+            await self.store.save_thread(thread, context_.request_context)
             seconds = time.monotonic() - began
             turn["start_s"] = round(seconds, 1)
             verb = "Created" if created else "Resumed"
@@ -269,23 +298,14 @@ class HarnessChatServer(ChatKitServer[dict]):
             extra = self.spec.instructions(conversation)
             agent = agent.clone(instructions=agent.instructions + ("\n\n" + extra if extra else ""),
                                 tools=[*agent.tools, *harness_tools])
-            history = self.history(thread.id)
-            kept = len(await history.get_items())
-            try:
-                result = Runner.run_streamed(
-                    agent, text, session=history, max_turns=self.max_turns,
-                    run_config=RunConfig(sandbox=SandboxRunConfig(session=session), tracing_disabled=not tracing_enabled(),
-                                         trace_include_sensitive_data=False))
-                steps = ToolSteps(result, context_, turn["tools"], frozenset(tool.name for tool in harness_tools))
-                async for event in stream_agent_response(context_, steps):
+            result = Runner.run_streamed(
+                agent, text, session=history, max_turns=self.max_turns,
+                run_config=RunConfig(sandbox=SandboxRunConfig(session=session), tracing_disabled=not tracing_enabled(),
+                                     trace_include_sensitive_data=False))
+            steps = ToolSteps(result, context_, turn["tools"], frozenset(tool.name for tool in harness_tools))
+            async with contextlib.aclosing(self._stream_agent_events(context_, steps)) as events:
+                async for event in events:
                     yield event
-            except BaseException:
-                # The SDK saves items as the run goes; a failed turn must not leave half of itself in the history.
-                while len(await history.get_items()) > kept:
-                    await history.pop_item()
-                raise
-            finally:
-                history.close()
             files = await self._collect(session, conversation, turn)
             _, check_operation = self.spec.trace_operations
             with operation(check_operation):
@@ -293,6 +313,31 @@ class HarnessChatServer(ChatKitServer[dict]):
             if self.file_status is not None:
                 turn["file_status"] = self.file_status(conversation, turn)
         meta["substrate"] = self.client.serialize_session_state(session.state)
+
+    async def _stream_agent_events(self, context: AgentContext, steps: ToolSteps):
+        async with contextlib.aclosing(stream_agent_response(context, steps)) as events:
+            pending = None
+            try:
+                while True:
+                    pending = asyncio.ensure_future(anext(events))
+                    try:
+                        event = await asyncio.shield(pending)
+                    except StopAsyncIteration:
+                        return
+                    pending = None
+                    yield event
+            except BaseException:
+                # Cancel the SDK run, then let ChatKit join its event producers before closing the Actor.
+                run_task = steps.result.run_loop_task
+                steps.result.cancel()
+                if pending is not None:
+                    await asyncio.gather(pending, return_exceptions=True)
+                with contextlib.suppress(Exception):
+                    async for _ in events:
+                        pass
+                if run_task is not None:
+                    await asyncio.gather(run_task, return_exceptions=True)
+                raise
 
     async def _start(self, session, workflow: WorkflowItem, turn: dict):
         """Start the sandbox, waiting with a visible step while every worker is full."""
@@ -459,21 +504,18 @@ class HarnessChatServer(ChatKitServer[dict]):
         """Delete the Actor (and with it the workspace volume), the history, then the host copies."""
         thread = await self.store.load_thread(thread_id, {})
         state = thread.metadata.get("substrate")
-        async with self._locks[thread_id]:
-            if state is not None:
-                session = await self.client.resume(self.client.deserialize_session_state(state))
-                try:
-                    await self.client.delete(session)
-                except RuntimeError as error:
-                    # An Actor that is already gone must not block deleting its thread.
-                    if not re.search(r"not found|no longer exists", str(error), re.IGNORECASE):
-                        raise
-            history = self.history(thread_id)
-            try:
-                await history.clear_session()
-            finally:
-                history.close()
-            shutil.rmtree(self.output_dir / thread_id, ignore_errors=True)
+        thread.metadata["delete_pending"] = True
+        await self.store.save_thread(thread, {})
+        if state is not None:
+            session = await self.client.resume(self.client.deserialize_session_state(state))
+            with contextlib.suppress(ActorNotFoundError):
+                await self.client.delete(session)
+        history = self.history(thread_id)
+        try:
+            await history.clear_session()
+        finally:
+            history.close()
+        shutil.rmtree(self.output_dir / thread_id, ignore_errors=True)
 
 
 def _has_badge(node: dict) -> bool:

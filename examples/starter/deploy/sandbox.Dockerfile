@@ -5,7 +5,7 @@
 FROM golang:1.27.3-alpine@sha256:d200d2dd76b03a99b52651fd1325aff7dcd35422c35c01bac56571b0507f3deb AS builder
 # Agent Substrate's execution server at the pinned commit; the deploy command passes .substrate-revision.
 ARG SUBSTRATE_REVISION
-COPY scripts/build-sandbox-server.sh /build-sandbox-server.sh
+COPY scripts/build-sandbox-server.sh scripts/sandbox-eviction.go /
 RUN sh /build-sandbox-server.sh "$SUBSTRATE_REVISION" /out
 
 # The sandbox: Python and a shell, plus the execution server the harness talks to.

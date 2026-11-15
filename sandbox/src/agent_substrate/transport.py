@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+from http.client import HTTPException
 import json
 import math
 import os
@@ -60,6 +61,7 @@ class ProcessTransport:
         if not math.isfinite(default_timeout) or default_timeout <= 0 or max_response_bytes <= 0:
             raise ValueError("Timeout and response limit must be positive")
         self.url = router_url.rstrip("/") + "/process"
+        self._eviction_url = router_url.rstrip("/") + "/_substrate/eviction"
         self.default_timeout = default_timeout
         self.max_response_bytes = max_response_bytes
         self.tls = tls
@@ -117,5 +119,40 @@ class ProcessTransport:
             return ProcessResult(result["stdout"].encode(), result["stderr"].encode(), result["exitCode"])
         except urllib.error.HTTPError as error:
             raise ProcessTransportError(f"Execution endpoint returned HTTP {error.code}; command was not retried") from None
-        except (OSError, ValueError, urllib.error.URLError) as error:
+        except (OSError, ValueError, HTTPException) as error:
             raise ProcessTransportError(f"Execution transport failed ({type(error).__name__}); outcome may be unknown") from None
+
+    async def poll_eviction(self, actor_ref: str) -> int | None:
+        """Read the current notice ID, zero while clear, or None for an older server."""
+        raw = await asyncio.to_thread(self._eviction_request, actor_ref, b"", 200)
+        if raw is None:
+            return None
+        try:
+            result = json.loads(raw)
+        except ValueError:
+            raise ProcessTransportError("Invalid Actor eviction response") from None
+        if (not isinstance(result, dict) or type(result.get("eviction_id")) is not int
+                or not 0 <= result["eviction_id"] < (1 << 64)):
+            raise ProcessTransportError("Invalid Actor eviction response")
+        return result["eviction_id"]
+
+    async def acknowledge_eviction(self, actor_ref: str, notice: int) -> None:
+        payload = json.dumps({"acknowledge": notice}).encode()
+        await asyncio.to_thread(self._eviction_request, actor_ref, payload, 204)
+
+    def _eviction_request(self, actor_ref: str, payload: bytes, expected_status: int) -> bytes | None:
+        request = urllib.request.Request(self._eviction_url, data=payload, method="POST", headers={
+            "Content-Type": "application/json", "ate-target-actor": actor_ref,
+        })
+        try:
+            with self._current_opener().open(request, timeout=3) as response:
+                raw = response.read(129)
+                if response.status != expected_status or len(raw) > 128:
+                    raise ProcessTransportError("Invalid Actor eviction response")
+                return raw
+        except urllib.error.HTTPError as error:
+            if error.code in {404, 405}:
+                return None
+            raise ProcessTransportError(f"Actor eviction poll returned HTTP {error.code}") from None
+        except (OSError, ValueError, HTTPException) as error:
+            raise ProcessTransportError(f"Actor eviction poll failed ({type(error).__name__})") from None

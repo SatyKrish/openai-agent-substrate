@@ -51,7 +51,7 @@ uv run python -m examples.provider_check --backend local \
   --output-dir artifacts/upstream
 ```
 
-The script downloads the v1.0.0 `demos/sandbox` package at the pinned commit through the Go module proxy, the same source the sandbox images build. This exercises the upstream HTTP execution code with simulated lifecycle operations. The upstream server briefly listens on the selected port on all host interfaces. Run this compatibility check only on a trusted development machine.
+The script downloads the v1.0.0 `demos/sandbox` package at the pinned commit through the Go module proxy and compiles it alongside the project's eviction notice handler, just as the sandbox images do. This exercises the upstream HTTP execution code and the handler with simulated lifecycle operations. The server briefly listens on the selected port on all host interfaces. Run this compatibility check only on a trusted development machine.
 
 ## Real Kubernetes tests
 

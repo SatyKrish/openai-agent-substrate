@@ -68,6 +68,13 @@ finally:
 
 The example belongs inside an async function. Set the host API key and a model available to your account when using a live model.
 
+For a disposable run, pass `SandboxRunConfig(client=client, options=options)`
+with `options = SubstrateSandboxOptions(template="sandbox-template")`. The SDK
+creates and deletes the Actor. The provider accepts the pinned SDK's default
+snapshot configuration and `NoopSnapshotSpec` in this mode. Substrate persists
+retained Actors through its own snapshot storage. Use an application-owned
+`session=` for durable cross-turn resume. [SDK lifecycle](https://openai.github.io/openai-agents-python/sandbox/guide/#sandbox-lifecycle)
+
 That client runs `kubectl ate` with your kubeconfig and reaches each Actor through `kubectl ate proxy`, the path for a harness outside the cluster. A harness in a pod calls Substrate as its own ServiceAccount instead, with the credentials [`substrate_volume()`](../deploy/kubernetes/base/README.md) mounts:
 
 ```python
@@ -102,6 +109,15 @@ async with resumed:
 Keep SDK conversation history or `RunState` separately. Actor suspension preserves compute/workspace state, not the external SDK harness. `examples/provider_check/main.py` shows carrying `result.to_input_list()` into the next run.
 
 For a chat application, keep one Actor per conversation: create it on the first message, store the serialized state with the conversation and its history in an SDK session (or `result.to_input_list()`), resume the Actor for each later message, and delete it when the conversation is deleted. Serialize turns within one conversation; separate conversations can run concurrently. The [shared agent harness](agent-harness.md) implements this with ChatKit for the example agents; the [starter agent](../examples/starter/README.md) is the smallest one, and [architecture](architecture.md#workspace-persistence-and-conversations) covers the workspace volume that makes it durable.
+
+Use `async with session, eviction_watch(client, session):` with
+`eviction_watch` imported from `agent_substrate.eviction` for an
+application-owned run on an eviction-aware image. If the worker reports a
+drain, `ActorEvicted` interrupts the run and the outer session scope requests
+synchronous suspend. Retain the Actor if the application will resume it.
+Rebuild and deploy the example sandbox image to enable eviction handling for
+new conversations. Existing Actors keep their original image and template.
+[Local deployment commands](local-kubernetes.md) · [Substrate eviction guidance](https://ate.dev/docs/reference/api-guide/#eviction)
 
 For complete runnable examples, see [examples/README.md](../examples/README.md).
 

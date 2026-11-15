@@ -22,6 +22,8 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from agent_substrate import ActorAlreadyExistsError, ActorNotFoundError
+
 
 class LocalActorControl:
     def __init__(self):
@@ -31,14 +33,14 @@ class LocalActorControl:
     async def create(self, atespace: str, name: str, template: str) -> None:
         ref = f"{atespace}/{name}"
         if ref in self.actors:
-            raise RuntimeError("Actor already exists")
+            raise ActorAlreadyExistsError("Actor already exists")
         self.actors[ref] = False
         self.events.append(("create", ref))
 
     async def resume(self, atespace: str, name: str) -> None:
         ref = f"{atespace}/{name}"
         if ref not in self.actors:
-            raise RuntimeError("Actor no longer exists; refusing to replace it")
+            raise ActorNotFoundError("Actor no longer exists; refusing to replace it")
         self.actors[ref] = True
         self.events.append(("resume", ref))
 
@@ -49,6 +51,8 @@ class LocalActorControl:
 
     async def delete(self, atespace: str, name: str) -> None:
         ref = f"{atespace}/{name}"
+        if ref not in self.actors:
+            raise ActorNotFoundError("Actor no longer exists")
         del self.actors[ref]
         self.events.append(("delete", ref))
 
@@ -153,6 +157,7 @@ class LocalExecutionServer:
             self._server.server_close()
             self._thread.join(timeout=5)
         if self._process:
-            self._process.terminate()
+            # An eviction-aware server catches SIGTERM and stays alive.
+            self._process.kill()
             self._process.wait(timeout=5)
         self._temporary.cleanup()

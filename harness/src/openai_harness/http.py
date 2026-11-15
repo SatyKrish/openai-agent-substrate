@@ -10,6 +10,7 @@ loopback only, refuses cross-site requests, and serves only files it recorded it
 
 from __future__ import annotations
 
+import asyncio
 import html
 import logging
 import re
@@ -28,8 +29,9 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
 from . import traces
-from .chat import HarnessChatServer, running_elsewhere
+from .chat import HarnessChatServer
 from .spec import MIB
+from .store import ThreadBusyError
 from .uploads import UploadRejected
 
 logger = logging.getLogger(__name__)
@@ -74,6 +76,8 @@ def chat_routes(server: HarnessChatServer, *, config: dict, port: int, jaeger_ur
             return JSONResponse({"error": "cross-origin request refused"}, status_code=403)
         try:
             result = await server.process(await request.body(), {})
+        except ThreadBusyError as error:
+            return JSONResponse({"error": str(error)}, status_code=409)
         except UploadRejected as error:
             return JSONResponse({"error": str(error)}, status_code=400)
         if isinstance(result, StreamingResult):
@@ -126,8 +130,8 @@ def chat_routes(server: HarnessChatServer, *, config: dict, port: int, jaeger_ur
             return JSONResponse({"error": "thread not found"}, status_code=404)
         meta = thread.metadata
         state = ("running" if thread.id in server.running
-                 else "elsewhere" if running_elsewhere(meta, server.running, thread.id)
-                 else "suspended" if meta.get("substrate") else "not created")
+                 else "elsewhere" if server.store.thread_claimed(thread.id)
+                 else "suspended" if meta.get("substrate") and not meta.get("pending_actor_template") else "not created")
         return JSONResponse({"thread_id": thread.id, "title": thread.title, "actor": meta.get("actor"), "state": state,
                              **{field: meta.get(field) for field in state_fields},
                              "uploads": meta.get("uploads", []), "turns": meta.get("turns", [])},
@@ -181,7 +185,7 @@ def chat_routes(server: HarnessChatServer, *, config: dict, port: int, jaeger_ur
         if not jaeger_url:
             return JSONResponse({"status": "unavailable", "otel_trace_id": turn["otel_trace_id"]}, status_code=503)
         try:
-            payload = traces.fetch_trace(jaeger_url, turn["otel_trace_id"])
+            payload = await asyncio.to_thread(traces.fetch_trace, jaeger_url, turn["otel_trace_id"])
         except (OSError, ValueError, urllib.error.URLError):
             return JSONResponse({"status": "unavailable", "otel_trace_id": turn["otel_trace_id"]}, status_code=503)
         if payload is None:

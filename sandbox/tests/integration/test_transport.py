@@ -4,7 +4,9 @@
 import json
 import threading
 from contextlib import contextmanager
+from http.client import IncompleteRead
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -58,6 +60,17 @@ async def test_oversized_response_is_rejected():
     with response_server(200, b"x" * 101) as (url, requests):
         with pytest.raises(ProcessTransportError, match="byte limit"):
             await ProcessTransport(url, max_response_bytes=100).execute("space/actor", ["true"], cwd="/workspace")
+
+
+async def test_incomplete_http_response_keeps_execution_outcome_unknown(monkeypatch):
+    transport = ProcessTransport("http://127.0.0.1:1")
+    opener = MagicMock()
+    opener.open.return_value.__enter__.return_value.read.side_effect = IncompleteRead(b"partial")
+    monkeypatch.setattr(transport, "_opener", opener)
+
+    with pytest.raises(ProcessTransportError, match="outcome may be unknown"):
+        await transport.execute("space/actor", ["true"], cwd="/workspace")
+    opener.open.assert_called_once()
 
 
 @pytest.mark.parametrize("url", ["ftp://example.com", "http://user:secret@example.com", "http://example.com?token=secret"])

@@ -1,6 +1,7 @@
 # Copyright 2026 openai-agent-substrate contributors
 # SPDX-License-Identifier: Apache-2.0
 
+import asyncio
 import io
 import json
 import os
@@ -14,14 +15,27 @@ from agents.sandbox.capabilities import Filesystem, Shell
 from agents.sandbox.entries import Dir, File, GitRepo
 from agents.sandbox.errors import ExecNonZeroError
 from agents.sandbox.manifest import Environment
-from agents.sandbox.snapshot import NoopSnapshot
+from agents.sandbox.snapshot import LocalSnapshot, LocalSnapshotSpec, NoopSnapshotSpec
 
+from agent_substrate import ActorAlreadyExistsError
 from agent_substrate.provider import MAX_FILE_BYTES, SubstrateSandboxClient, SubstrateSandboxOptions
 from testing.model import ScriptedModel
 
 
 def options():
     return SubstrateSandboxOptions(template="sandbox-template")
+
+
+@pytest.mark.parametrize("explicit_noop", [False, True])
+async def test_runner_owns_lifecycle_with_default_or_noop_snapshot(client, server, explicit_noop):
+    manifest = Manifest(root=str(server.root), entries={"input.txt": File(content=b"sdk-owned")})
+    model = ScriptedModel("cat input.txt", expected_output="sdk-owned")
+    agent = SandboxAgent(name="SDK owned", model=model, default_manifest=manifest, capabilities=[Shell()])
+    sandbox = SandboxRunConfig(client=client, options=options(), snapshot=NoopSnapshotSpec() if explicit_noop else None)
+    result = await Runner.run(agent, "Read the file", run_config=RunConfig(sandbox=sandbox, tracing_disabled=True))
+    assert result.final_output == "Sandbox execution verified."
+    assert [kind for kind, _ in server.control.events] == ["create", "resume", "suspend", "delete"]
+    assert not server.control.actors
 
 
 async def test_real_runner_binds_shell_and_filesystem_and_collects_artifact(client, server):
@@ -65,6 +79,7 @@ async def test_resume_preserves_mutated_manifest_file_and_artifact(client, serve
             await session.write(Path("input.txt"), io.BytesIO(b"changed"))
             await session.write(Path("artifact.bin"), io.BytesIO(b"retained"))
         payload = json.loads(json.dumps(client.serialize_session_state(session.state)))
+        assert payload.pop("workspace_initialized") is True
         assert "router_url" not in payload
         session = await client.resume(client.deserialize_session_state(payload))
         async with session:
@@ -73,6 +88,118 @@ async def test_resume_preserves_mutated_manifest_file_and_artifact(client, serve
         assert [e[0] for e in server.control.events].count("create") == 1
     finally:
         await client.delete(session)
+
+
+@pytest.mark.parametrize("legacy_state", [False, True])
+async def test_resume_uninitialized_actor_seeds_an_already_mounted_workspace(client, server, legacy_state):
+    server.root.mkdir()
+    manifest = Manifest(root=str(server.root), entries={"input.txt": File(content=b"initial")})
+    session = await client.create(manifest=manifest, options=options())
+    try:
+        payload = json.loads(json.dumps(client.serialize_session_state(session.state)))
+        if legacy_state:
+            assert payload.pop("workspace_initialized") is False
+        session = await client.resume(client.deserialize_session_state(payload))
+        async with session:
+            assert (await session.read(Path("input.txt"))).read() == b"initial"
+            assert client.serialize_session_state(session.state)["workspace_initialized"] is True
+    finally:
+        await client.delete(session)
+
+
+@pytest.mark.parametrize("cancel", [False, True])
+async def test_partial_first_start_suspends_and_retries_manifest(client, server, monkeypatch, cancel):
+    manifest = Manifest(root=str(server.root), entries={"input.txt": File(content=b"initial")})
+    session = await client.create(manifest=manifest, options=options())
+    received = asyncio.Event()
+
+    async def fail_materialization(*args, **kwargs):
+        received.set()
+        if cancel:
+            await asyncio.Future()
+        raise OSError("interrupted first manifest")
+
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(session._inner, "_apply_manifest", fail_materialization)
+            task = asyncio.create_task(session.start())
+            await asyncio.wait_for(received.wait(), 5)
+            if cancel:
+                task.cancel()
+            with pytest.raises(asyncio.CancelledError if cancel else OSError):
+                await task
+        assert [event[0] for event in server.control.events] == ["create", "resume", "suspend"]
+        assert client.serialize_session_state(session.state)["workspace_initialized"] is False
+        async with session:
+            assert (await session.read(Path("input.txt"))).read() == b"initial"
+    finally:
+        await client.delete(session)
+
+
+async def test_recover_prepared_actor_keeps_same_identity(client, server):
+    manifest = Manifest(root=str(server.root))
+    state = client.prepare_session_state(manifest=manifest, options=options())
+    assert not server.control.events
+    session = await client.create_from_state(state, options())
+    try:
+        with pytest.raises(ActorAlreadyExistsError):
+            await client.create_from_state(state, options())
+        restored = client.deserialize_session_state(client.serialize_session_state(state))
+        recovered = await client.create_from_state(restored, options(), recover=True)
+        assert recovered.state.actor_name == state.actor_name
+        assert server.control.events == [("create", f"{state.atespace}/{state.actor_name}")]
+    finally:
+        await client.delete(session)
+    await client.delete(recovered)
+
+
+async def test_cancelled_resume_settles_before_startup_suspends(client, server, monkeypatch):
+    session = await client.create(manifest=Manifest(root=str(server.root)), options=options())
+    started, complete = asyncio.Event(), asyncio.Event()
+    resume = server.control.resume
+
+    async def delayed_resume(*args):
+        started.set()
+        await complete.wait()
+        await resume(*args)
+
+    monkeypatch.setattr(server.control, "resume", delayed_resume)
+    task = asyncio.create_task(session.start())
+    try:
+        await asyncio.wait_for(started.wait(), 5)
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+        complete.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert [event for event, _ in server.control.events] == ["create", "resume", "suspend"]
+    finally:
+        complete.set()
+        await client.delete(session)
+
+
+async def test_cancelled_create_deletes_completed_allocation(client, server, monkeypatch):
+    started, complete = asyncio.Event(), asyncio.Event()
+    create = server.control.create
+
+    async def delayed_create(*args):
+        started.set()
+        await complete.wait()
+        await create(*args)
+
+    monkeypatch.setattr(server.control, "create", delayed_create)
+    task = asyncio.create_task(client.create(manifest=Manifest(root=str(server.root)), options=options()))
+    try:
+        await asyncio.wait_for(started.wait(), 5)
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+    finally:
+        complete.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert [event for event, _ in server.control.events] == ["create", "delete"]
 
 
 async def test_nonzero_exit_preserves_stdout_and_stderr(client, server):
@@ -183,10 +310,27 @@ async def test_unsupported_manifest_is_rejected_before_actor_creation(client, se
     assert server.control.events == []
 
 
-async def test_portable_snapshots_are_explicitly_unsupported(client, server):
+async def test_portable_snapshots_are_explicitly_unsupported(client, server, tmp_path):
+    manifest = Manifest(root=str(server.root))
     with pytest.raises(NotImplementedError, match="snapshots"):
-        await client.create(manifest=Manifest(root=str(server.root)), options=options(), snapshot=NoopSnapshot(id="test"))
+        await client.create(manifest=manifest, options=options(), snapshot=LocalSnapshot(id="test", base_path=tmp_path))
+    with pytest.raises(NotImplementedError, match="snapshots"):
+        await client.create(manifest=manifest, options=options(), snapshot=LocalSnapshotSpec(base_path=tmp_path))
     assert server.control.events == []
+
+
+async def test_writes_consume_short_reads(client, server):
+    class ShortReads(io.BytesIO):
+        def read(self, size=-1):
+            return super().read(min(size, 2) if size >= 0 else size)
+
+    session = await client.create(manifest=Manifest(root=str(server.root)), options=options())
+    try:
+        async with session:
+            await session.write(Path("result.bin"), ShortReads(b"012345"))
+            assert (await session.read(Path("result.bin"))).read() == b"012345"
+    finally:
+        await client.delete(session)
 
 
 async def test_authenticated_proxy_is_owned_per_session_and_reopened_on_resume(server):

@@ -17,8 +17,21 @@ class ActorCapacityError(RuntimeError):
     """Substrate refused to run an Actor because no worker has room; retrying later can succeed."""
 
 
+class ActorAlreadyExistsError(RuntimeError):
+    """Substrate already has an Actor with this name in the atespace."""
+
+
+class ActorNotFoundError(RuntimeError):
+    """The requested Actor no longer exists in the atespace."""
+
+
 # Substrate's AssignWorker step reports a full pool with this text and gRPC RESOURCE_EXHAUSTED.
 _NO_ROOM = re.compile(r"no worker has room|RESOURCE_EXHAUSTED", re.IGNORECASE)
+_STATUS_ERRORS = (
+    (re.compile(r"\bcode\s*=\s*AlreadyExists\b", re.IGNORECASE), ActorAlreadyExistsError),
+    (re.compile(r"\bcode\s*=\s*NotFound\b", re.IGNORECASE), ActorNotFoundError),
+    (_NO_ROOM, ActorCapacityError),
+)
 
 
 def resource_name(value: str) -> str:
@@ -81,7 +94,7 @@ class KubectlActorControl:
             raise
         if process.returncode:
             detail = (stderr or stdout).decode(errors="replace")[:2000]
-            error = ActorCapacityError if _NO_ROOM.search(detail) else RuntimeError
+            error = next((error for pattern, error in _STATUS_ERRORS if pattern.search(detail)), RuntimeError)
             raise error(f"Actor lifecycle command failed (exit {process.returncode}): {detail}")
 
     async def create(self, atespace: str, name: str, template: str) -> None:

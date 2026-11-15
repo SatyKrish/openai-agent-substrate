@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
-from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -15,7 +14,7 @@ from starlette.testclient import TestClient  # noqa: E402
 
 from openai_harness import http  # noqa: E402
 from openai_harness.capacity import free_slots, usage  # noqa: E402
-from openai_harness.chat import HarnessChatServer, preferred_file, running_elsewhere  # noqa: E402
+from openai_harness.chat import HarnessChatServer, preferred_file  # noqa: E402
 from openai_harness.spec import AgentSpec  # noqa: E402
 from openai_harness.store import SQLiteStore  # noqa: E402
 from testing.harness import Calls, events, message, shell  # noqa: E402
@@ -93,32 +92,25 @@ def test_free_slots_count_the_templates_size_on_active_selected_workers():
     assert free_slots(workers, usage(table), template) == {"workers": 2, "slots": 8, "free": 4}
 
 
-def test_a_turn_running_in_another_process_blocks_a_new_one_until_it_is_stale():
-    now = datetime.now(timezone.utc)
-    running = {"turns": [{"number": 1, "status": "running", "started_at": now.isoformat()}]}
-    assert running_elsewhere(running, set(), "thr_1")
-    # Not elsewhere when this process runs it, when it finished, or when it was left running long ago (a crash).
-    assert not running_elsewhere(running, {"thr_1"}, "thr_1")
-    assert not running_elsewhere({"turns": [{"status": "completed", "started_at": now.isoformat()}]}, set(), "thr_1")
-    stale = (now - timedelta(minutes=20)).isoformat()
-    assert not running_elsewhere({"turns": [{"status": "running", "started_at": stale}]}, set(), "thr_1")
-
-
 async def test_a_message_is_refused_while_another_process_runs_the_conversation(server, tmp_path):
     chat = make_chat(server, tmp_path, Calls(answer="Hi."))
     first = await events(chat, {"type": "threads.create", "params": {"input": message("Hello")}})
     thread_id = next(event["thread"]["id"] for event in first if event["type"] == "thread.created")
-    thread = await chat.store.load_thread(thread_id, {})
-    # Another process (a terminal chat) saved a turn it is still running.
-    thread.metadata["turns"].append({"number": 2, "status": "running", "started_at": datetime.now(timezone.utc).isoformat(),
-                                     "files": [], "tools": []})
-    await chat.store.save_thread(thread, {})
-    with TestClient(app_for(chat), base_url="http://localhost:8009") as client:
-        assert client.get(f"/api/threads/{thread_id}").json()["state"] == "elsewhere"
-    stream = await events(chat, {"type": "threads.add_user_message", "params": {"thread_id": thread_id, "input": message("Again")}})
+    other = SQLiteStore(chat.store.path)
+    try:
+        async with other.claim_thread(thread_id):
+            with TestClient(app_for(chat), base_url="http://localhost:8009") as client:
+                assert client.get(f"/api/threads/{thread_id}").json()["state"] == "elsewhere"
+                deletion = client.post("/chatkit", json={"type": "threads.delete", "params": {"thread_id": thread_id}})
+                assert deletion.status_code == 409
+            stream = await events(chat, {"type": "threads.add_user_message",
+                                         "params": {"thread_id": thread_id, "input": message("Again")}})
+        assert not chat.store.thread_claimed(thread_id)
+    finally:
+        other.close()
     errors = [event for event in stream if event["type"] == "error"]
     assert errors and "running in another window or terminal" in errors[0]["message"]
-    assert len((await chat.store.load_thread(thread_id, {})).metadata["turns"]) == 2
+    assert len((await chat.store.load_thread(thread_id, {})).metadata["turns"]) == 1
     # The refused message is not left in the conversation without a reply.
     items = (await chat.store.load_thread_items(thread_id, None, 50, "asc", {})).data
     texts = [part.text for item in items if item.type == "user_message" for part in item.content]

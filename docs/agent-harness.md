@@ -46,10 +46,10 @@ settings and behavior.
 The harness also provides a terminal chat (`openai_harness.terminal`), which
 drives the same server in-process, so a terminal conversation is an ordinary
 thread that the agent's UI also lists and links to. The starter agent uses the
-terminal chat as the quick start's last step and keeps its UI optional. Each
-process locks a conversation only for itself, so a message for a conversation
-another process is running a turn of is refused: the UI shows that it is
-running elsewhere until the turn ends.
+terminal chat as the quick start's last step and keeps its UI optional. Turns
+and deletion share a per-thread file lock next to the SQLite store. A process
+on the same host can see when a conversation is running elsewhere, and the OS
+releases its lock if it exits.
 
 ## Standards, not a new agent format
 
@@ -88,8 +88,10 @@ the SDK does not cover:
    conversation's lock, so the harness reloads the thread after taking it.
    Without that, a second message sent during a running turn overwrote the
    first turn's record and history.
-2. **Create or resume the sandbox, waiting for capacity.** The provider raises
-   `ActorCapacityError` when Substrate has no worker with room. The harness shows
+2. **Create or resume the sandbox, waiting for capacity.** The harness records
+   the intended Actor before creation and saves workspace initialization
+   separately. If a creation response is lost, it can recover the same Actor.
+   The provider raises `ActorCapacityError` when Substrate has no worker with room. The harness shows
    a waiting step, retries with backoff for up to five minutes, then fails with
    a message that says the workers are busy. Every failure is logged on the
    server; the browser sees only safe text.
@@ -105,7 +107,10 @@ the SDK does not cover:
    Checks compare against the host copy, which the sandbox cannot edit.
 7. **Collect and check.** Files in the agent's `collect` folders are copied to
    the host; the agent's check runs on them and on the host copies.
-8. **Suspend** the sandbox and save its session state with the thread.
+8. **Suspend** the sandbox and save its session state with the thread. During a
+   turn, the example sandbox images report worker eviction to the harness. The
+   harness stops the turn, acknowledges the notice and suspends the Actor for
+   the next turn. [Substrate eviction guidance](https://ate.dev/docs/reference/api-guide/#eviction)
 
 ## The SRE agent
 

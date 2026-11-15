@@ -60,6 +60,11 @@ An explicit `--router-url` selects a trusted HTTP gateway you operate, bypassing
 
 An application gateway can implement the four lifecycle methods in `ActorControl`. Supply a trusted `router_url`, or provide an async `start_proxy(atespace, name)` method returning an object with a loopback `url` and async `aclose()` lifecycle.
 
+For shared execution, the repository includes a gateway that authenticates
+application client certificates and applies an explicit per-Actor grant before
+forwarding execution and eviction requests to Substrate over mTLS. Run it with
+direct router access restricted to trusted infrastructure. [Actor gateway deployment](../deploy/kubernetes/actor_gateway/README.md)
+
 ## Agent sandbox templates
 
 Each agent registers an ActorTemplate for its sandbox image through the

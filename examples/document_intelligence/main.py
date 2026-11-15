@@ -17,6 +17,7 @@ from agents.run import RunConfig
 from agents.sandbox import SandboxRunConfig
 
 from agent_substrate import SubstrateSandboxOptions
+from agent_substrate.eviction import eviction_watch
 from agent_substrate.tracing import configure_tracing, current_trace_ids, operation, tracing_enabled
 
 from .agent.agent import build_agent
@@ -53,7 +54,7 @@ async def _run(args, local, analysis_id):
             from .evals.scripted import DocumentWorkflowModel
             model = DocumentWorkflowModel(sys.executable if local else "python3")
         agent = build_agent(manifest, model)
-        async with session:
+        async with session, eviction_watch(client, session):
             boundary = await session.exec('test -z "${OPENAI_API_KEY:-}" && test ! -d /var/run/agent-config')
             if not boundary.ok():
                 raise RuntimeError("The document sandbox must not contain the trusted harness API key or Secret mount")
