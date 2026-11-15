@@ -129,7 +129,8 @@ case "${1:-help}" in
     if [[ -f "$PROJECT_ROOT/.env" ]]; then
       uv run --locked python -m examples.document_intelligence.deploy secret --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG"
     else
-      echo "No .env found. Copy .env.example to .env to configure the Kubernetes agent."
+      echo "The scripted Kubernetes provider check is ready. Run ./scripts/local-kubernetes.sh test without an OpenAI API key."
+      echo "For live model calls, copy .env.example to .env and set OPENAI_API_KEY and OPENAI_MODEL."
     fi
     ;;
   test)

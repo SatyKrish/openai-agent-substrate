@@ -114,9 +114,9 @@ configure OTLP for new agent Jobs. Run `agent-run` for live model inference, or
 terminal to open a loopback port forward for <http://127.0.0.1:16686>.
 See [tracing and independent verification](tracing.md) for the complete workflow.
 
-The quick start's golden path is `setup`, `.env`, `starter-setup`, then
-`starter-chat`, a terminal chat with the [starter agent](../examples/starter/README.md).
-`starter-ui` optionally serves the same conversations on <http://localhost:8002>.
+For a live session, configure `.env` after cluster setup and run
+`starter-setup` followed by `starter-chat`. `starter-ui` serves the same
+conversations on <http://localhost:8002>. [Run Starter with a live model](../README.md#run-starter-with-a-live-model)
 
 For multi-turn testing, `./scripts/local-kubernetes.sh ui` serves the
 [Document Intelligence UI](../examples/document_intelligence/ui/README.md) on
