@@ -3,7 +3,7 @@
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 [![CI](https://github.com/SatyKrish/openai-agent-substrate/actions/workflows/ci.yml/badge.svg)](https://github.com/SatyKrish/openai-agent-substrate/actions/workflows/ci.yml)
 
-A reference implementation of **Kubernetes as a sandbox compute provider for OpenAI Agents SDK `SandboxAgent`**, using Agent Substrate to manage sandboxed Actors and workers. The SDK harness runs in your trusted application; shell commands and workspace files run in the Actor.
+A reference implementation of **Kubernetes as a sandbox compute provider for OpenAI Agents SDK `SandboxAgent`**, built on [Agent Substrate v1.0.0](https://github.com/agent-substrate/substrate/releases/tag/v1.0.0). The SDK harness runs in your trusted application. Shell commands and workspace files run in an Actor scheduled onto a Substrate worker.
 
 ## Harness separate from compute
 
@@ -13,23 +13,22 @@ This project follows the [harness separate from compute pattern](https://develop
 
 *Diagram from the [official OpenAI documentation](https://developers.openai.com/api/docs/guides/agents/sandboxes).*
 
-`SubstrateSandboxClient` connects the SDK sandbox interface to the Kubernetes execution environment. Agent Substrate manages Actor lifecycle and routes execution requests to each workspace. The agents in this repository run on a [shared agent harness](docs/agent-harness.md):
+`SubstrateSandboxClient` connects the SDK sandbox interface to Substrate. Kubernetes manages worker infrastructure. Substrate's control plane assigns Actors to workers, and its router forwards requests to the assigned Actor. Each example runs on the [shared agent harness](docs/agent-harness.md). See the [Agent Substrate architecture](https://ate.dev/docs/concepts/architecture/).
 
 | Harness (runs the agent loop) | Sandbox (runs the tools) |
 | --- | --- |
 | The OpenAI Agents SDK, with SDK sessions for history | One Agent Substrate Actor per conversation |
 | ChatKit for the streaming UI, or a terminal chat | Shell, files, skills and agent-written code |
 | OpenTelemetry to Jaeger | A per-Actor volume that keeps the workspace across turns |
-| Credentials, conversation state, suspend and resume, host checks of outputs | No credentials: the harness checks this when it creates the workspace |
+| Model credentials, conversation state, suspend and resume, host checks of outputs | Workspace setup verifies separation from the harness API key and Secret mount |
 
-The harness never shares a process with the sandbox. Code execution and file
-access cross the boundary; the loop, model calls and orchestration stay on the
-harness side, so a compromised or misbehaving tool cannot reach the harness's
-credentials or conversation state. Tools that need credentials, such as the SRE
-agent's read-only cluster access, run in the harness and hand their output to
-the sandbox as evidence. After every turn the harness suspends the Actor: its
-snapshot frees the worker, and the next message resumes it with the workspace
-intact. See the [architecture and supported capabilities](docs/architecture.md).
+The harness keeps model calls, credentialed tools and conversation state in the
+trusted application. The SRE agent's read-only cluster tools run there and pass
+their output to the sandbox as evidence. The harness explicitly starts the
+Actor for each turn and requests a synchronous suspend when the turn ends.
+Substrate persists the checkpoint to snapshot storage and frees the worker's
+capacity. The next turn resumes the same Actor and workspace. See the
+[architecture and supported capabilities](docs/architecture.md).
 
 ## Quick start
 
@@ -37,10 +36,10 @@ Run an agent in a Kubernetes sandbox on your machine. You need macOS with
 [Colima](https://github.com/abiosoft/colima) or Linux with Docker, plus Git, Go,
 kubectl, [uv](https://docs.astral.sh/uv/), and an OpenAI API key.
 
-**1. Set up a local cluster with Agent Substrate.** This follows Agent
-Substrate's own [quickstart](https://ate.dev/docs/get-started/quickstart/): a
-dedicated Kind cluster with a local registry, Substrate itself, its sandbox
-worker pool and the `kubectl ate` plugin. See the
+**1. Set up a local cluster with Agent Substrate.** The setup script adapts the
+[upstream quickstart](https://ate.dev/docs/get-started/quickstart/) to create a
+dedicated Kind cluster with a local registry, the pinned Substrate release, a
+sandbox worker pool and the `kubectl ate` plugin. See the
 [local Kubernetes guide](docs/local-kubernetes.md).
 
 ```sh
@@ -137,7 +136,12 @@ uv run python -m examples.provider_check --backend local
 
 ## Verification
 
-The provider is pinned to `openai-agents==0.24.0`. Real Actor execution, authenticated routing, suspend/resume, and external snapshot recovery have been verified on local ARM64 Kind with gVisor. A live Document Intelligence run with `gpt-6.1-terra` also passed through a Secret-backed Kubernetes harness and Substrate Actor. On the shared agent harness, nine live conversations started together all passed their checks, the one beyond the cluster's capacity waited for a sandbox worker instead of failing, and the SRE agent's findings matched the evidence it read. The quick start's golden path, from `starter-setup` to a two-turn terminal conversation, ran end to end on the same cluster. Production isolation properties remain unverified. See the [verification record](docs/verification.md).
+The provider pins `openai-agents==0.24.0`. The verification record identifies
+the Substrate revision and environment for each set of checks. The October
+2026 runs on pre-release Substrate covered real Actor execution with gVisor on
+ARM64 Kind, authenticated routing, snapshot recovery and the Secret-backed
+Document Intelligence Job. The record also describes the limits of those
+checks. [Verification record](docs/verification.md)
 
 ## Tracing
 

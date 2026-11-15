@@ -51,7 +51,7 @@ uv run python -m examples.provider_check --backend local \
   --output-dir artifacts/upstream
 ```
 
-The script downloads upstream's `demos/sandbox` package at the pinned commit through the Go module proxy, the same source the sandbox images build. This runs the actual upstream HTTP execution code locally. Lifecycle operations remain simulated; it does not prove Kubernetes suspend/resume. The upstream server briefly listens on the selected port on all host interfaces, matching its source. Run this compatibility check only on a trusted development machine.
+The script downloads the v1.0.0 `demos/sandbox` package at the pinned commit through the Go module proxy, the same source the sandbox images build. This exercises the upstream HTTP execution code with simulated lifecycle operations. The upstream server briefly listens on the selected port on all host interfaces. Run this compatibility check only on a trusted development machine.
 
 ## Real Kubernetes tests
 
@@ -164,10 +164,10 @@ For a real cluster run on GitHub, manually dispatch CI with the `kubernetes`
 boolean enabled. That separate, bounded job installs Kind/Substrate, tests the
 provider and document workflow, runs the Secret-mounted harness checks, and
 collects artifacts. It uses an empty-key configuration and explicit evaluation
-mode, so it requires no OpenAI credential. The new dispatch job has been configured
-but has not been executed on GitHub in this session.
+mode, so it requires no OpenAI credential.
 
-The executable Substrate revision is centralized in `.substrate-revision`.
+The Substrate commit used by CI, local setup, and the sandbox and harness images
+is centralized in `.substrate-revision`.
 Kubectl's version and architecture hashes are committed in
 `examples/document_intelligence/deploy/kubectl-checksums.json`; updates must replace those pins along
 with validation of the new binaries.

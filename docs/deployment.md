@@ -1,14 +1,20 @@
 # Deploy on Kubernetes
 
-The reference implementation uses the upstream `sandbox-template` ActorTemplate and authenticated `kubectl-ate` routing. Start with the [local Kubernetes guide](local-kubernetes.md) for a complete Kind deployment.
+The provider check uses the upstream `sandbox-template` ActorTemplate and
+authenticated `kubectl-ate` routing. The local setup builds a complete Kind
+deployment. [Local Kubernetes guide](local-kubernetes.md)
 
 ## Existing Substrate cluster
 
-Prepare a Linux Kubernetes cluster with Agent Substrate, a supported sandbox runtime, durable snapshot storage, and the upstream sandbox demo. Install `kubectl-ate` from the same pinned Substrate source.
+Install Agent Substrate v1.0.0 on a Linux Kubernetes cluster with durable
+snapshot storage and a supported sandbox class. Use the `kubectl-ate` binary
+from that release and verify its published checksum, or build it from the
+pinned source. Kubernetes supplies the `WorkerPool` and `SandboxConfig`
+resources. Register `ActorTemplate` definitions through Substrate's API with
+`kubectl ate`. Install the sandbox demo for the provider check. [Operator install](https://ate.dev/docs/guides/operator-install/) · [v1.0.0 release assets](https://github.com/agent-substrate/substrate/releases/tag/v1.0.0) · [Sandbox demo](https://github.com/agent-substrate/substrate/tree/v1.0.0/demos/sandbox)
 
-The tested source is `6949841e9dc98edbd2e0042ef95c19b4ce20aef5`. Follow its [installation instructions](https://github.com/agent-substrate/substrate/blob/6949841e9dc98edbd2e0042ef95c19b4ce20aef5/README.md) and [sandbox demo setup](https://github.com/agent-substrate/substrate/blob/6949841e9dc98edbd2e0042ef95c19b4ce20aef5/demos/sandbox/README.md).
-
-Allow the CLI proxy's Pod Identity SPIFFE principal at Substrate ingress when installing the control plane:
+Include the CLI proxy's Pod Identity SPIFFE principal in the control plane's
+router allowlist during installation.
 
 ```text
 spiffe://cluster.local/ns/ate-system/sa/atenet-client
@@ -18,11 +24,12 @@ The caller also needs the upstream CLI's API permissions and permissions to crea
 
 ### A harness in the cluster
 
-A harness in a pod needs none of that. It calls Substrate as its own ServiceAccount (the [usage example](usage.md) shows the client):
+A harness in a pod uses its own ServiceAccount for Substrate API calls and
+router ingress. [SDK configuration example](usage.md)
 
-- **API.** A projected ServiceAccount token with audience `api.ate-system.svc`, passed as `kubectl ate --token-file`, with `--endpoint api.ate-system.svc:443`. Substrate's API names the caller `system:serviceaccount:NAMESPACE:NAME`. An atespace access policy makes that principal `editor` there, enough to create, resume, suspend and delete Actors and nothing else. It cannot list workers, which needs global viewer, so a UI running this way shows no capacity.
-- **Router.** A `podCertificate` from the `podidentity.podcert.ate.dev/identity` signer and the `servicedns.podcert.ate.dev/identity` ClusterTrustBundle for the router's CA. The router admits the pod's SPIFFE ID, `spiffe://cluster.local/ns/NAMESPACE/sa/NAME`, only if the install lists it in `--ingress-allowed-spiffe-ids`. Any listed identity can reach any Actor: Substrate has no per-Actor ingress authorization yet.
-- **Kubernetes.** Read access to ClusterTrustBundles, which `kubectl ate` uses to verify Substrate's API. No other Kubernetes permission.
+- **API.** Pass a projected ServiceAccount token with audience `api.ate-system.svc` to `kubectl ate --token-file`, with `--endpoint api.ate-system.svc:443`. Grant `system:serviceaccount:NAMESPACE:NAME` the `editor` role on the application's atespace to create, resume, suspend and delete its Actors. Listing workers requires a global role. [Substrate authorization](https://ate.dev/docs/guides/authorization/)
+- **Router.** Project a `podCertificate` from `podidentity.podcert.ate.dev/identity` and the CA from the `servicedns.podcert.ate.dev/identity` ClusterTrustBundle. List the pod's SPIFFE ID, `spiffe://cluster.local/ns/NAMESPACE/sa/NAME`, in `--ingress-allowed-spiffe-ids`. The router admits listed identities across Actors. Account for this scope when choosing which clients to allow. [Substrate networking](https://ate.dev/docs/concepts/architecture/#networking-stack-atenet--atunnel)
+- **Kubernetes.** Grant read access to ClusterTrustBundles so `kubectl ate` can verify the Substrate API. Label the harness namespace `ate.dev/api-access=true` to allow API traffic under the installed NetworkPolicy.
 
 `python -m deploy.kubernetes.base resources` applies the ServiceAccount and that one ClusterRole, grants the atespace access as the operator, and stops with an error if the router does not admit the harness. The router allowlist is an install flag, so add the harness's SPIFFE ID when you install Substrate, as `scripts/local-kubernetes.sh setup` does:
 
@@ -45,7 +52,9 @@ uv run python -m examples.provider_check --backend substrate \
   --atespace ate-demo-sandbox --template sandbox-template
 ```
 
-Pass `--kubeconfig PATH` for a separate kubeconfig. The provider owns an ephemeral loopback `kubectl ate proxy actor` for each session. The CLI authenticates to Substrate's router; a plain HTTP port-forward to the router does not provide that authentication. No separate port-forward is needed for the default path.
+Pass `--kubeconfig PATH` for a separate kubeconfig. The provider owns an
+ephemeral loopback `kubectl ate proxy actor` for each session. The CLI handles
+the port-forward and mutual TLS to Substrate's router.
 
 An explicit `--router-url` selects a trusted HTTP gateway you operate, bypassing the owned CLI proxy. Such a gateway must provide the cluster's required upstream authentication and authorization. This option is also used by the local protocol simulator. In the cluster, `router_url` names Substrate's router itself and `router_tls` supplies the pod's certificate; see [a harness in the cluster](#a-harness-in-the-cluster).
 
@@ -53,9 +62,11 @@ An application gateway can implement the four lifecycle methods in `ActorControl
 
 ## Agent sandbox templates
 
-Each agent runs in its own ActorTemplate, built from its sandbox image. The
-deploy commands build and push the image, register the template (its name is a
-hash of its content), and record it for the agent's launcher:
+Each agent registers an ActorTemplate for its sandbox image through the
+Substrate API. The template selects the worker pool by `workload=sandbox`,
+requests `MEMORY` snapshots and mounts a per-Actor `durableDir` at `/workspace`.
+The deploy commands push an image, register the content-addressed template
+and record it for the agent's launcher.
 
 ```sh
 uv run python -m examples.document_intelligence.deploy sandbox \
@@ -71,10 +82,10 @@ checkout with `uv run --locked --group ui python -m examples.starter` (the
 terminal chat) or `-m examples.starter.ui`, passing `--context` and, if needed,
 `--kubeconfig`.
 
-Each template limits an Actor to 0.5 CPU and 480 MiB by default (`deploy/kubernetes/sandbox.py`).
-A worker runs as many Actors as its reported CPU and memory hold; on local Kind
-each worker reports 2,000 millicores and 1,984 MiB, so it runs four. When every
-worker is full, the harness waits for room instead of failing the turn.
+Each template limits an Actor to 0.5 CPU and 480 MiB by default
+(`deploy/kubernetes/sandbox.py`). The pool's sandbox class and reported worker
+capacity determine how many Actors fit. When workers are full, the harness
+reports the wait and retries startup up to its configured deadline.
 
 The SRE agent also needs read access to the namespaces it investigates. With an
 operator kubeconfig, this creates the `sre-agent-reader` ServiceAccount and a

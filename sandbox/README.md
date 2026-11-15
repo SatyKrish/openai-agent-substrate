@@ -6,6 +6,9 @@ to run each sandbox as an Actor. The SDK's agent loop stays in your trusted
 application; shell commands and workspace files run in the Actor, which holds
 no credentials.
 
+This provider targets [Agent Substrate v1.0.0](https://github.com/agent-substrate/substrate/releases/tag/v1.0.0)
+with the upstream sandbox demo's HTTP execution server.
+
 ```sh
 pip install openai-agent-substrate            # provider only
 pip install 'openai-agent-substrate[tracing]' # with the OTLP exporter

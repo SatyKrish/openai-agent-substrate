@@ -6,8 +6,8 @@ umask 077
 
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LOCAL_DIR="$PROJECT_ROOT/artifacts/local"
-SOURCE_DIR="${SUBSTRATE_SOURCE_DIR:-$LOCAL_DIR/substrate}"
 PIN="$(cat "$PROJECT_ROOT/.substrate-revision")"
+SOURCE_DIR="${SUBSTRATE_SOURCE_DIR:-$LOCAL_DIR/substrate-$PIN}"
 CLUSTER=openai-agent-substrate
 PROFILE=openai-agent-substrate
 # Cluster size. The defaults suit one or two people testing: one sandbox worker runs four sandbox
@@ -44,13 +44,28 @@ apply_size() {
 }
 
 prepare_source() {
-  if [[ ! -d "$SOURCE_DIR/.git" ]]; then
-    git clone --filter=blob:none --no-checkout https://github.com/agent-substrate/substrate.git "$SOURCE_DIR"
-    git -C "$SOURCE_DIR" fetch origin "$PIN"
-    git -C "$SOURCE_DIR" checkout --detach "$PIN"
+  local contents
+  if [[ ! -e "$SOURCE_DIR/.git" ]]; then
+    if [[ -d "$SOURCE_DIR" ]]; then
+      contents="$(ls -A "$SOURCE_DIR")"
+      if [[ -n "$contents" ]]; then
+        echo "Choose an empty Substrate source directory or an existing Git checkout: $SOURCE_DIR" >&2
+        return 1
+      fi
+    fi
+    git init --quiet "$SOURCE_DIR"
+  fi
+  if ! git -C "$SOURCE_DIR" rev-parse --verify HEAD >/dev/null 2>&1; then
+    git -C "$SOURCE_DIR" fetch --depth=1 https://github.com/agent-substrate/substrate.git "$PIN"
+    git -C "$SOURCE_DIR" checkout --detach FETCH_HEAD
   fi
   [[ "$(git -C "$SOURCE_DIR" rev-parse HEAD)" == "$PIN" ]] || { echo "Source checkout must be at $PIN" >&2; exit 1; }
-  git -C "$SOURCE_DIR" diff --quiet
+  git -C "$SOURCE_DIR" diff --quiet HEAD --
+}
+
+record_cluster_revision() {
+  kubectl --context "kind-$CLUSTER" annotate namespace kube-system \
+    "openai-agent-substrate.dev/substrate-revision=$1" "${@:2}"
 }
 
 case "${1:-help}" in
@@ -66,19 +81,32 @@ case "${1:-help}" in
     configure_docker
     docker info >/dev/null
     prepare_source
-    if ! (cd "$SOURCE_DIR" && hack/kind.sh get clusters) | grep -Fxq "$CLUSTER"; then
+    clusters="$(cd "$SOURCE_DIR" && hack/kind.sh get clusters)"
+    if ! grep -Fxq "$CLUSTER" <<< "$clusters"; then
       if docker inspect kind-registry >/dev/null 2>&1; then
         docker port kind-registry | grep -q ':5501' || { echo "kind-registry already uses another port; use a dedicated Docker daemon." >&2; exit 1; }
       fi
       (cd "$SOURCE_DIR" && hack/create-kind-cluster.sh) 2>&1 | tee "$LOCAL_DIR/cluster-setup.log"
     else
       (cd "$SOURCE_DIR" && hack/kind.sh export kubeconfig --name "$CLUSTER" --kubeconfig "$KUBECONFIG")
-      # After a VM restart Substrate's pods wait for new pod certificates; ate-setup fails until they serve.
-      kubectl --context "kind-$CLUSTER" wait --for=condition=Ready node --all --timeout=300s
-      if kubectl --context "kind-$CLUSTER" get namespace ate-system >/dev/null 2>&1; then
-        kubectl --context "kind-$CLUSTER" -n ate-system wait --for=condition=Ready pod --all \
-          --field-selector=status.phase!=Succeeded --timeout=600s
+    fi
+    revision="$(kubectl --context "kind-$CLUSTER" get namespace kube-system \
+      -o 'jsonpath={.metadata.annotations.openai-agent-substrate\.dev/substrate-revision}')"
+    installed="$(kubectl --context "kind-$CLUSTER" get namespace ate-system --ignore-not-found -o name)"
+    if [[ "$revision" != "$PIN" && "$revision" != "$PIN-pending" ]]; then
+      if [[ -n "$installed" || -n "$revision" ]]; then
+        echo "This cluster has an existing Substrate installation (revision: ${revision:-unrecorded})." >&2
+        echo "Use a fresh Kind cluster for revision $PIN. See docs/local-kubernetes.md before resetting this cluster." >&2
+        exit 1
       fi
+      # Record the intended release before deploy, so an interrupted setup can resume at the same revision.
+      record_cluster_revision "$PIN-pending"
+    fi
+    kubectl --context "kind-$CLUSTER" wait --for=condition=Ready node --all --timeout=300s
+    if [[ "$revision" == "$PIN" && -n "$installed" ]]; then
+      # After a VM restart Substrate's pods wait for new pod certificates; ate-setup fails until they serve.
+      kubectl --context "kind-$CLUSTER" -n ate-system wait --for=condition=Ready pod --all \
+        --field-selector=status.phase!=Succeeded --timeout=600s
     fi
     # Agent Substrate's quickstart (docs/get-started/quickstart.md), step by step:
     # step 1 created the cluster and registry above; step 2 is ATE_INSTALL_KIND, exported at the top.
@@ -89,12 +117,14 @@ case "${1:-help}" in
     # policy, and no atespace here is granted any namespace, so sandboxes receive no credentials.
     # The router admits two client identities: atenet-client, which `kubectl ate proxy` presents for
     # the UIs on this machine, and the in-cluster harness's own ServiceAccount.
+    # Install only gVisor, the class used by the sandbox WorkerPool. v1.0 otherwise stages microVM assets too.
     # --no-dev-env ignores a personal .ate-dev-env.sh in the checkout; Colima needs the longer rollout timeout.
-    (cd "$SOURCE_DIR" && go run ./cmd/ate-setup --no-dev-env --rollout-timeout 300s deploy ate-system --credential-provider='{"name":"k8s.io"}' --ingress-allowed-spiffe-ids="spiffe://cluster.local/ns/ate-system/sa/atenet-client,$HARNESS_SPIFFE_ID") 2>&1 | tee "$LOCAL_DIR/substrate-setup.log"
+    (cd "$SOURCE_DIR" && go run ./cmd/ate-setup --no-dev-env --rollout-timeout 300s deploy ate-system --sandbox-classes=gvisor --credential-provider='{"name":"k8s.io"}' --ingress-allowed-spiffe-ids="spiffe://cluster.local/ns/ate-system/sa/atenet-client,$HARNESS_SPIFFE_ID") 2>&1 | tee "$LOCAL_DIR/substrate-setup.log"
     # Step 4 deploys a sample application. The sandbox demo replaces the counter: its WorkerPool
     # (workload=sandbox) runs every agent's Actors, and the provider check uses its template.
     (cd "$SOURCE_DIR" && go run ./cmd/ate-setup --no-dev-env --rollout-timeout 300s deploy demo sandbox) 2>&1 | tee "$LOCAL_DIR/sandbox-setup.log"
     apply_size
+    record_cluster_revision "$PIN" --overwrite
     uv sync --locked
     if [[ -f "$PROJECT_ROOT/.env" ]]; then
       uv run --locked python -m examples.document_intelligence.deploy secret --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG"
@@ -186,6 +216,13 @@ case "${1:-help}" in
   teardown)
     # The quickstart's teardown: delete the Kind cluster and its registry. Conversations' Actors go with it.
     configure_docker
+    if [[ ! -f "$SOURCE_DIR/hack/delete-kind-cluster.sh" ]]; then
+      if [[ -z "${SUBSTRATE_SOURCE_DIR:-}" && -f "$LOCAL_DIR/substrate/hack/delete-kind-cluster.sh" ]]; then
+        SOURCE_DIR="$LOCAL_DIR/substrate"
+      else
+        prepare_source
+      fi
+    fi
     (cd "$SOURCE_DIR" && hack/delete-kind-cluster.sh)
     rm -f "$KUBECONFIG"
     ;;
@@ -195,6 +232,6 @@ case "${1:-help}" in
     ;;
   *)
     echo "Usage: $0 {setup|test|document-intelligence|agent-setup|agent-test|agent-run|agent-artifacts|tracing-setup|tracing-ui|ui|starter-setup|starter-chat|starter-ui|sre-setup|sre-ui|scale|status|stop|teardown}"
-    echo "Uses an isolated Kind cluster and project-local kubeconfig. setup reuses an existing cluster."
+    echo "Uses an isolated Kind cluster and project-local kubeconfig. setup reuses a cluster at the same revision."
     ;;
 esac

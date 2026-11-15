@@ -62,7 +62,7 @@ def resolve_image_digest(image, digests):
 def build(args):
     if checked(["git", "-C", str(args.source_dir), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip() != PIN:
         raise ValueError(f"Substrate source must be checked out at {PIN}")
-    checked(["git", "-C", str(args.source_dir), "diff", "--quiet"])
+    checked(["git", "-C", str(args.source_dir), "diff", "--quiet", "HEAD", "--"])
     nodes = json.loads(kubectl(args, "get", "nodes", "-o", "json", capture_output=True).stdout)["items"]
     architectures = {node["status"]["nodeInfo"]["architecture"] for node in nodes}
     if len(architectures) != 1 or not architectures <= {"amd64", "arm64"}:
@@ -160,7 +160,7 @@ def main():
     parser.add_argument("--kubeconfig", type=Path)
     parser.add_argument("--env-file", type=Path, default=ROOT / ".env")
     parser.add_argument("--secret-name", default=SECRET)
-    parser.add_argument("--source-dir", type=Path, default=ROOT / "artifacts/local/substrate")
+    parser.add_argument("--source-dir", type=Path, default=ROOT / "artifacts/local" / f"substrate-{PIN}")
     parser.add_argument("--image", help="Registry/repository:tag; defaults depend on the selected image build")
     parser.add_argument("--docker-context")
     parser.add_argument("--state-file", type=Path, default=ROOT / "artifacts/local/agent-deployment.json")
