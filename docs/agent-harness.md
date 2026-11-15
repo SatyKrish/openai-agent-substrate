@@ -46,10 +46,10 @@ settings and behavior.
 The harness also provides a terminal chat (`openai_harness.terminal`), which
 drives the same server in-process, so a terminal conversation is an ordinary
 thread that the agent's UI also lists and links to. The starter agent uses the
-terminal chat as the quick start's last step and keeps its UI optional. Each
-process locks a conversation only for itself, so a message for a conversation
-another process is running a turn of is refused: the UI shows that it is
-running elsewhere until the turn ends.
+terminal chat as the quick start's last step and keeps its UI optional. Turns
+and deletion share a per-thread file lock next to the SQLite store. A process
+on the same host can see when a conversation is running elsewhere, and the OS
+releases its lock if it exits.
 
 ## Standards, not a new agent format
 
@@ -83,13 +83,13 @@ the SDK does not cover:
 
 ## What the harness does on every turn
 
-1. **Lock, then reload.** Turns in one conversation never overlap: they share a
-   workspace. ChatKit loads the thread before the harness takes the
-   conversation's lock, so the harness reloads the thread after taking it.
-   Without that, a second message sent during a running turn overwrote the
-   first turn's record and history.
-2. **Create or resume the sandbox, waiting for capacity.** The provider raises
-   `ActorCapacityError` when Substrate has no worker with room. The harness shows
+1. **Claim the conversation.** The harness takes the same host file lock for
+   turns, retries, and deletion. It claims a turn before ChatKit loads or writes
+   its items and holds the lock through ChatKit's final save.
+2. **Create or resume the sandbox, waiting for capacity.** The harness records
+   the intended Actor before creation and saves workspace initialization
+   separately. If a creation response is lost, it can recover the same Actor.
+   The provider raises `ActorCapacityError` when Substrate has no worker with room. The harness shows
    a waiting step, retries with backoff for up to five minutes, then fails with
    a message that says the workers are busy. Every failure is logged on the
    server; the browser sees only safe text.
@@ -98,14 +98,19 @@ the SDK does not cover:
 4. **Stage uploads** from the host's retained copies, then run the agent's
    processors (PDF text and page images are produced inside the sandbox).
 5. **Run the agent loop** with the conversation's SDK session and this turn's
-   harness tools. Tool calls stream to ChatKit as workflow steps. If the turn
-   fails, the items it added to the session are removed, so a retry starts clean.
+   harness tools. Tool calls stream to ChatKit as workflow steps. The harness
+   records how much SDK history existed before the turn so it can discard an
+   incomplete turn after failure or restart.
 6. **Record evidence.** A harness tool's output is saved on the host and written
    into the workspace under `evidence/`, so code in the sandbox can analyze it.
    Checks compare against the host copy, which the sandbox cannot edit.
 7. **Collect and check.** Files in the agent's `collect` folders are copied to
    the host; the agent's check runs on them and on the host copies.
-8. **Suspend** the sandbox and save its session state with the thread.
+8. **Suspend** the sandbox and save its session state with the thread. During a
+   turn, the example sandbox images report worker eviction to the harness. The
+   harness stops the turn independently of the browser connection and records
+   the pending notice before requesting a synchronous checkpoint. It saves the
+   handled notice with the Actor state after suspend. [Substrate eviction guidance](https://ate.dev/docs/reference/api-guide/#eviction)
 
 ## The SRE agent
 

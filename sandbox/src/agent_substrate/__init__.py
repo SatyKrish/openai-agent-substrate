@@ -3,12 +3,25 @@
 
 """OpenAI Agents SDK sandbox provider backed by Agent Substrate on Kubernetes."""
 
-from .lifecycle import ActorCapacityError, KubectlActorControl
+from .lifecycle import (
+    ActorAlreadyExistsError,
+    ActorCapacityError,
+    ActorCreateUncertainError,
+    ActorNotFoundError,
+    ActorOperationUncertainError,
+    ActorResumeInProgressError,
+    KubectlActorControl,
+)
 from .provider import SubstrateSandboxClient, SubstrateSandboxOptions, SubstrateSessionState
 from .transport import RouterTLS
 
 __all__ = [
+    "ActorAlreadyExistsError",
     "ActorCapacityError",
+    "ActorCreateUncertainError",
+    "ActorNotFoundError",
+    "ActorOperationUncertainError",
+    "ActorResumeInProgressError",
     "KubectlActorControl",
     "RouterTLS",
     "SubstrateSandboxClient",

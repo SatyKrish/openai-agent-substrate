@@ -618,6 +618,21 @@ with an empty API key.
   checks for a proxy span only on runs that use the CLI proxy. Artifact
   collection copied the Job outputs from the Kubernetes PVC to the host.
 
+## Actor lifecycle and gateway checks
+
+- SDK-owned runs completed with the SDK's default snapshot specification and
+  with an explicit no-op specification. The local tests exercised incomplete
+  startup, cancellation and recovery with a persisted Actor ID.
+- On the dedicated ARM64 Kind cluster, a Starter Actor wrote a workspace file
+  and began a command before its worker pod began graceful termination. The
+  eviction watcher interrupted the command and saved the pending notice. The
+  Actor synchronously suspended. A new session loaded the saved pre-suspend
+  state, reconciled the checkpoint, and restored the same file on a replacement
+  worker. The handled notice did not interrupt the resumed session.
+- Gateway tests used separate TLS identities on loopback for caller and router.
+  They covered exact Actor grants, denial and revocation, trust failures, and
+  forwarding of both execution and eviction requests.
+
 ## Limits of this verification
 
 These checks establish local functional execution and snapshot recovery on a single-node Kind cluster. They do not establish production availability, multi-tenant authorization policy, resistance to sandbox escape, host/node-loss durability, or model quality beyond the documented live fixture workflow. The in-cluster harness uses its own ServiceAccount; the operator's commands and the laptop UIs still use the shared `ate-client` development identity, and shared deployments need operator-defined principals. Substrate's router lets any allowlisted identity reach any Actor.

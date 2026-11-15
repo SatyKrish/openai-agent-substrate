@@ -7,8 +7,9 @@ from __future__ import annotations
 
 import asyncio
 import re
-from typing import Protocol
+from contextlib import suppress
 from pathlib import Path
+from typing import Protocol
 
 from .proxy import ActorProxy
 
@@ -17,8 +18,45 @@ class ActorCapacityError(RuntimeError):
     """Substrate refused to run an Actor because no worker has room; retrying later can succeed."""
 
 
+class ActorAlreadyExistsError(RuntimeError):
+    """Substrate already has an Actor with this name in the atespace."""
+
+
+class ActorNotFoundError(RuntimeError):
+    """The requested Actor no longer exists in the atespace."""
+
+
+class ActorOperationUncertainError(RuntimeError):
+    """The control plane could have applied a lifecycle operation before its reply was lost."""
+
+
+class ActorCreateUncertainError(ActorOperationUncertainError):
+    """The caller can reconcile an unresolved allocation through its exact Actor reference."""
+
+    def __init__(self, atespace: str, actor_name: str):
+        self.actor_ref = f"{atespace}/{actor_name}"
+        super().__init__(f"Creation outcome is uncertain for Actor {self.actor_ref}")
+
+
+class ActorResumeInProgressError(RuntimeError):
+    """Substrate cannot suspend an Actor while a prior resume is still incomplete."""
+
+
 # Substrate's AssignWorker step reports a full pool with this text and gRPC RESOURCE_EXHAUSTED.
+_RPC_CODE = re.compile(r"\brpc error:\s*code\s*=\s*(\w+)\b", re.IGNORECASE)
 _NO_ROOM = re.compile(r"no worker has room|RESOURCE_EXHAUSTED", re.IGNORECASE)
+_INCOMPLETE_RESUME = re.compile(r"\bMarkSuspending\b.*\bgot:\s*ACTOR_STATE_RESUMING\b", re.IGNORECASE)
+_STATUS_ERRORS = {
+    "alreadyexists": ActorAlreadyExistsError,
+    "notfound": ActorNotFoundError,
+    "resourceexhausted": ActorCapacityError,
+    "aborted": ActorOperationUncertainError,
+    "canceled": ActorOperationUncertainError,
+    "deadlineexceeded": ActorOperationUncertainError,
+    "unavailable": ActorOperationUncertainError,
+    "unknown": ActorOperationUncertainError,
+    "internal": ActorOperationUncertainError,
+}
 
 
 def resource_name(value: str) -> str:
@@ -28,6 +66,8 @@ def resource_name(value: str) -> str:
 
 
 class ActorControl(Protocol):
+    """Control implementations report unknown mutation outcomes with ActorOperationUncertainError."""
+
     async def create(self, atespace: str, name: str, template: str) -> None: ...
     async def resume(self, atespace: str, name: str) -> None: ...
     async def suspend(self, atespace: str, name: str) -> None: ...
@@ -74,15 +114,28 @@ class KubectlActorControl:
         )
         try:
             stdout, stderr = await asyncio.wait_for(process.communicate(), self.timeout)
-        except BaseException:
+        except BaseException as error:
             if process.returncode is None:
-                process.kill()
+                with suppress(ProcessLookupError):
+                    process.kill()
             await process.communicate()
+            if isinstance(error, TimeoutError):
+                raise ActorOperationUncertainError(
+                    f"Actor lifecycle command did not complete within {self.timeout:g} seconds"
+                ) from error
             raise
         if process.returncode:
             detail = (stderr or stdout).decode(errors="replace")[:2000]
-            error = ActorCapacityError if _NO_ROOM.search(detail) else RuntimeError
-            raise error(f"Actor lifecycle command failed (exit {process.returncode}): {detail}")
+            status = _RPC_CODE.search(detail)
+            code = status.group(1).lower() if status else ""
+            error_type: type[RuntimeError]
+            if code == "failedprecondition" and _INCOMPLETE_RESUME.search(detail):
+                error_type = ActorResumeInProgressError
+            elif not code and _NO_ROOM.search(detail):
+                error_type = ActorCapacityError
+            else:
+                error_type = _STATUS_ERRORS.get(code, RuntimeError)
+            raise error_type(f"Actor lifecycle command failed (exit {process.returncode}): {detail}")
 
     async def create(self, atespace: str, name: str, template: str) -> None:
         await self._run(self.command("create", atespace, name, "--template", resource_name(template)))

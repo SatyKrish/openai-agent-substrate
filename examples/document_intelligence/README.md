@@ -227,7 +227,8 @@ Expected fixture results: ACME operating margin **22.93%**, BETA **30.19%**,
 and revenue gap **USD 117.8 billion**. EBITDA is unavailable.
 
 Actors are deleted by default. Add `--keep-actor` on Substrate to suspend the
-workspace and save `session.json`. Inspect it with
+workspace and save `session.json`, including when worker eviction interrupts
+the workflow. Inspect it with
 `uv run python -m examples.provider_check.resume --context CONTEXT --state-file PATH`,
 including the same kubeconfig and atespace when applicable. Do not publish
 credentials or session state from real document workflows.

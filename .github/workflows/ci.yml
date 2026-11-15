@@ -52,6 +52,10 @@ jobs:
         with:
           go-version-file: .go-version
           cache: false
+      - name: Test authenticated Actor gateway
+        if: matrix.python == '3.14'
+        run: go test ./...
+        working-directory: deploy/kubernetes/actor_gateway
       - name: Build the upstream execution server
         run: |
           sh scripts/build-sandbox-server.sh "$(cat .substrate-revision)" artifacts/upstream-sandbox

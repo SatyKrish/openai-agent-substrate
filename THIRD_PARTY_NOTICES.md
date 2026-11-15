@@ -4,7 +4,7 @@ The Apache-2.0 license in the repository root covers original project code and d
 
 ## Agent Substrate execution server
 
-- The agent sandbox images compile the `demos/sandbox` package from the Agent Substrate v1.0.0 Go module `go.ate.dev/substrate`. `.substrate-revision` pins commit `b34fbee742906494b5eb4f1f36987176bf8770a4`. `scripts/build-sandbox-server.sh` downloads the module through the Go module proxy with Go checksum verification and builds the source as published. [Execution server source](https://github.com/agent-substrate/substrate/blob/b34fbee742906494b5eb4f1f36987176bf8770a4/demos/sandbox/main.go)
+- The agent sandbox images compile the `demos/sandbox` package from the Agent Substrate v1.0.0 Go module `go.ate.dev/substrate`. `.substrate-revision` pins commit `b34fbee742906494b5eb4f1f36987176bf8770a4`. `scripts/build-sandbox-server.sh` downloads the module through the Go module proxy with Go checksum verification and builds the published source alongside this project's eviction notice handler. [Execution server source](https://github.com/agent-substrate/substrate/blob/b34fbee742906494b5eb4f1f36987176bf8770a4/demos/sandbox/main.go)
 - Copyright 2026 The Agent Substrate Authors.
 - Apache-2.0. Each image carries upstream's license at `/usr/share/licenses/substrate/LICENSE`.
 

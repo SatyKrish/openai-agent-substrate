@@ -19,6 +19,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
+    "httpx2>=2.12,<3",
     "openai-agents==0.24.0",
 ]
 

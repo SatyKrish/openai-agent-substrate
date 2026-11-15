@@ -5,7 +5,14 @@ import asyncio
 
 import pytest
 
-from agent_substrate.lifecycle import ActorCapacityError, KubectlActorControl
+from agent_substrate.lifecycle import (
+    ActorAlreadyExistsError,
+    ActorCapacityError,
+    ActorNotFoundError,
+    ActorOperationUncertainError,
+    ActorResumeInProgressError,
+    KubectlActorControl,
+)
 
 
 async def test_upstream_cli_lifecycle_contract(monkeypatch):
@@ -50,9 +57,17 @@ async def test_a_token_file_replaces_the_shared_ate_client_identity(monkeypatch)
 @pytest.mark.parametrize(("stderr", "expected"), [
     (b"Error: rpc error: code = ResourceExhausted desc = workflow failed at step AssignWorker: no worker has room "
      b"for the actor", ActorCapacityError),
+    (b"Error: rpc error: code = AlreadyExists desc = Actor already exists", ActorAlreadyExistsError),
+    (b"Error: rpc error: code = NotFound desc = Actor not found", ActorNotFoundError),
+    (b"Error: rpc error: code = Unavailable desc = connection closed", ActorOperationUncertainError),
+    (b"Error: rpc error: code = Unknown desc = transport: rpc error: code = NotFound desc = worker",
+     ActorOperationUncertainError),
+    (b"Error: rpc error: code = FailedPrecondition desc = workflow failed at step MarkSuspending: "
+     b"MarkSuspending prerequisite not met for Actor: test/actor (got: ACTOR_STATE_RESUMING, want: ACTOR_STATE_RUNNING)",
+     ActorResumeInProgressError),
     (b"Error: actor not found", RuntimeError),
 ])
-async def test_a_full_worker_pool_is_reported_as_a_capacity_error(monkeypatch, stderr, expected):
+async def test_lifecycle_errors_use_the_top_level_grpc_status(monkeypatch, stderr, expected):
     class Finished:
         returncode = 1
 
@@ -66,6 +81,29 @@ async def test_a_full_worker_pool_is_reported_as_a_capacity_error(monkeypatch, s
     with pytest.raises(RuntimeError) as raised:
         await KubectlActorControl(context="test").resume("space", "actor")
     assert type(raised.value) is expected
+
+
+async def test_cli_timeout_reaps_process_and_reports_uncertain_outcome(monkeypatch):
+    class TimedOut:
+        returncode = None
+
+        async def communicate(self):
+            if self.returncode is None:
+                await asyncio.Future()
+            return b"", b""
+
+        def kill(self):
+            self.returncode = -9
+
+    process = TimedOut()
+
+    async def spawn(*argv, **kwargs):
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
+    with pytest.raises(ActorOperationUncertainError, match="did not complete"):
+        await KubectlActorControl(context="test", timeout=0.01).create("space", "actor", "template")
+    assert process.returncode == -9
 
 
 def test_explicit_cluster_context_is_required():

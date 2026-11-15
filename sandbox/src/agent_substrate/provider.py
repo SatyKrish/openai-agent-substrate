@@ -5,14 +5,16 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import io
+import logging
 import uuid
 from contextlib import suppress
 from pathlib import Path, PurePosixPath
-from typing import Literal
+from typing import Literal, TypeVar
 
-from pydantic import field_validator
+from pydantic import Field, field_validator, model_validator
 
 from agents.sandbox import Manifest
 from agents.sandbox.entries import BaseEntry, Dir, File, LocalDir, LocalFile
@@ -20,14 +22,27 @@ from agents.sandbox.errors import ExecNonZeroError, ExecTransportError
 from agents.sandbox.session import SandboxSession, SandboxSessionState
 from agents.sandbox.session.base_sandbox_session import BaseSandboxSession
 from agents.sandbox.session.sandbox_client import BaseSandboxClient, BaseSandboxClientOptions
-from agents.sandbox.snapshot import NoopSnapshot, SnapshotBase, SnapshotSpec
+from agents.sandbox.snapshot import LocalSnapshotSpec, NoopSnapshot, NoopSnapshotSpec, SnapshotBase, SnapshotSpec
+from agents.sandbox.snapshot_defaults import default_local_snapshot_base_dir
 from agents.sandbox.types import ExecResult, User
 
-from .lifecycle import ActorControl, resource_name
+from .lifecycle import (
+    ActorAlreadyExistsError,
+    ActorControl,
+    ActorCreateUncertainError,
+    ActorNotFoundError,
+    ActorOperationUncertainError,
+    ActorResumeInProgressError,
+    resource_name,
+)
+from .proxy import ActorProxy
 from .transport import ProcessTransport, ProcessTransportError, RouterTLS
 from .instrumentation import operation, traced_operation
 
 MAX_FILE_BYTES = 10 * 1024 * 1024
+_logger = logging.getLogger(__name__)
+_T = TypeVar("_T")
+_UNCERTAIN_OUTCOMES = (ActorOperationUncertainError, TimeoutError)
 # Each /process round trip costs the same whatever its size, so transfers use as
 # few commands as the limits allow. 90 KiB base64-encodes under Linux's 128 KiB
 # per-argument limit (and a multiple of 3 keeps parts concatenable); seven parts
@@ -74,6 +89,16 @@ class SubstrateSessionState(SandboxSessionState):
     type: Literal["agent-substrate-poc"] = "agent-substrate-poc"
     actor_name: str
     atespace: str
+    workspace_initialized: bool = True
+    pending_eviction_id: int = Field(default=0, ge=0, lt=1 << 64)
+    handled_eviction_id: int = Field(default=0, ge=0, lt=1 << 64)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _restore_workspace_initialization(cls, value: object) -> object:
+        if isinstance(value, dict) and "workspace_initialized" not in value:
+            return {**value, "workspace_initialized": value.get("workspace_root_ready", True)}
+        return value
 
     @field_validator("actor_name", "atespace")
     @classmethod
@@ -97,6 +122,19 @@ def validate_manifest(manifest: Manifest) -> None:
 
     for entry in manifest.validated_entries().values():
         validate(entry)
+
+
+async def _finish_actor_operation(task: asyncio.Task[_T]) -> _T:
+    """Let an in-flight lifecycle operation settle before releasing its caller."""
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        while not task.done():
+            with suppress(asyncio.CancelledError, Exception):
+                await asyncio.shield(task)
+        if not task.cancelled():
+            task.exception()
+        raise
 
 
 class SubstrateSandboxClient(BaseSandboxClient[SubstrateSandboxOptions]):
@@ -128,30 +166,87 @@ class SubstrateSandboxClient(BaseSandboxClient[SubstrateSandboxOptions]):
         self.transport = (ProcessTransport(router_url, default_timeout=exec_timeout, tls=router_tls)
                           if router_url is not None else None)
 
-    @traced_operation("sandbox.create")
     async def create(self, *, options: SubstrateSandboxOptions, manifest: Manifest | None = None,
                      snapshot: SnapshotSpec | SnapshotBase | None = None) -> SandboxSession:
-        if snapshot is not None:
+        state = self.prepare_session_state(manifest=manifest, options=options, snapshot=snapshot)
+        creation = asyncio.create_task(self._allocate_new_session(state, options))
+        try:
+            return await _finish_actor_operation(creation)
+        except asyncio.CancelledError:
+            # No session was returned to the caller. Clean up this known successful allocation.
+            if not creation.cancelled() and creation.exception() is None:
+                try:
+                    await _finish_actor_operation(asyncio.create_task(self.delete(creation.result())))
+                except Exception as error:
+                    _logger.warning("Could not clean up Actor %s/%s after canceled create (%s)",
+                                    state.atespace, state.actor_name, type(error).__name__)
+            raise
+
+    async def _allocate_new_session(
+        self, state: SubstrateSessionState, options: SubstrateSandboxOptions
+    ) -> SandboxSession:
+        try:
+            return await self.create_from_state(state, options)
+        except _UNCERTAIN_OUTCOMES as error:
+            uncertainty = ActorCreateUncertainError(state.atespace, state.actor_name)
+            if options.actor_name is None:
+                # Only a freshly generated identity can be safely deleted without proof of creation.
+                try:
+                    await self.control.delete(state.atespace, state.actor_name)
+                except Exception as cleanup_error:
+                    # A not-found result can race a create that has yet to commit.
+                    _logger.warning("%s after compensating delete returned %s", uncertainty, type(cleanup_error).__name__)
+                else:
+                    raise
+            else:
+                _logger.warning("%s with an explicitly chosen name", uncertainty)
+            raise uncertainty from error
+
+    def prepare_session_state(self, *, options: SubstrateSandboxOptions, manifest: Manifest | None = None,
+                              snapshot: SnapshotSpec | SnapshotBase | None = None) -> SubstrateSessionState:
+        """Validate inputs and choose the Actor identity before allocating remote resources."""
+        # The pinned SDK supplies its standard local archive directory on client-owned runs.
+        # Treat that location as a no-op sentinel since Substrate owns snapshots.
+        sdk_default = isinstance(snapshot, LocalSnapshotSpec) and snapshot.base_path == default_local_snapshot_base_dir()
+        if snapshot is not None and not isinstance(snapshot, (NoopSnapshot, NoopSnapshotSpec)) and not sdk_default:
             raise NotImplementedError("Use Substrate Actor suspension/resumption, not portable SDK snapshots")
         manifest = manifest if manifest is not None else Manifest()
         self._validate_manifest_for_create(manifest)
         validate_manifest(manifest)
-        actor_name = options.actor_name or f"oas-{uuid.uuid4().hex[:16]}"
-        await self.control.create(self.atespace, actor_name, options.template)
-        state = SubstrateSessionState(
-            actor_name=actor_name, atespace=self.atespace, manifest=manifest,
-            snapshot=NoopSnapshot(id=uuid.uuid4().hex),
+        return SubstrateSessionState(
+            actor_name=options.actor_name or f"oas-{uuid.uuid4().hex}",
+            atespace=self.atespace, manifest=manifest, snapshot=NoopSnapshot(id=uuid.uuid4().hex),
+            workspace_initialized=False,
         )
-        return self._wrap_session(_SubstrateSession(state, self, preserved=False))
 
-    async def resume(self, state: SandboxSessionState) -> SandboxSession:
+    @traced_operation("sandbox.create")
+    async def create_from_state(self, state: SubstrateSessionState, options: SubstrateSandboxOptions, *,
+                                recover: bool = False) -> SandboxSession:
+        """Allocate an Actor from a prepared state. Recover only caller-owned creation intents."""
+        self._validate_state_for_session(state)
+        if state.workspace_initialized or (options.actor_name is not None and options.actor_name != state.actor_name):
+            raise ValueError("Actor creation requires matching, uninitialized session state")
+        if recover and options.actor_name is not None:
+            raise ValueError("Automatic create recovery requires a provider-generated Actor name")
+        try:
+            await self.control.create(state.atespace, state.actor_name, options.template)
+        except ActorAlreadyExistsError:
+            if not recover:
+                raise
+        return self._wrap_session(_SubstrateSession(state.model_copy(deep=True), self))
+
+    def _validate_state_for_session(self, state: SandboxSessionState) -> SubstrateSessionState:
         if not isinstance(state, SubstrateSessionState) or state.atespace != self.atespace:
-            raise ValueError("Resume requires Substrate state in this client's configured atespace")
+            raise ValueError("Substrate state must belong to this client's configured atespace")
         state.assert_path_grants_rebound()
         validate_manifest(state.manifest)
         if not isinstance(state.snapshot, NoopSnapshot):
             raise NotImplementedError("Portable SDK snapshots are unsupported")
-        return self._wrap_session(_SubstrateSession(state.model_copy(deep=True), self, preserved=True))
+        return state
+
+    async def resume(self, state: SandboxSessionState) -> SandboxSession:
+        state = self._validate_state_for_session(state)
+        return self._wrap_session(_SubstrateSession(state.model_copy(deep=True), self))
 
     def deserialize_session_state(self, payload: dict[str, object]) -> SubstrateSessionState:
         state = self._deserialize_session_state_payload(payload, SubstrateSessionState)
@@ -159,50 +254,116 @@ class SubstrateSandboxClient(BaseSandboxClient[SubstrateSandboxOptions]):
             raise ValueError("Session state belongs to a different atespace")
         return state
 
-    @traced_operation("sandbox.delete")
-    async def delete(self, session: SandboxSession) -> SandboxSession:
+    def _owned_session(self, session: SandboxSession) -> _SubstrateSession:
         inner = session._inner
         if not isinstance(inner, _SubstrateSession) or inner.client is not self:
-            raise ValueError("Delete requires a session owned by this client")
+            raise ValueError("Requires a session owned by this client")
+        return inner
+
+    async def _delete_actor(self, state: SubstrateSessionState) -> None:
+        with suppress(ActorNotFoundError):
+            await self.control.delete(state.atespace, state.actor_name)
+
+    @traced_operation("sandbox.delete")
+    async def delete(self, session: SandboxSession) -> SandboxSession:
+        inner = self._owned_session(session)
         if not inner.deleted:
             # Deletion must remain possible after failed startup/suspension.
             # It also bypasses suspension when the workspace is disposable.
             await inner.close_proxy()
-            await self.control.delete(inner.state.atespace, inner.state.actor_name)
+            await _finish_actor_operation(asyncio.create_task(self._delete_actor(inner.state)))
             inner.deleted = True
             inner.active = False
             await session.aclose()
         return session
 
+    async def poll_eviction(self, session: SandboxSession) -> int | None:
+        """Report a worker drain signal, zero before activation, or None for older Actor images."""
+        inner = self._owned_session(session)
+        if not inner.active or inner._transport is None:
+            return 0
+        return await inner._transport.poll_eviction(inner.actor_ref)
+
+    def note_eviction(self, session: SandboxSession, notice: int) -> bool:
+        """Record an unhandled drain signal for synchronous suspension."""
+        state = self._owned_session(session).state
+        if not notice or notice == state.handled_eviction_id:
+            return False
+        state.pending_eviction_id = notice
+        return True
+
 
 class _SubstrateSession(BaseSandboxSession):
-    def __init__(self, state: SubstrateSessionState, client: SubstrateSandboxClient, *, preserved: bool):
+    state: SubstrateSessionState
+
+    def __init__(self, state: SubstrateSessionState, client: SubstrateSandboxClient):
         self.state = state
         self.client = client
         self.active = False
+        self._resume_outcome_uncertain = False
         self.deleted = False
         self._cwd_ready = False
-        self._proxy = None
+        self._proxy: ActorProxy | None = None
         self._transport = client.transport
-        self._set_start_state_preserved(preserved)
+        self._set_start_state_preserved(state.workspace_initialized)
 
     @property
     def actor_ref(self) -> str:
         return f"{self.state.atespace}/{self.state.actor_name}"
+
+    def _mark_eviction_suspended(self) -> None:
+        if notice := self.state.pending_eviction_id:
+            self.state.handled_eviction_id = notice
+            self.state.pending_eviction_id = 0
+
+    async def _suspend_actor(self) -> None:
+        try:
+            await self.client.control.suspend(self.state.atespace, self.state.actor_name)
+        except _UNCERTAIN_OUTCOMES:
+            if not self.state.pending_eviction_id:
+                raise
+            # Substrate re-reads the Actor under its lease on each request and
+            # returns success if the first attempt already suspended it.
+            await asyncio.sleep(0.25)
+            await self.client.control.suspend(self.state.atespace, self.state.actor_name)
+
+    async def _finish_pending_eviction(self) -> None:
+        if self.state.pending_eviction_id:
+            with operation("sandbox.suspend"):
+                await self._suspend_actor()
+            self._mark_eviction_suspended()
+
+    async def start(self) -> None:
+        try:
+            await super().start()
+        except asyncio.CancelledError:
+            # The SDK's start cleanup handles Exception, and cancellation is a BaseException.
+            await self._after_start_failed()
+            raise
+
+    async def _resume_backend(self) -> None:
+        await self._finish_pending_eviction()
+        with operation("sandbox.resume"):
+            try:
+                await self.client.control.resume(self.state.atespace, self.state.actor_name)
+            except _UNCERTAIN_OUTCOMES:
+                self._resume_outcome_uncertain = True
+                raise
+        self._resume_outcome_uncertain = False
+        self.active = True
 
     async def _ensure_backend_started(self) -> None:
         if self.deleted:
             raise RuntimeError("This Actor has been deleted")
         validate_manifest(self.state.manifest)
         if not self.active:
-            with operation("sandbox.resume"):
-                await self.client.control.resume(self.state.atespace, self.state.actor_name)
-            self.active = True
+            await _finish_actor_operation(asyncio.create_task(self._resume_backend()))
         if self.client.transport is None and self._proxy is None:
             start_proxy = getattr(self.client.control, "start_proxy")
             with operation("sandbox.proxy"):
-                self._proxy = await start_proxy(self.state.atespace, self.state.actor_name)
-            self._transport = ProcessTransport(self._proxy.url, default_timeout=self.client.exec_timeout)
+                proxy: ActorProxy = await start_proxy(self.state.atespace, self.state.actor_name)
+            self._proxy = proxy
+            self._transport = ProcessTransport(proxy.url, default_timeout=self.client.exec_timeout)
 
     async def close_proxy(self) -> None:
         if self._proxy is not None:
@@ -216,18 +377,36 @@ class _SubstrateSession(BaseSandboxSession):
         await self._checked("mkdir", "-p", self.state.manifest.root)
         self._cwd_ready = True
 
-    async def _shutdown_backend(self) -> None:
+    async def _after_start(self) -> None:
+        self.state.workspace_initialized = True
+        self._set_start_state_preserved(True)
+
+    async def _suspend_backend(self) -> None:
         try:
-            if self.active and not self.deleted:
-                with operation("sandbox.suspend"):
-                    await self.client.control.suspend(self.state.atespace, self.state.actor_name)
-                self.active = False
-                self._set_start_state_preserved(True)
-        finally:
             await self.close_proxy()
+        finally:
+            if (self.active or self._resume_outcome_uncertain) and not self.deleted:
+                with operation("sandbox.suspend"):
+                    try:
+                        await self._suspend_actor()
+                    except ActorResumeInProgressError:
+                        if not self._resume_outcome_uncertain:
+                            raise
+                        # Resume is idempotent and can finish a partially applied restore.
+                        await self.client.control.resume(self.state.atespace, self.state.actor_name)
+                        await self._suspend_actor()
+                self.active = False
+                self._resume_outcome_uncertain = False
+                self._mark_eviction_suspended()
+
+    async def _shutdown_backend(self) -> None:
+        await _finish_actor_operation(asyncio.create_task(self._suspend_backend()))
 
     async def _after_start_failed(self) -> None:
-        await self._shutdown_backend()
+        try:
+            await self._shutdown_backend()
+        except Exception as error:
+            _logger.warning("Actor startup cleanup failed (%s)", type(error).__name__)
 
     async def _exec_internal(self, *command: str | Path, timeout: float | None = None) -> ExecResult:
         if self.deleted or not self.active:
@@ -307,10 +486,17 @@ class _SubstrateSession(BaseSandboxSession):
         if user is not None:
             raise NotImplementedError("Per-user execution is unsupported")
         target = self.normalize_path(path, for_write=True)
-        value = data.read(self.client.max_file_bytes + 1)
-        payload = value.encode() if isinstance(value, str) else bytes(value)
-        if len(payload) > self.client.max_file_bytes:
-            raise self._limit_error()
+        limit = self.client.max_file_bytes
+        payload = bytearray()
+        while True:
+            value = data.read(limit + 1 - len(payload))
+            if value is None:
+                raise BlockingIOError("Sandbox file writes require a blocking stream")
+            if not value:
+                break
+            payload.extend(value.encode() if isinstance(value, str) else value)
+            if len(payload) > limit:
+                raise self._limit_error()
         parts = [base64.b64encode(payload[offset:offset + _WRITE_PART_BYTES]).decode()
                  for offset in range(0, len(payload), _WRITE_PART_BYTES)]
         batches = [parts[index:index + _WRITE_PARTS_PER_COMMAND]

@@ -4,6 +4,12 @@
 
 from __future__ import annotations
 
+import asyncio
+from collections import defaultdict
+from contextlib import asynccontextmanager, contextmanager
+import fcntl
+import hashlib
+import os
 import sqlite3
 import threading
 from pathlib import Path
@@ -14,6 +20,11 @@ from pydantic import TypeAdapter
 
 _ITEM = TypeAdapter(ThreadItem)
 _ATTACHMENT = TypeAdapter(Attachment)
+_NEW_THREAD_ID = object()
+
+
+class ThreadBusyError(RuntimeError):
+    """Another process owns the conversation."""
 
 
 class SQLiteStore(Store[dict]):
@@ -24,6 +35,9 @@ class SQLiteStore(Store[dict]):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.on_delete_thread = on_delete_thread
         self._lock = threading.Lock()
+        self._claims: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+        self._claim_dir = self.path.resolve().with_name(self.path.name + ".locks")
+        self._claim_dir.mkdir(mode=0o700, exist_ok=True)
         self._db = sqlite3.connect(self.path, check_same_thread=False)
         self._db.executescript("""
             CREATE TABLE IF NOT EXISTS threads (id TEXT PRIMARY KEY, data TEXT NOT NULL);
@@ -31,6 +45,42 @@ class SQLiteStore(Store[dict]):
             CREATE INDEX IF NOT EXISTS items_by_thread ON items (thread_id);
             CREATE TABLE IF NOT EXISTS attachments (id TEXT PRIMARY KEY, data TEXT NOT NULL);
         """)
+
+    @contextmanager
+    def _host_claim(self, thread_id: str):
+        lock_name = hashlib.sha256(thread_id.encode()).hexdigest()
+        fd = os.open(self._claim_dir / lock_name, os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as error:
+                raise ThreadBusyError("A turn of this conversation is running in another window or terminal.") from error
+            yield
+        finally:
+            # Closing the descriptor also releases the claim if this process exits.
+            os.close(fd)
+
+    @asynccontextmanager
+    async def claim_thread(self, thread_id: str):
+        """Queue within this process and acquire a cross-process claim without blocking the event loop."""
+        async with self._claims[thread_id]:
+            with self._host_claim(thread_id):
+                yield
+
+    def thread_claimed(self, thread_id: str) -> bool:
+        try:
+            with self._host_claim(thread_id):
+                return False
+        except ThreadBusyError:
+            return True
+
+    def reserve_thread_id(self, context: dict) -> tuple[str, dict]:
+        """Choose the ID before publishing the new thread so it can be claimed first."""
+        thread_id = self.generate_thread_id(context)
+        return thread_id, {**context, _NEW_THREAD_ID: thread_id}
+
+    def generate_thread_id(self, context: dict) -> str:
+        return context.get(_NEW_THREAD_ID) or super().generate_thread_id(context)
 
     def close(self) -> None:
         with self._lock:
@@ -45,10 +95,10 @@ class SQLiteStore(Store[dict]):
             return self._db.execute(sql, args).rowcount
 
     def _upsert(self, table: str, columns: tuple[str, ...], values: tuple) -> None:
-        # UPDATE first keeps the rowid, which is the insertion order used for paging.
-        assignments = ", ".join(f"{column} = ?" for column in columns[1:])
-        if not self._write(f"UPDATE {table} SET {assignments} WHERE id = ?", (*values[1:], values[0])):
-            self._write(f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({', '.join('?' for _ in columns)})", values)
+        # Updating on conflict preserves rowid, the insertion order used for paging.
+        assignments = ", ".join(f"{column} = excluded.{column}" for column in columns[1:])
+        self._write(f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({', '.join('?' for _ in columns)}) "
+                    f"ON CONFLICT(id) DO UPDATE SET {assignments}", values)
 
     def _page(self, sql_rows, limit: int, decode) -> Page:
         data = [decode(row) for row in sql_rows[:limit]]
@@ -76,11 +126,13 @@ class SQLiteStore(Store[dict]):
         return self._page(rows, limit, lambda row: ThreadMetadata.model_validate_json(row[0]))
 
     async def delete_thread(self, thread_id: str, context: dict) -> None:
-        if self.on_delete_thread is not None:
-            # The server deletes the thread's Actor first; a failure keeps the thread for a retry.
-            await self.on_delete_thread(thread_id)
-        self._write("DELETE FROM items WHERE thread_id = ?", (thread_id,))
-        self._write("DELETE FROM threads WHERE id = ?", (thread_id,))
+        async with self.claim_thread(thread_id):
+            if self.on_delete_thread is not None:
+                # A failed cleanup keeps the thread for a retry.
+                await self.on_delete_thread(thread_id)
+            with self._lock, self._db:
+                self._db.execute("DELETE FROM items WHERE thread_id = ?", (thread_id,))
+                self._db.execute("DELETE FROM threads WHERE id = ?", (thread_id,))
 
     async def load_thread_items(self, thread_id: str, after: str | None, limit: int, order: str,
                                 context: dict) -> Page[ThreadItem]:

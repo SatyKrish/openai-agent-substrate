@@ -102,7 +102,12 @@ file size and up to 1 MiB of base64 per command, so a file larger than the
 limit is refused before its contents are transferred. A file that changes
 size between read commands raises an error.
 
-Cancelling the Python coroutine does not guarantee cancellation of an in-flight HTTP request; the remote command has its own deadline. The demo server's Go `CommandContext` does not provide process-group management for shell grandchildren. File operations validate SDK workspace paths, but the shell intentionally has Actor-level access; workspace path validation is not an OS isolation boundary.
+Cancelling execution closes the provider's HTTP connection. The upstream
+server uses the request context and command deadline to stop the command.
+Effects that occurred before disconnect can remain in the workspace, and Go's
+`CommandContext` can leave shell grandchildren alive. A Substrate router resume
+already accepted before disconnect can also complete independently. Workspace
+path validation applies to the file API. The shell has Actor-level access.
 
 ## Kubernetes-hosted harness
 
@@ -128,6 +133,12 @@ The host UIs use the CLI proxy under the operator's kubeconfig. The router's
 ingress allowlist admits clients across Actors. `ate-api-server` separately
 applies per-atespace OpenFGA policy to lifecycle calls. [Substrate authorization](https://ate.dev/docs/guides/authorization/) · [In-cluster deployment](deployment.md#a-harness-in-the-cluster)
 
+Shared applications can use the Actor execution gateway to authorize caller
+identities against exact Actor references. Place the gateway between those
+callers and the router so their command traffic goes through that policy. API
+lifecycle authorization still belongs to Substrate and the owning application.
+[Actor gateway](../deploy/kubernetes/actor_gateway/README.md)
+
 ## Workspace persistence and conversations
 
 Creating an Actor registers it as suspended with an initial golden snapshot
@@ -147,8 +158,9 @@ upstream option that returns after the local checkpoint and uploads later.
 
 The shared harness stores serialized Actor session state with each ChatKit
 thread. Different conversations run concurrently in separate Actors with their
-own workspace volumes. Turns within one conversation require exclusive ownership
-of the Actor. User uploads enter the volume through the provider's file API,
+own workspace volumes. A host file lock serializes turns and deletion for
+each conversation, and the harness records Actor creation intent before making
+the lifecycle call. User uploads enter the volume through the provider's file API,
 which defaults to 10 MiB per file. [Shared agent harness](agent-harness.md)
 
 ## Conversation lifecycle and density
@@ -156,6 +168,15 @@ which defaults to 10 MiB per file. [Shared agent harness](agent-harness.md)
 The harness owns the Actor's active session for the turn, including workspace
 setup, tool execution and output collection. Closing the session suspends the
 Actor and releases its worker capacity between turns.
+
+When Substrate signals worker eviction, the example server reports it on the
+same routed Actor connection. The external harness stops the turn, records the
+pending notice, and requests synchronous suspend. The notice stays visible in
+the Actor. After a successful checkpoint, the harness records which notice it
+handled so that a restored process can report a later signal independently.
+Recovery depends on the worker remaining reachable until Substrate completes the
+checkpoint.
+[Upstream eviction guidance](https://ate.dev/docs/reference/api-guide/#eviction)
 
 | Moment | What happens |
 | --- | --- |
@@ -197,5 +218,6 @@ with the harness. Scripted mode exercises the same SDK tools without inference.
 
 `.substrate-revision` pins the v1.0.0 release commit
 `b34fbee742906494b5eb4f1f36987176bf8770a4`. `scripts/build-sandbox-server.sh`
-builds the stock execution server from the pinned Go module, and each sandbox
-image carries its Apache-2.0 license. [Verification record](verification.md)
+builds the upstream execution server from the pinned Go module alongside the
+project's eviction notice handler. Each sandbox image carries upstream's
+Apache-2.0 license. [Verification record](verification.md)

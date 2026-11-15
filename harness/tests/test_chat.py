@@ -13,13 +13,16 @@ from agents import Runner, function_tool  # noqa: E402
 from agents.sandbox import Manifest, SandboxAgent  # noqa: E402
 from agents.sandbox.capabilities import Shell  # noqa: E402
 from agents.sandbox.entries import Dir  # noqa: E402
+from chatkit.store import NotFoundError  # noqa: E402
 from chatkit.types import ThreadMetadata  # noqa: E402
 
 from openai_harness.chat import HarnessChatServer  # noqa: E402
 from openai_harness.spec import AgentSpec, Conversation, TurnContext  # noqa: E402
 from openai_harness.store import SQLiteStore  # noqa: E402
 from testing.harness import Calls, events, message, shell, titles  # noqa: E402
-from agent_substrate import ActorCapacityError, SubstrateSandboxClient, SubstrateSandboxOptions  # noqa: E402
+from agent_substrate import (  # noqa: E402
+    ActorAlreadyExistsError, ActorCapacityError, SubstrateSandboxClient, SubstrateSandboxOptions,
+)
 
 
 def build_agent(manifest, model):
@@ -113,15 +116,24 @@ async def test_a_full_worker_pool_makes_the_turn_wait_then_run(server, tmp_path)
 
 
 async def test_a_pool_that_stays_full_fails_with_a_clear_message(server, tmp_path):
-    chat = make_chat(server, tmp_path, Calls(), control=FullThenRoom(server.control, full=99), capacity_wait_s=0)
+    server.root.mkdir()  # Substrate mounts an empty workspace before SDK initialization.
+    chat = make_chat(server, tmp_path, Calls([shell("test -d work")]),
+                     control=FullThenRoom(server.control, full=1), capacity_wait_s=0)
     try:
         stream = await events(chat, {"type": "threads.create", "params": {"input": message("Question")}})
         errors = [event for event in stream if event["type"] == "error"]
         assert errors and "No sandbox worker had room" in errors[0]["message"] and errors[0]["allow_retry"]
         thread_id = next(event["thread"]["id"] for event in stream if event["type"] == "thread.created")
         thread = await chat.store.load_thread(thread_id, {})
-        # The Actor exists (created suspended), so retrying resumes it rather than creating another.
+        # The actor exists, but the manifest and boundary check must still run on retry.
         assert thread.metadata["turns"][0]["status"] == "failed" and thread.metadata["actor"].startswith("test-space/")
+        assert thread.metadata["substrate"]["workspace_initialized"] is False
+        retry = await events(chat, {"type": "threads.add_user_message", "params": {"thread_id": thread_id,
+                                                                                  "input": message("Retry")}})
+        assert not [event for event in retry if event["type"] == "error"]
+        saved = (await chat.store.load_thread(thread_id, {})).metadata
+        assert saved["actor"] == thread.metadata["actor"] and saved["substrate"]["workspace_initialized"]
+        assert saved["actor_boundary_checked"] and (server.root / "work").is_dir()
     finally:
         chat.store.close()
 
@@ -148,6 +160,181 @@ async def test_a_failed_run_leaves_no_partial_turn_in_the_history(server, tmp_pa
             "thread_id": thread_id, "input": message("This turn fails")}})
         assert [event for event in stream if event["type"] == "error"]
         assert await user_messages(chat, thread_id) == ["First question"]
+    finally:
+        chat.store.close()
+
+
+async def test_a_failed_artifact_check_rolls_back_sdk_history(server, tmp_path, monkeypatch):
+    chat = make_chat(server, tmp_path, Calls())
+    try:
+        thread_id = await new_thread(chat)
+
+        async def failed_collection(*args):
+            raise OSError("artifact storage unavailable")
+
+        monkeypatch.setattr(chat, "_collect", failed_collection)
+        stream = await events(chat, {"type": "threads.add_user_message", "params": {
+            "thread_id": thread_id, "input": message("This turn fails after streaming")}})
+        assert [event for event in stream if event["type"] == "error"]
+        assert await user_messages(chat, thread_id) == ["First question"]
+    finally:
+        chat.store.close()
+
+
+async def test_failed_stream_cannot_restore_deleted_thread(server, tmp_path, monkeypatch):
+    chat = make_chat(server, tmp_path, Calls())
+    try:
+        thread_id = await new_thread(chat)
+
+        async def failed_collection(*args):
+            raise OSError("artifact storage unavailable")
+
+        monkeypatch.setattr(chat, "_collect", failed_collection)
+        request = {"type": "threads.add_user_message", "params": {"thread_id": thread_id, "input": message("Fails")}}
+        stream = aiter(await chat.process(json.dumps(request), {}))
+        async for chunk in stream:
+            if json.loads(chunk[6:])["type"] == "error":
+                break
+        else:
+            pytest.fail("The failed turn did not emit an error")
+        deletion = asyncio.create_task(chat.store.delete_thread(thread_id, {}))
+        await asyncio.sleep(0)
+        assert not deletion.done()
+        async for _ in stream:
+            pass
+        await deletion
+        with pytest.raises(NotFoundError):
+            await chat.store.load_thread(thread_id, {})
+        assert not server.control.actors
+    finally:
+        chat.store.close()
+
+
+async def test_next_turn_repairs_sdk_history_left_by_an_interrupted_process(server, tmp_path):
+    chat = make_chat(server, tmp_path, Calls())
+    try:
+        thread_id = await new_thread(chat)
+        thread = await chat.store.load_thread(thread_id, {})
+        history = chat.history(thread_id)
+        try:
+            kept = len(await history.get_items())
+            thread.metadata["turns"].append({"number": 2, "status": "running", "files": []})
+            thread.metadata["sdk_history_before"] = kept
+            await chat.store.save_thread(thread, {})
+            await history.add_items([{"role": "user", "content": "Interrupted question"}])
+        finally:
+            history.close()
+        recovered = await events(chat, {"type": "threads.add_user_message", "params": {
+            "thread_id": thread_id, "input": message("Next question")}})
+        assert not [event for event in recovered if event["type"] == "error"]
+        assert await user_messages(chat, thread_id) == ["First question", "Next question"]
+        metadata = (await chat.store.load_thread(thread_id, {})).metadata
+        assert [turn["status"] for turn in metadata["turns"]] == ["completed", "stopped", "completed"]
+        assert "sdk_history_before" not in metadata
+    finally:
+        chat.store.close()
+
+
+async def test_lost_create_reply_reuses_the_persisted_actor_intent(server, tmp_path, monkeypatch):
+    chat = make_chat(server, tmp_path, Calls())
+    actual_create = server.control.create
+    attempts = []
+
+    async def create(atespace, name, template):
+        attempts.append(name)
+        await actual_create(atespace, name, template)
+        raise TimeoutError("create result lost")
+
+    monkeypatch.setattr(server.control, "create", create)
+    try:
+        stream = await events(chat, {"type": "threads.create", "params": {"input": message("Question")}})
+        assert [event for event in stream if event["type"] == "error"]
+        thread_id = next(event["thread"]["id"] for event in stream if event["type"] == "thread.created")
+        thread = await chat.store.load_thread(thread_id, {})
+        assert thread.metadata["pending_actor_template"] == "test"
+        retry = await events(chat, {"type": "threads.add_user_message", "params": {"thread_id": thread_id,
+                                                                                  "input": message("Retry")}})
+        assert not [event for event in retry if event["type"] == "error"]
+        assert attempts == [thread.metadata["actor"].split("/")[1]] * 2
+        await chat.store.delete_thread(thread_id, {})
+        assert not server.control.actors
+    finally:
+        chat.store.close()
+
+
+async def test_confirmed_actor_collision_is_not_adopted_on_retry(server, tmp_path, monkeypatch):
+    chat = make_chat(server, tmp_path, Calls())
+    actual_create = server.control.create
+    attempts = []
+
+    async def create(atespace, name, template):
+        attempts.append(name)
+        await actual_create(atespace, name, template)
+        if len(attempts) == 1:
+            raise ActorAlreadyExistsError("The name belongs to a different allocation")
+
+    monkeypatch.setattr(server.control, "create", create)
+    try:
+        stream = await events(chat, {"type": "threads.create", "params": {"input": message("Question")}})
+        assert any(event["type"] == "error" for event in stream)
+        thread_id = next(event["thread"]["id"] for event in stream if event["type"] == "thread.created")
+        metadata = (await chat.store.load_thread(thread_id, {})).metadata
+        assert not {"substrate", "actor", "pending_actor_template", "actor_boundary_checked"}.intersection(metadata)
+        retry = await events(chat, {"type": "threads.add_user_message", "params": {
+            "thread_id": thread_id, "input": message("Retry")}})
+        assert not any(event["type"] == "error" for event in retry)
+        assert len(attempts) == 2 and attempts[0] != attempts[1]
+        await chat.store.delete_thread(thread_id, {})
+        assert set(server.control.actors) == {f"test-space/{attempts[0]}"}
+    finally:
+        chat.store.close()
+
+
+async def test_deleting_during_first_create_waits_and_deletes_the_actor(server, tmp_path, monkeypatch):
+    chat = make_chat(server, tmp_path, Calls())
+    actual_create = server.control.create
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def delayed_create(*args):
+        started.set()
+        await release.wait()
+        await actual_create(*args)
+
+    monkeypatch.setattr(server.control, "create", delayed_create)
+    try:
+        turn = asyncio.create_task(new_thread(chat))
+        await started.wait()
+        threads = await chat.store.load_threads(10, None, "asc", {})
+        thread_id = threads.data[0].id
+        deletion = asyncio.create_task(chat.store.delete_thread(thread_id, {}))
+        await asyncio.sleep(0)
+        assert not deletion.done()
+        release.set()
+        await asyncio.gather(turn, deletion)
+        assert not server.control.actors
+        with pytest.raises(NotFoundError):
+            await chat.store.load_thread(thread_id, {})
+    finally:
+        chat.store.close()
+
+
+async def test_worker_eviction_interrupts_the_turn_and_suspends_the_actor(server, tmp_path, monkeypatch):
+    chat = make_chat(server, tmp_path, Calls(delay=2))
+
+    async def poll(session):
+        return int(any(server.control.actors.values()))
+
+    monkeypatch.setattr(chat.client, "poll_eviction", poll)
+    try:
+        stream = await events(chat, {"type": "threads.create", "params": {"input": message("Question")}})
+        thread_id = next(event["thread"]["id"] for event in stream if event["type"] == "thread.created")
+        thread = await chat.store.load_thread(thread_id, {})
+        assert any(event["type"] == "error" and event["allow_retry"] for event in stream)
+        assert thread.metadata["turns"][0]["status"] == "stopped"
+        assert server.control.events[-1][0] == "suspend"
+        assert thread.metadata["substrate"]["handled_eviction_id"] == 1
+        assert thread.metadata["substrate"]["pending_eviction_id"] == 0
+        assert not chat.store.thread_claimed(thread_id)
     finally:
         chat.store.close()
 

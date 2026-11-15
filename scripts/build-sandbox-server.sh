@@ -2,13 +2,13 @@
 # Copyright 2026 openai-agent-substrate contributors
 # SPDX-License-Identifier: Apache-2.0
 #
-# Build Agent Substrate's execution server, the program that runs in every sandbox Actor.
+# Build the Actor execution server and its worker-eviction notice handler.
 # Usage: build-sandbox-server.sh REVISION OUTDIR
 #
 # The source is upstream's demos/sandbox package at REVISION (the commit in .substrate-revision),
 # downloaded through the Go module proxy and checked against the Go checksum database. It imports
-# only the standard library, so it builds on its own; `go install pkg@version` would refuse because
-# upstream's go.mod has a replace directive. Writes OUTDIR/sandbox-server and upstream's LICENSE.
+# only the standard library. We compile the upstream source alongside our eviction handler.
+# Writes OUTDIR/sandbox-server and upstream's LICENSE.
 set -eu
 
 revision="$1"
@@ -20,6 +20,7 @@ module="$(go mod download -json "go.ate.dev/substrate@${revision}" | grep '"Dir"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 cp "$module/demos/sandbox/main.go" "$work/main.go"
+cp "$(dirname "$0")/sandbox-eviction.go" "$work/eviction.go"
 mkdir -p "$out"
 out="$(cd "$out" && pwd)"  # absolute: the build runs in a temporary folder
 rm -f "$out/LICENSE"

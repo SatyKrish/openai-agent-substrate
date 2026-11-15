@@ -1244,6 +1244,7 @@ name = "openai-agent-substrate"
 version = "0.1.0"
 source = { editable = "sandbox" }
 dependencies = [
+    { name = "httpx2" },
     { name = "openai-agents" },
 ]
 
@@ -1255,6 +1256,7 @@ tracing = [
 
 [package.metadata]
 requires-dist = [
+    { name = "httpx2", specifier = ">=2.12,<3" },
     { name = "openai-agents", specifier = "==0.24.0" },
     { name = "opentelemetry-exporter-otlp-proto-http", marker = "extra == 'tracing'", specifier = ">=1.39,<2" },
     { name = "opentelemetry-sdk", marker = "extra == 'tracing'", specifier = ">=1.39,<2" },
