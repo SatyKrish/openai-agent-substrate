@@ -69,11 +69,16 @@ like this.
 }
 ```
 
-Choose unique Actor names when granting access. Publish grants from the
-application's ownership records, remove them on deletion, and avoid reusing a
-name under an existing grant. Update the file by atomic replacement. The
-gateway loads it on every request and denies requests if it cannot load the
-policy. TLS material is reloaded for new connections.
+Issue a fresh `atespace/actor` reference for every allocation. Keep retired
+references in the trusted application's ownership records and reserve them
+permanently. A request that has already passed the gateway can still be parked
+in Substrate awaiting worker capacity. The router resolves the resource name,
+so reusing it would make an in-flight request address a different Actor.
+
+Remove an Actor's grants before deleting it and update the grants file by
+atomic replacement. The gateway reads the current file after buffering the
+request, immediately before forwarding. A policy read failure denies access.
+TLS material is reloaded for new connections.
 
 Pass the gateway as `router_url` and use `RouterTLS` with the application's
 client certificate and the gateway serving CA. The application's trusted
@@ -94,11 +99,18 @@ client = SubstrateSandboxClient(
         ca_bundle=Path("/var/run/actor-gateway-client/serving-ca.pem"),
     ),
 )
-options = SubstrateSandboxOptions(template="report", actor_name="report-a")
+options = SubstrateSandboxOptions(template="report")
+state = client.prepare_session_state(options=options)
+actor_ref = f"{state.atespace}/{state.actor_name}"
 ```
 
+Record `actor_ref` against its owner before calling
+`await client.create_from_state(state, options)`. Publish the grant for that
+reference when the allocation is ready.
+
 The command path accepts up to 2 MiB of request data and returns up to 4 MiB of
-response data. Eviction requests and responses each have a 64-byte cap. An
+response data. The gateway accepts an empty POST for eviction polls and caps
+the response at 64 bytes. An
 execution transport failure can leave command outcome unknown. The gateway
 passes the request upstream once and rejects redirects. Keep the gateway,
 grant writer, TLS issuers, and lifecycle credentials inside trusted

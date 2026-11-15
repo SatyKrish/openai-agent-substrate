@@ -14,7 +14,7 @@ from contextlib import suppress
 from pathlib import Path, PurePosixPath
 from typing import Literal, TypeVar
 
-from pydantic import field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from agents.sandbox import Manifest
 from agents.sandbox.entries import BaseEntry, Dir, File, LocalDir, LocalFile
@@ -26,7 +26,15 @@ from agents.sandbox.snapshot import LocalSnapshotSpec, NoopSnapshot, NoopSnapsho
 from agents.sandbox.snapshot_defaults import default_local_snapshot_base_dir
 from agents.sandbox.types import ExecResult, User
 
-from .lifecycle import ActorAlreadyExistsError, ActorControl, ActorNotFoundError, resource_name
+from .lifecycle import (
+    ActorAlreadyExistsError,
+    ActorControl,
+    ActorCreateUncertainError,
+    ActorNotFoundError,
+    ActorOperationUncertainError,
+    ActorResumeInProgressError,
+    resource_name,
+)
 from .proxy import ActorProxy
 from .transport import ProcessTransport, ProcessTransportError, RouterTLS
 from .instrumentation import operation, traced_operation
@@ -34,6 +42,7 @@ from .instrumentation import operation, traced_operation
 MAX_FILE_BYTES = 10 * 1024 * 1024
 _logger = logging.getLogger(__name__)
 _T = TypeVar("_T")
+_UNCERTAIN_OUTCOMES = (ActorOperationUncertainError, TimeoutError)
 # Each /process round trip costs the same whatever its size, so transfers use as
 # few commands as the limits allow. 90 KiB base64-encodes under Linux's 128 KiB
 # per-argument limit (and a multiple of 3 keeps parts concatenable); seven parts
@@ -81,6 +90,8 @@ class SubstrateSessionState(SandboxSessionState):
     actor_name: str
     atespace: str
     workspace_initialized: bool = True
+    pending_eviction_id: int = Field(default=0, ge=0, lt=1 << 64)
+    handled_eviction_id: int = Field(default=0, ge=0, lt=1 << 64)
 
     @model_validator(mode="before")
     @classmethod
@@ -158,15 +169,38 @@ class SubstrateSandboxClient(BaseSandboxClient[SubstrateSandboxOptions]):
     async def create(self, *, options: SubstrateSandboxOptions, manifest: Manifest | None = None,
                      snapshot: SnapshotSpec | SnapshotBase | None = None) -> SandboxSession:
         state = self.prepare_session_state(manifest=manifest, options=options, snapshot=snapshot)
-        creation = asyncio.create_task(self.create_from_state(state, options))
+        creation = asyncio.create_task(self._allocate_new_session(state, options))
         try:
             return await _finish_actor_operation(creation)
         except asyncio.CancelledError:
             # No session was returned to the caller. Clean up this known successful allocation.
             if not creation.cancelled() and creation.exception() is None:
-                with suppress(Exception):
+                try:
                     await _finish_actor_operation(asyncio.create_task(self.delete(creation.result())))
+                except Exception as error:
+                    _logger.warning("Could not clean up Actor %s/%s after canceled create (%s)",
+                                    state.atespace, state.actor_name, type(error).__name__)
             raise
+
+    async def _allocate_new_session(
+        self, state: SubstrateSessionState, options: SubstrateSandboxOptions
+    ) -> SandboxSession:
+        try:
+            return await self.create_from_state(state, options)
+        except _UNCERTAIN_OUTCOMES as error:
+            uncertainty = ActorCreateUncertainError(state.atespace, state.actor_name)
+            if options.actor_name is None:
+                # Only a freshly generated identity can be safely deleted without proof of creation.
+                try:
+                    await self.control.delete(state.atespace, state.actor_name)
+                except Exception as cleanup_error:
+                    # A not-found result can race a create that has yet to commit.
+                    _logger.warning("%s after compensating delete returned %s", uncertainty, type(cleanup_error).__name__)
+                else:
+                    raise
+            else:
+                _logger.warning("%s with an explicitly chosen name", uncertainty)
+            raise uncertainty from error
 
     def prepare_session_state(self, *, options: SubstrateSandboxOptions, manifest: Manifest | None = None,
                               snapshot: SnapshotSpec | SnapshotBase | None = None) -> SubstrateSessionState:
@@ -180,7 +214,7 @@ class SubstrateSandboxClient(BaseSandboxClient[SubstrateSandboxOptions]):
         self._validate_manifest_for_create(manifest)
         validate_manifest(manifest)
         return SubstrateSessionState(
-            actor_name=options.actor_name or f"oas-{uuid.uuid4().hex[:16]}",
+            actor_name=options.actor_name or f"oas-{uuid.uuid4().hex}",
             atespace=self.atespace, manifest=manifest, snapshot=NoopSnapshot(id=uuid.uuid4().hex),
             workspace_initialized=False,
         )
@@ -192,6 +226,8 @@ class SubstrateSandboxClient(BaseSandboxClient[SubstrateSandboxOptions]):
         self._validate_state_for_session(state)
         if state.workspace_initialized or (options.actor_name is not None and options.actor_name != state.actor_name):
             raise ValueError("Actor creation requires matching, uninitialized session state")
+        if recover and options.actor_name is not None:
+            raise ValueError("Automatic create recovery requires a provider-generated Actor name")
         try:
             await self.control.create(state.atespace, state.actor_name, options.template)
         except ActorAlreadyExistsError:
@@ -224,6 +260,10 @@ class SubstrateSandboxClient(BaseSandboxClient[SubstrateSandboxOptions]):
             raise ValueError("Requires a session owned by this client")
         return inner
 
+    async def _delete_actor(self, state: SubstrateSessionState) -> None:
+        with suppress(ActorNotFoundError):
+            await self.control.delete(state.atespace, state.actor_name)
+
     @traced_operation("sandbox.delete")
     async def delete(self, session: SandboxSession) -> SandboxSession:
         inner = self._owned_session(session)
@@ -231,10 +271,7 @@ class SubstrateSandboxClient(BaseSandboxClient[SubstrateSandboxOptions]):
             # Deletion must remain possible after failed startup/suspension.
             # It also bypasses suspension when the workspace is disposable.
             await inner.close_proxy()
-            with suppress(ActorNotFoundError):
-                await _finish_actor_operation(asyncio.create_task(
-                    self.control.delete(inner.state.atespace, inner.state.actor_name)
-                ))
+            await _finish_actor_operation(asyncio.create_task(self._delete_actor(inner.state)))
             inner.deleted = True
             inner.active = False
             await session.aclose()
@@ -247,12 +284,13 @@ class SubstrateSandboxClient(BaseSandboxClient[SubstrateSandboxOptions]):
             return 0
         return await inner._transport.poll_eviction(inner.actor_ref)
 
-    async def acknowledge_eviction(self, session: SandboxSession, notice: int) -> None:
-        """Acknowledge a worker drain signal before suspending the active Actor."""
-        inner = self._owned_session(session)
-        if not inner.active or inner._transport is None:
-            raise RuntimeError("Actor session is no longer active")
-        await inner._transport.acknowledge_eviction(inner.actor_ref, notice)
+    def note_eviction(self, session: SandboxSession, notice: int) -> bool:
+        """Record an unhandled drain signal for synchronous suspension."""
+        state = self._owned_session(session).state
+        if not notice or notice == state.handled_eviction_id:
+            return False
+        state.pending_eviction_id = notice
+        return True
 
 
 class _SubstrateSession(BaseSandboxSession):
@@ -262,6 +300,7 @@ class _SubstrateSession(BaseSandboxSession):
         self.state = state
         self.client = client
         self.active = False
+        self._resume_outcome_uncertain = False
         self.deleted = False
         self._cwd_ready = False
         self._proxy: ActorProxy | None = None
@@ -272,6 +311,28 @@ class _SubstrateSession(BaseSandboxSession):
     def actor_ref(self) -> str:
         return f"{self.state.atespace}/{self.state.actor_name}"
 
+    def _mark_eviction_suspended(self) -> None:
+        if notice := self.state.pending_eviction_id:
+            self.state.handled_eviction_id = notice
+            self.state.pending_eviction_id = 0
+
+    async def _suspend_actor(self) -> None:
+        try:
+            await self.client.control.suspend(self.state.atespace, self.state.actor_name)
+        except _UNCERTAIN_OUTCOMES:
+            if not self.state.pending_eviction_id:
+                raise
+            # Substrate re-reads the Actor under its lease on each request and
+            # returns success if the first attempt already suspended it.
+            await asyncio.sleep(0.25)
+            await self.client.control.suspend(self.state.atespace, self.state.actor_name)
+
+    async def _finish_pending_eviction(self) -> None:
+        if self.state.pending_eviction_id:
+            with operation("sandbox.suspend"):
+                await self._suspend_actor()
+            self._mark_eviction_suspended()
+
     async def start(self) -> None:
         try:
             await super().start()
@@ -281,8 +342,14 @@ class _SubstrateSession(BaseSandboxSession):
             raise
 
     async def _resume_backend(self) -> None:
+        await self._finish_pending_eviction()
         with operation("sandbox.resume"):
-            await self.client.control.resume(self.state.atespace, self.state.actor_name)
+            try:
+                await self.client.control.resume(self.state.atespace, self.state.actor_name)
+            except _UNCERTAIN_OUTCOMES:
+                self._resume_outcome_uncertain = True
+                raise
+        self._resume_outcome_uncertain = False
         self.active = True
 
     async def _ensure_backend_started(self) -> None:
@@ -316,12 +383,21 @@ class _SubstrateSession(BaseSandboxSession):
 
     async def _suspend_backend(self) -> None:
         try:
-            if self.active and not self.deleted:
-                with operation("sandbox.suspend"):
-                    await self.client.control.suspend(self.state.atespace, self.state.actor_name)
-                self.active = False
-        finally:
             await self.close_proxy()
+        finally:
+            if (self.active or self._resume_outcome_uncertain) and not self.deleted:
+                with operation("sandbox.suspend"):
+                    try:
+                        await self._suspend_actor()
+                    except ActorResumeInProgressError:
+                        if not self._resume_outcome_uncertain:
+                            raise
+                        # Resume is idempotent and can finish a partially applied restore.
+                        await self.client.control.resume(self.state.atespace, self.state.actor_name)
+                        await self._suspend_actor()
+                self.active = False
+                self._resume_outcome_uncertain = False
+                self._mark_eviction_suspended()
 
     async def _shutdown_backend(self) -> None:
         await _finish_actor_operation(asyncio.create_task(self._suspend_backend()))

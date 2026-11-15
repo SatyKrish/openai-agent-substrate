@@ -624,10 +624,11 @@ with an empty API key.
   with an explicit no-op specification. The local tests exercised incomplete
   startup, cancellation and recovery with a persisted Actor ID.
 - On the dedicated ARM64 Kind cluster, a Starter Actor wrote a workspace file
-  before its worker pod began graceful termination. The harness received and
-  acknowledged the eviction notice and synchronously suspended the Actor. The
-  same Actor resumed on the replacement worker with the file intact and no
-  pending eviction notice.
+  and began a command before its worker pod began graceful termination. The
+  eviction watcher interrupted the command and saved the pending notice. The
+  Actor synchronously suspended. A new session loaded the saved pre-suspend
+  state, reconciled the checkpoint, and restored the same file on a replacement
+  worker. The handled notice did not interrupt the resumed session.
 - Gateway tests used separate TLS identities on loopback for caller and router.
   They covered exact Actor grants, denial and revocation, trust failures, and
   forwarding of both execution and eviction requests.

@@ -102,7 +102,12 @@ file size and up to 1 MiB of base64 per command, so a file larger than the
 limit is refused before its contents are transferred. A file that changes
 size between read commands raises an error.
 
-Cancelling the Python coroutine does not guarantee cancellation of an in-flight HTTP request; the remote command has its own deadline. The demo server's Go `CommandContext` does not provide process-group management for shell grandchildren. File operations validate SDK workspace paths, but the shell intentionally has Actor-level access; workspace path validation is not an OS isolation boundary.
+Cancelling execution closes the provider's HTTP connection. The upstream
+server uses the request context and command deadline to stop the command.
+Effects that occurred before disconnect can remain in the workspace, and Go's
+`CommandContext` can leave shell grandchildren alive. A Substrate router resume
+already accepted before disconnect can also complete independently. Workspace
+path validation applies to the file API. The shell has Actor-level access.
 
 ## Kubernetes-hosted harness
 
@@ -165,9 +170,12 @@ setup, tool execution and output collection. Closing the session suspends the
 Actor and releases its worker capacity between turns.
 
 When Substrate signals worker eviction, the example server reports it on the
-same routed Actor connection. The external harness stops the turn, acknowledges
-the notice and requests synchronous suspend. Recovery depends on the worker
-remaining reachable until Substrate completes the checkpoint.
+same routed Actor connection. The external harness stops the turn, records the
+pending notice, and requests synchronous suspend. The notice stays visible in
+the Actor. After a successful checkpoint, the harness records which notice it
+handled so that a restored process can report a later signal independently.
+Recovery depends on the worker remaining reachable until Substrate completes the
+checkpoint.
 [Upstream eviction guidance](https://ate.dev/docs/reference/api-guide/#eviction)
 
 | Moment | What happens |

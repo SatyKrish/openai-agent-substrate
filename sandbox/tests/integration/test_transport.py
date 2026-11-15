@@ -1,12 +1,11 @@
 # Copyright 2026 openai-agent-substrate contributors
 # SPDX-License-Identifier: Apache-2.0
 
+import asyncio
 import json
 import threading
 from contextlib import contextmanager
-from http.client import IncompleteRead
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -62,15 +61,55 @@ async def test_oversized_response_is_rejected():
             await ProcessTransport(url, max_response_bytes=100).execute("space/actor", ["true"], cwd="/workspace")
 
 
-async def test_incomplete_http_response_keeps_execution_outcome_unknown(monkeypatch):
-    transport = ProcessTransport("http://127.0.0.1:1")
-    opener = MagicMock()
-    opener.open.return_value.__enter__.return_value.read.side_effect = IncompleteRead(b"partial")
-    monkeypatch.setattr(transport, "_opener", opener)
+async def read_request(reader):
+    headers = (await reader.readuntil(b"\r\n\r\n")).splitlines()
+    length = next(line.split(b":", 1)[1] for line in headers[1:] if line.lower().startswith(b"content-length:"))
+    return await reader.readexactly(int(length))
 
-    with pytest.raises(ProcessTransportError, match="outcome may be unknown"):
-        await transport.execute("space/actor", ["true"], cwd="/workspace")
-    opener.open.assert_called_once()
+
+async def test_incomplete_http_response_keeps_execution_outcome_unknown():
+    requests = []
+
+    async def handle(reader, writer):
+        requests.append(await read_request(reader))
+        body = b'{"stdout":"","stderr":"","exitCode":0}'
+        # The JSON body parses, but the declared framing is incomplete.
+        writer.write(f"HTTP/1.1 200 OK\r\nContent-Length: {len(body) + 1}\r\n\r\n".encode() + body)
+        await writer.drain()
+        writer.close()
+        await writer.wait_closed()
+
+    async with await asyncio.start_server(handle, "127.0.0.1", 0) as server:
+        url = f"http://127.0.0.1:{server.sockets[0].getsockname()[1]}"
+        with pytest.raises(ProcessTransportError, match="outcome may be unknown"):
+            await ProcessTransport(url).execute("space/actor", ["true"], cwd="/workspace")
+        assert len(requests) == 1
+
+
+async def test_cancelling_execution_disconnects_an_in_flight_request():
+    started, disconnected = asyncio.Event(), asyncio.Event()
+
+    async def handle(reader, writer):
+        await read_request(reader)
+        started.set()
+        try:
+            if await reader.read(1) == b"":
+                disconnected.set()
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    async with await asyncio.start_server(handle, "127.0.0.1", 0) as server:
+        url = f"http://127.0.0.1:{server.sockets[0].getsockname()[1]}"
+        async with asyncio.timeout(3):
+            command = asyncio.create_task(ProcessTransport(url).execute("space/actor", ["true"], cwd="/workspace"))
+            try:
+                await started.wait()
+            finally:
+                command.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await command
+            await disconnected.wait()
 
 
 @pytest.mark.parametrize("url", ["ftp://example.com", "http://user:secret@example.com", "http://example.com?token=secret"])

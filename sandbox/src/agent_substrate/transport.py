@@ -6,25 +6,19 @@
 from __future__ import annotations
 
 import asyncio
-from http.client import HTTPException
 import json
 import math
 import os
 import ssl
-import urllib.error
 import urllib.parse
-import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
+
+import httpx2
 
 
 class ProcessTransportError(RuntimeError):
     """Execution outcome may be unknown. Never automatically retry the command."""
-
-
-class _RejectRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        raise ProcessTransportError("The execution endpoint redirected; request was not replayed")
 
 
 @dataclass(frozen=True)
@@ -65,25 +59,42 @@ class ProcessTransport:
         self.default_timeout = default_timeout
         self.max_response_bytes = max_response_bytes
         self.tls = tls
-        self._tls_opener: tuple[tuple[int, ...], urllib.request.OpenerDirector] | None = None
-        # Deliberately avoid inheriting HTTP_PROXY and avoid replaying POST on redirects.
-        self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _RejectRedirect())
+        self._default_tls_context: ssl.SSLContext | bool = (
+            ssl.create_default_context() if tls is None and url.scheme == "https" else False
+        )
+        self._tls_context: tuple[tuple[int, ...], ssl.SSLContext] | None = None
         if tls is not None:
-            self._current_opener()  # Fail at construction, not on the first command, if the files are unusable.
+            self._current_tls_context()  # Check the projected files before opening the first connection.
 
-    def _current_opener(self) -> urllib.request.OpenerDirector:
+    def _current_tls_context(self) -> ssl.SSLContext | bool:
         if self.tls is None:
-            return self._opener
+            return self._default_tls_context
         stamp = tuple(os.stat(path).st_mtime_ns for path in (self.tls.credential_bundle, self.tls.ca_bundle))
-        cached = self._tls_opener
+        cached = self._tls_context
         if cached is None or cached[0] != stamp:
             context = ssl.create_default_context(cafile=self.tls.ca_bundle)
             context.load_cert_chain(self.tls.credential_bundle)
-            opener = urllib.request.build_opener(
-                urllib.request.ProxyHandler({}), _RejectRedirect(), urllib.request.HTTPSHandler(context=context))
-            # One assignment, so a concurrent command never pairs a new stamp with an old opener.
-            cached = self._tls_opener = (stamp, opener)
+            cached = self._tls_context = (stamp, context)
         return cached[1]
+
+    async def _post(self, url: str, actor_ref: str, payload: bytes, *, timeout: float,
+                    limit: int) -> tuple[int, bytes]:
+        transport = httpx2.AsyncHTTPTransport(verify=self._current_tls_context(), trust_env=False, retries=0)
+        # Own the connection in this coroutine so cancellation closes it before Actor suspension.
+        async with asyncio.timeout(timeout), httpx2.AsyncClient(
+            transport=transport, trust_env=False, follow_redirects=False, timeout=timeout,
+        ) as client:
+            async with client.stream("POST", url, content=payload, headers={
+                "Content-Type": "application/json", "Ate-Target-Actor": actor_ref, "Accept-Encoding": "identity",
+            }) as response:
+                if response.status_code != 200:
+                    return response.status_code, b""
+                body = bytearray()
+                async for chunk in response.aiter_raw():
+                    if len(chunk) > limit - len(body):
+                        raise ProcessTransportError("Execution response exceeded the configured byte limit")
+                    body.extend(chunk)
+                return response.status_code, bytes(body)
 
     async def execute(self, actor_ref: str, command: list[str], *, cwd: str, timeout: float | None = None) -> ProcessResult:
         seconds = self.default_timeout if timeout is None else timeout
@@ -92,18 +103,12 @@ class ProcessTransport:
         payload = json.dumps({
             "command": command, "cwd": cwd, "timeout": f"{seconds:.6f}s",
         }).encode()
-        return await asyncio.to_thread(self._execute, actor_ref, payload, seconds)
-
-    def _execute(self, actor_ref: str, payload: bytes, seconds: float) -> ProcessResult:
-        request = urllib.request.Request(self.url, data=payload, method="POST", headers={
-            "Content-Type": "application/json", "ate-target-actor": actor_ref,
-        })
         try:
             # Allow routing/resumption overhead in addition to the remote command deadline.
-            with self._current_opener().open(request, timeout=seconds + 15) as response:
-                raw = response.read(self.max_response_bytes + 1)
-            if len(raw) > self.max_response_bytes:
-                raise ProcessTransportError("Execution response exceeded the configured byte limit")
+            status, raw = await self._post(self.url, actor_ref, payload, timeout=seconds + 15,
+                                           limit=self.max_response_bytes)
+            if status != 200:
+                raise ProcessTransportError(f"Execution endpoint returned HTTP {status}; command was not retried")
             result = json.loads(raw)
             if (not isinstance(result, dict) or type(result.get("exitCode")) is not int
                     or not isinstance(result.get("stdout"), str)
@@ -117,16 +122,19 @@ class ProcessTransport:
             # Output is JSON text: invalid UTF-8 bytes were already replaced upstream.
             # Use the provider file API (base64) when byte-for-byte fidelity is required.
             return ProcessResult(result["stdout"].encode(), result["stderr"].encode(), result["exitCode"])
-        except urllib.error.HTTPError as error:
-            raise ProcessTransportError(f"Execution endpoint returned HTTP {error.code}; command was not retried") from None
-        except (OSError, ValueError, HTTPException) as error:
+        except (OSError, ValueError, httpx2.HTTPError) as error:
             raise ProcessTransportError(f"Execution transport failed ({type(error).__name__}); outcome may be unknown") from None
 
     async def poll_eviction(self, actor_ref: str) -> int | None:
         """Read the current notice ID, zero while clear, or None for an older server."""
-        raw = await asyncio.to_thread(self._eviction_request, actor_ref, b"", 200)
-        if raw is None:
+        try:
+            status, raw = await self._post(self._eviction_url, actor_ref, b"", timeout=3, limit=128)
+        except (OSError, ValueError, httpx2.HTTPError) as error:
+            raise ProcessTransportError(f"Actor eviction poll failed ({type(error).__name__})") from None
+        if status in {404, 405}:
             return None
+        if status != 200:
+            raise ProcessTransportError(f"Actor eviction poll returned HTTP {status}")
         try:
             result = json.loads(raw)
         except ValueError:
@@ -135,24 +143,3 @@ class ProcessTransport:
                 or not 0 <= result["eviction_id"] < (1 << 64)):
             raise ProcessTransportError("Invalid Actor eviction response")
         return result["eviction_id"]
-
-    async def acknowledge_eviction(self, actor_ref: str, notice: int) -> None:
-        payload = json.dumps({"acknowledge": notice}).encode()
-        await asyncio.to_thread(self._eviction_request, actor_ref, payload, 204)
-
-    def _eviction_request(self, actor_ref: str, payload: bytes, expected_status: int) -> bytes | None:
-        request = urllib.request.Request(self._eviction_url, data=payload, method="POST", headers={
-            "Content-Type": "application/json", "ate-target-actor": actor_ref,
-        })
-        try:
-            with self._current_opener().open(request, timeout=3) as response:
-                raw = response.read(129)
-                if response.status != expected_status or len(raw) > 128:
-                    raise ProcessTransportError("Invalid Actor eviction response")
-                return raw
-        except urllib.error.HTTPError as error:
-            if error.code in {404, 405}:
-                return None
-            raise ProcessTransportError(f"Actor eviction poll returned HTTP {error.code}") from None
-        except (OSError, ValueError, HTTPException) as error:
-            raise ProcessTransportError(f"Actor eviction poll failed ({type(error).__name__})") from None

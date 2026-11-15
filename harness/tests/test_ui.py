@@ -1,6 +1,7 @@
 # Copyright 2026 openai-agent-substrate contributors
 # SPDX-License-Identifier: Apache-2.0
 
+import asyncio
 import json
 
 import pytest
@@ -10,6 +11,7 @@ pytest.importorskip("chatkit", reason="install the ui dependency group: uv sync 
 from agents.sandbox import Manifest, SandboxAgent  # noqa: E402
 from agents.sandbox.capabilities import Shell  # noqa: E402
 from agents.sandbox.entries import Dir  # noqa: E402
+from chatkit.server import StreamingResult  # noqa: E402
 from starlette.testclient import TestClient  # noqa: E402
 
 from openai_harness import http  # noqa: E402
@@ -116,6 +118,104 @@ async def test_a_message_is_refused_while_another_process_runs_the_conversation(
     texts = [part.text for item in items if item.type == "user_message" for part in item.content]
     assert texts == ["Hello"]
     chat.store.close()
+
+
+async def test_refused_retry_keeps_original_input_and_later_items(server, tmp_path):
+    chat = make_chat(server, tmp_path, Calls(answer="Hi."))
+    other = SQLiteStore(chat.store.path)
+    try:
+        first = await events(chat, {"type": "threads.create", "params": {"input": message("Hello")}})
+        thread_id = next(event["thread"]["id"] for event in first if event["type"] == "thread.created")
+        before = (await chat.store.load_thread_items(thread_id, None, 50, "asc", {})).data
+        item = next(item for item in before if item.type == "user_message")
+        assert len(before) > 1
+        async with other.claim_thread(thread_id):
+            stream = await events(chat, {"type": "threads.retry_after_item", "params": {
+                "thread_id": thread_id, "item_id": item.id}})
+        assert any(event["type"] == "error" and event["allow_retry"] for event in stream)
+        after = (await chat.store.load_thread_items(thread_id, None, 50, "asc", {})).data
+        assert after == before
+    finally:
+        other.close()
+        chat.store.close()
+
+
+async def test_eviction_suspends_while_the_http_client_is_slow(server, tmp_path, monkeypatch):
+    chat = make_chat(server, tmp_path, Calls(delay=20))
+    sending = asyncio.Event()
+    release = asyncio.Event()
+    suspended = asyncio.Event()
+    events_sent = []
+    thread_id = None
+    suspend_actor = server.control.suspend
+
+    async def poll(session):
+        await sending.wait()
+        return 17
+
+    async def suspend(atespace, actor_name):
+        saved = (await chat.store.load_thread(thread_id, {})).metadata["substrate"]
+        assert saved["pending_eviction_id"] == 17 and saved["handled_eviction_id"] == 0
+        await suspend_actor(atespace, actor_name)
+        suspended.set()
+
+    async def receive():
+        await asyncio.Future()  # The connection stays open until the response finishes.
+
+    async def send(response_event):
+        nonlocal thread_id
+        if not (chunk := response_event.get("body")):
+            return
+        event = json.loads(chunk[6:])
+        events_sent.append(event)
+        if event["type"] == "thread.created":
+            thread_id = event["thread"]["id"]
+        if event["type"] == "thread.item.updated" and event["update"].get("task", {}).get("title", "").startswith("Created the workspace"):
+            sending.set()
+            await release.wait()
+
+    monkeypatch.setattr(chat.client, "poll_eviction", poll)
+    monkeypatch.setattr(server.control, "suspend", suspend)
+    request = {"type": "threads.create", "params": {"input": message("Hello")}}
+    result = await chat.process(json.dumps(request), {})
+    response = http._ChatKitResponse(result)
+    response_task = asyncio.create_task(response({"type": "http", "asgi": {"spec_version": "2.3"}}, receive, send))
+    try:
+        await asyncio.wait_for(suspended.wait(), 5)
+        assert not response_task.done() and not release.is_set()
+    finally:
+        release.set()
+        try:
+            await asyncio.wait_for(response_task, 5)
+        finally:
+            chat.store.close()
+    assert any(event["type"] == "error" and event["allow_retry"] for event in events_sent)
+
+
+async def test_slow_http_stream_stops_at_the_queue_limit(monkeypatch):
+    monkeypatch.setattr(http, "_STREAM_QUEUE_EVENTS", 2)
+    finished = asyncio.Event()
+    sent = []
+
+    async def stream():
+        try:
+            for _ in range(4):
+                yield b"data: {}\n\n"
+            await asyncio.Future()
+        finally:
+            finished.set()
+
+    async def receive():
+        await asyncio.Future()
+
+    async def send(event):
+        if chunk := event.get("body"):
+            sent.append(json.loads(chunk[6:]))
+
+    response = http._ChatKitResponse(StreamingResult(stream()))
+    await asyncio.wait_for(response({"type": "http", "asgi": {"spec_version": "2.4"}}, receive, send), 5)
+    assert finished.is_set()
+    assert len(sent) == 3 and sent[-1]["type"] == "error" and not sent[-1]["allow_retry"]
 
 
 async def test_steps_say_where_they_ran_and_every_turn_says_what_was_checked(server, tmp_path):

@@ -34,24 +34,30 @@ from chatkit.errors import CustomStreamError
 from chatkit.server import ChatKitServer
 from chatkit.store import NotFoundError
 from chatkit.types import (
-    ClientEffectEvent, CustomTask, ThreadItemAddedEvent, ThreadItemDoneEvent, ThreadItemUpdatedEvent, ThreadMetadata,
-    UserMessageItem, WidgetItem, Workflow, WorkflowItem, WorkflowTaskAdded, WorkflowTaskUpdated,
+    ClientEffectEvent, CustomTask, ErrorEvent, NonStreamingReq, StreamingReq, ThreadItemAddedEvent,
+    ThreadItemDoneEvent, ThreadItemUpdatedEvent, ThreadMetadata, ThreadsCreateReq, ThreadsSyncCustomActionReq,
+    ThreadsUpdateReq, UserMessageItem, WidgetItem, Workflow, WorkflowItem, WorkflowTaskAdded, WorkflowTaskUpdated,
 )
 from chatkit.widgets import DynamicWidgetRoot
 
-from agent_substrate import ActorCapacityError, ActorNotFoundError, SubstrateSandboxOptions
+from agent_substrate import ActorAlreadyExistsError, ActorCapacityError, ActorNotFoundError, SubstrateSandboxOptions
 from agent_substrate.eviction import ActorEvicted, eviction_watch
 from agent_substrate.instrumentation import operation
 from agent_substrate.tracing import otel_trace_id, tracing_enabled
 
 from .spec import WORKSPACE_ROOT, AgentSpec, Conversation, TurnContext
 from .steps import ToolSteps, fenced, user_text
-from .store import ThreadBusyError
+from .store import SQLiteStore, ThreadBusyError
 from .uploads import UploadRejected, UploadStore, upload_name
 
 logger = logging.getLogger(__name__)
 _MAX_FILES = 40
 _FILE_NAME = r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}"
+
+
+def error_frame(message: str, *, retry: bool) -> bytes:
+    event = ErrorEvent(code="custom", message=message, allow_retry=retry)
+    return b"data: " + event.model_dump_json(exclude_none=True).encode() + b"\n\n"
 
 
 def preferred_file(turn: dict, preferred: str | None = None) -> str | None:
@@ -76,13 +82,14 @@ class TurnError(Exception):
 
 
 class HarnessChatServer(ChatKitServer[dict]):
-    def __init__(self, spec: AgentSpec, store, client, *, model, template: str, output_dir: Path,
+    def __init__(self, spec: AgentSpec, store: SQLiteStore, client, *, model, template: str, output_dir: Path,
                  base_url: str = "http://localhost:8000", workspace_root: str = WORKSPACE_ROOT,
                  model_label: str | None = None, max_turns: int = 25, capacity_wait_s: float = 300,
                  card: Callable[[Conversation, dict, set[str]], list[dict]] | None = None,
                  file_status: Callable[[Conversation, dict], dict[str, dict]] | None = None,
                  preferred_output: str | None = None):
         self.spec = spec
+        self.store: SQLiteStore = store
         self.output_dir = Path(output_dir)
         self.uploads = UploadStore(store, self.output_dir / ".staged", base_url, spec.uploads)
         super().__init__(store, attachment_store=self.uploads)
@@ -109,19 +116,66 @@ class HarnessChatServer(ChatKitServer[dict]):
         self.history_path.parent.mkdir(parents=True, exist_ok=True)
         return SQLiteSession(thread_id, self.history_path)
 
+    async def _process_streaming(self, request: StreamingReq, context: dict):
+        creating = isinstance(request, ThreadsCreateReq)
+        if creating:
+            thread_id, context = self.store.reserve_thread_id(context)
+        else:
+            thread_id = request.params.thread_id
+        try:
+            async with self.store.claim_thread(thread_id):
+                # ChatKit's retry and add-message operations write items before calling respond.
+                if not creating:
+                    thread = await self.store.load_thread(thread_id, context)
+                    if thread.metadata.get("delete_pending"):
+                        raise NotFoundError("Conversation deletion is pending")
+                async with contextlib.aclosing(super()._process_streaming(request, context)) as events:
+                    async for event in events:
+                        yield event
+        except ThreadBusyError as error:
+            yield error_frame(f"{error} Wait for it to finish, then send again.", retry=True)
+        except NotFoundError:
+            yield error_frame("This conversation was deleted or is awaiting deletion.", retry=False)
+
+    async def _process_non_streaming(self, request: NonStreamingReq, context: dict) -> bytes:
+        if isinstance(request, (ThreadsUpdateReq, ThreadsSyncCustomActionReq)):
+            async with self.store.claim_thread(request.params.thread_id):
+                return await super()._process_non_streaming(request, context)
+        # SQLiteStore owns the claim for deletion, including direct callers of its delete API.
+        return await super()._process_non_streaming(request, context)
+
+    @staticmethod
+    async def _truncate_history(history: SQLiteSession, kept: int) -> None:
+        for _ in range(len(await history.get_items()) - kept):
+            await history.pop_item()
+
     @contextlib.asynccontextmanager
-    async def _turn_history(self, thread_id: str):
-        history = self.history(thread_id)
+    async def _turn_history(self, thread: ThreadMetadata, context: dict):
+        history = self.history(thread.id)
         try:
             kept = len(await history.get_items())
+            thread.metadata["sdk_history_before"] = kept
+            await self.store.save_thread(thread, context)
             try:
                 yield history
             except BaseException:
-                while len(await history.get_items()) > kept:
-                    await history.pop_item()
+                await self._truncate_history(history, kept)
+                del thread.metadata["sdk_history_before"]
                 raise
         finally:
             history.close()
+
+    async def _save_session_state(self, session, thread: ThreadMetadata, context: dict) -> None:
+        thread.metadata["substrate"] = self.client.serialize_session_state(session.state)
+        await self.store.save_thread(thread, context)
+
+    @contextlib.asynccontextmanager
+    async def _actor_session(self, session, thread: ThreadMetadata, context: dict):
+        try:
+            yield
+        finally:
+            await session.aclose()
+            await self._save_session_state(session, thread, context)
 
     async def respond(self, thread: ThreadMetadata, input_user_message: UserMessageItem | None, context: dict):
         if input_user_message is None:
@@ -135,26 +189,13 @@ class HarnessChatServer(ChatKitServer[dict]):
         if not text and not attachments:
             raise CustomStreamError("Type a question to send.", allow_retry=False)
         text = text or self.spec.default_question
+        self.running.add(thread.id)
         try:
-            async with self.store.claim_thread(thread.id):
-                # ChatKit loaded this thread before the claim. Re-read after competing turns or deletion.
-                fresh = await self.store.load_thread(thread.id, context)
-                thread.metadata, thread.title = fresh.metadata, fresh.title
-                if thread.metadata.get("delete_pending"):
-                    raise NotFoundError("Conversation deletion is pending")
-                self.running.add(thread.id)
-                try:
-                    async with contextlib.aclosing(self._turn(thread, text, attachments, context)) as events:
-                        async for event in events:
-                            yield event
-                finally:
-                    self.running.discard(thread.id)
-        except (ThreadBusyError, NotFoundError) as error:
-            # ChatKit already stored the message before asking the harness to respond.
-            await self.store.delete_thread_item(thread.id, input_user_message.id, context)
-            if isinstance(error, ThreadBusyError):
-                raise CustomStreamError(f"{error} Wait for it to finish, then send again.", allow_retry=True) from error
-            raise CustomStreamError("This conversation was deleted or is awaiting deletion.", allow_retry=False) from error
+            async with contextlib.aclosing(self._turn(thread, text, attachments, context)) as events:
+                async for event in events:
+                    yield event
+        finally:
+            self.running.discard(thread.id)
 
     async def _turn(self, thread: ThreadMetadata, text: str, attachments: list, context: dict):
         conversation = self.conversation(thread)
@@ -162,8 +203,15 @@ class HarnessChatServer(ChatKitServer[dict]):
         if not thread.title:
             thread.title = text if len(text) <= 60 else text[:57].rstrip() + "…"
         turns = meta.setdefault("turns", [])
+        if "sdk_history_before" in meta:
+            # SQLite commits SDK writes while the model runs. Recover a turn interrupted by process exit.
+            history = self.history(thread.id)
+            try:
+                await self._truncate_history(history, meta["sdk_history_before"])
+            finally:
+                history.close()
+            del meta["sdk_history_before"]
         if turns and turns[-1].get("status") == "running":
-            # The previous process exited while it owned this conversation.
             turns[-1]["status"] = "stopped"
         sdk_trace_id = gen_trace_id()
         traced = tracing_enabled()
@@ -185,6 +233,7 @@ class HarnessChatServer(ChatKitServer[dict]):
                     async with contextlib.aclosing(self._run_turn(conversation, context_, turn, text, attachments)) as events:
                         async for event in events:
                             yield event
+            meta.pop("sdk_history_before", None)
             turn["status"] = "completed"
         except (asyncio.CancelledError, GeneratorExit):
             turn["status"] = "stopped"
@@ -239,13 +288,21 @@ class HarnessChatServer(ChatKitServer[dict]):
             state = self.client.deserialize_session_state(meta["substrate"])
 
         async with contextlib.AsyncExitStack() as cleanup:
-            history = await cleanup.enter_async_context(self._turn_history(thread.id))
+            history = await cleanup.enter_async_context(self._turn_history(thread, context_.request_context))
             if pending_template := meta.get("pending_actor_template"):
-                session = await self.client.create_from_state(state, SubstrateSandboxOptions(template=pending_template),
-                                                              recover=not first_allocation)
+                try:
+                    session = await self.client.create_from_state(state, SubstrateSandboxOptions(template=pending_template),
+                                                                  recover=not first_allocation)
+                except ActorAlreadyExistsError:
+                    if first_allocation:
+                        # A confirmed collision belongs to a different allocation.
+                        for key in ("substrate", "actor", "pending_actor_template", "actor_boundary_checked"):
+                            del meta[key]
+                        await self.store.save_thread(thread, context_.request_context)
+                    raise
             else:
                 session = await self.client.resume(state)
-            await cleanup.enter_async_context(contextlib.aclosing(session))
+            await cleanup.enter_async_context(self._actor_session(session, thread, context_.request_context))
             if pending_template:
                 del meta["pending_actor_template"]
                 await self.store.save_thread(thread, context_.request_context)
@@ -253,14 +310,16 @@ class HarnessChatServer(ChatKitServer[dict]):
             initialize = not session.state.workspace_initialized or meta.get("actor_boundary_checked") is False
             async for event in self._start(session, workflow, turn):
                 yield event
-            await cleanup.enter_async_context(eviction_watch(self.client, session))
+            async def save_eviction_state():
+                await self._save_session_state(session, thread, context_.request_context)
+
+            await cleanup.enter_async_context(eviction_watch(self.client, session, persist=save_eviction_state))
             if initialize:
                 boundary = await session.exec('test -z "${OPENAI_API_KEY:-}" && test ! -d /var/run/agent-config')
                 if not boundary.ok():
                     raise RuntimeError("The sandbox must not contain the harness API key or Secret mount")
                 meta["actor_boundary_checked"] = True
-            meta["substrate"] = self.client.serialize_session_state(session.state)
-            await self.store.save_thread(thread, context_.request_context)
+            await self._save_session_state(session, thread, context_.request_context)
             seconds = time.monotonic() - began
             turn["start_s"] = round(seconds, 1)
             verb = "Created" if created else "Resumed"
@@ -312,8 +371,6 @@ class HarnessChatServer(ChatKitServer[dict]):
                 turn["check"] = self.spec.check(conversation, turn, files)
             if self.file_status is not None:
                 turn["file_status"] = self.file_status(conversation, turn)
-        meta["substrate"] = self.client.serialize_session_state(session.state)
-
     async def _stream_agent_events(self, context: AgentContext, steps: ToolSteps):
         async with contextlib.aclosing(stream_agent_response(context, steps)) as events:
             pending = None

@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+from agent_substrate import SubstrateSandboxClient
+from agent_substrate.eviction import ActorEvicted
 from examples.document_intelligence.main import digests, run, stage_inputs
 from examples.document_intelligence.agent.agent import AGENT_ROOT
 from examples.document_intelligence.agent.lib.verify import OUTPUTS, verify_artifacts
@@ -37,6 +39,30 @@ async def test_skill_drives_real_sdk_tools_and_artifacts(server, tmp_path):
                      "exec_command", "exec_command", "exec_command"]
     assert (server.root / ".agents/document-analysis/SKILL.md").exists()
     assert [event[0] for event in server.control.events][-1] == "delete"
+
+
+async def test_retained_workflow_saves_eviction_state(server, tmp_path, monkeypatch):
+    args = argparse.Namespace(atespace="test-space", template="document-intelligence", model="scripted",
+                              keep_actor=True, output_dir=tmp_path)
+    original_suspend = server.control.suspend
+
+    async def notice(_client, _session):
+        return 83
+
+    async def suspend(atespace, name):
+        state_file, = tmp_path.glob("*/session.json")
+        assert json.loads(state_file.read_text())["pending_eviction_id"] == 83
+        await original_suspend(atespace, name)
+
+    monkeypatch.setattr(SubstrateSandboxClient, "poll_eviction", notice)
+    monkeypatch.setattr(server.control, "suspend", suspend)
+    with pytest.raises(ActorEvicted):
+        await run(args, server)
+    state_file, = tmp_path.glob("*/session.json")
+    state = json.loads(state_file.read_text())
+    assert state["pending_eviction_id"] == 0
+    assert state["handled_eviction_id"] == 83
+    assert [event[0] for event in server.control.events][-1] == "suspend"
 
 
 @pytest.fixture

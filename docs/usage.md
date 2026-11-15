@@ -70,10 +70,46 @@ The example belongs inside an async function. Set the host API key and a model a
 
 For a disposable run, pass `SandboxRunConfig(client=client, options=options)`
 with `options = SubstrateSandboxOptions(template="sandbox-template")`. The SDK
-creates and deletes the Actor. The provider accepts the pinned SDK's default
-snapshot configuration and `NoopSnapshotSpec` in this mode. Substrate persists
-retained Actors through its own snapshot storage. Use an application-owned
-`session=` for durable cross-turn resume. [SDK lifecycle](https://openai.github.io/openai-agents-python/sandbox/guide/#sandbox-lifecycle)
+creates and deletes the Actor, including when it returns an approval interruption.
+The provider accepts the pinned SDK's default snapshot configuration and
+`NoopSnapshotSpec` in this mode. Use an application-owned `session=` for approval
+interruptions and durable cross-turn resume. [SDK lifecycle](https://openai.github.io/openai-agents-python/sandbox/guide/#sandbox-lifecycle)
+
+For a workflow that can pause for approval, close the Actor session when the run
+returns its interruption. Store the SDK run state and Actor state together in
+trusted application storage. After an authorized approval, restore both states.
+This example assumes one pending tool call.
+
+```python
+from agents import RunState
+
+# After an application-owned run returns an interruption and its session closes.
+approval_record = {
+    "run_state": result.to_state().to_json(),
+    "actor_state": client.serialize_session_state(session.state),
+}
+
+# Load the stored record after the application authorizes the approval.
+pending = await RunState.from_json(agent, approval_record["run_state"])
+pending.approve(pending.get_interruptions()[0])
+resumed = await client.resume(client.deserialize_session_state(approval_record["actor_state"]))
+async with resumed:
+    result = await Runner.run(
+        agent, pending, run_config=RunConfig(sandbox=SandboxRunConfig(session=resumed)),
+    )
+```
+
+Persist both states again if the run pauses for another approval. Delete the
+Actor when the workflow no longer needs its workspace.
+
+Applications that must recover an allocation across process loss should use
+`prepare_session_state()`, persist the returned state and template before
+calling `create_from_state()`, and use `recover=True` with the same trusted,
+provider-generated Actor identity after an uncertain create. A direct
+`client.create()` attempts to remove a generated Actor when the create reply is
+lost. If it cannot confirm cleanup, `ActorCreateUncertainError.actor_ref`
+identifies the Actor to reconcile. If the create reply for an explicitly chosen
+name is lost, that error leaves ownership and cleanup with the caller.
 
 That client runs `kubectl ate` with your kubeconfig and reaches each Actor through `kubectl ate proxy`, the path for a harness outside the cluster. A harness in a pod calls Substrate as its own ServiceAccount instead, with the credentials [`substrate_volume()`](../deploy/kubernetes/base/README.md) mounts:
 
@@ -114,7 +150,11 @@ Use `async with session, eviction_watch(client, session):` with
 `eviction_watch` imported from `agent_substrate.eviction` for an
 application-owned run on an eviction-aware image. If the worker reports a
 drain, `ActorEvicted` interrupts the run and the outer session scope requests
-synchronous suspend. Retain the Actor if the application will resume it.
+synchronous suspend. When retaining an Actor, pass an async `persist` callback
+that stores `client.serialize_session_state(session.state)`. The watcher calls
+it before suspend. Store the updated state again after session close, including
+after an interrupted turn. Resuming from a saved pending notice first retries
+the synchronous checkpoint before reopening the Actor.
 Rebuild and deploy the example sandbox image to enable eviction handling for
 new conversations. Existing Actors keep their original image and template.
 [Local deployment commands](local-kubernetes.md) · [Substrate eviction guidance](https://ate.dev/docs/reference/api-guide/#eviction)

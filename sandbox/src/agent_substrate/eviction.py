@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 import logging
 from typing import TYPE_CHECKING
@@ -28,18 +28,20 @@ class ActorEvicted(RuntimeError):
 
 @asynccontextmanager
 async def eviction_watch(
-    client: SubstrateSandboxClient, session: SandboxSession, *, interval_s: float = 1
+    client: SubstrateSandboxClient, session: SandboxSession, *, interval_s: float = 1,
+    persist: Callable[[], Awaitable[None]] | None = None,
 ) -> AsyncIterator[None]:
-    """Interrupt the active turn so its outer session scope can suspend the Actor."""
+    """Interrupt the turn and persist its notice before the outer scope suspends the Actor."""
     owner = asyncio.current_task()
     if owner is None:
         raise RuntimeError("The eviction watcher requires an asyncio task")
     initial_cancellations = owner.cancelling()
     stop = asyncio.Event()
     evicted = False
+    noticed = False
 
     async def monitor():
-        nonlocal evicted
+        nonlocal evicted, noticed
         while not stop.is_set():
             try:
                 notice = await client.poll_eviction(session)
@@ -48,15 +50,11 @@ async def eviction_watch(
             else:
                 if notice is None:
                     return
-                if notice:
+                if notice and client.note_eviction(session, notice):
+                    noticed = True
                     if not stop.is_set():
                         evicted = True
                         owner.cancel()
-                    try:
-                        # The outer scope waits for this before synchronous suspend.
-                        await client.acknowledge_eviction(session, notice)
-                    except ProcessTransportError as error:
-                        logger.debug("Actor eviction acknowledgement unavailable: %s", error)
                     return
             try:
                 await asyncio.wait_for(stop.wait(), interval_s)
@@ -64,6 +62,12 @@ async def eviction_watch(
                 pass
 
     monitor_task = asyncio.create_task(monitor())
+
+    async def finish() -> None:
+        await monitor_task
+        if noticed and persist is not None:
+            await persist()
+
     try:
         yield
     except asyncio.CancelledError:
@@ -74,12 +78,13 @@ async def eviction_watch(
         stop.set()
         # A routed poll can wake a suspended Actor. Let any in-flight HTTP
         # request finish before the outer session scope starts suspending.
+        completion = asyncio.create_task(finish())
         cancelled = False
-        while not monitor_task.done():
+        while not completion.done():
             try:
-                await asyncio.shield(monitor_task)
+                await asyncio.shield(completion)
             except asyncio.CancelledError:
                 cancelled = True
         if cancelled:
             raise asyncio.CancelledError
-        monitor_task.result()
+        completion.result()

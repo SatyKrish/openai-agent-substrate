@@ -11,6 +11,7 @@ loopback only, refuses cross-site requests, and serves only files it recorded it
 from __future__ import annotations
 
 import asyncio
+from contextlib import aclosing
 import html
 import logging
 import re
@@ -27,9 +28,10 @@ from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
+from starlette.types import Receive, Scope, Send
 
 from . import traces
-from .chat import HarnessChatServer
+from .chat import HarnessChatServer, error_frame
 from .spec import MIB
 from .store import ThreadBusyError
 from .uploads import UploadRejected
@@ -38,6 +40,61 @@ logger = logging.getLogger(__name__)
 SHELL = Path(__file__).resolve().parent / "static"
 _THREAD_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
 FILE_HEADERS = {"X-Content-Type-Options": "nosniff", "Content-Security-Policy": "sandbox", "Cache-Control": "no-store"}
+_STREAM_QUEUE_EVENTS = 128
+_STREAM_QUEUE_BYTES = 4 * MIB
+
+
+class _ChatKitResponse(StreamingResponse):
+    """Run turn cleanup in the task consuming ChatKit, independently of ASGI writes."""
+
+    def __init__(self, result: StreamingResult):
+        self._source = result.json_events
+        self._queue: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=_STREAM_QUEUE_EVENTS + 1)
+        self._buffered_bytes = 0
+        self._overflowed = False
+        super().__init__(self._events(), media_type="text/event-stream")
+
+    async def _publish(self) -> None:
+        async with aclosing(self._source):
+            async for event in self._source:
+                if self._overflowed:
+                    continue
+                if self._queue.qsize() >= _STREAM_QUEUE_EVENTS or self._buffered_bytes + len(event) > _STREAM_QUEUE_BYTES:
+                    self._overflowed = True
+                    # This task never waits outside ChatKit on a full queue. Cancellation is
+                    # delivered inside the source the next time it awaits.
+                    self._producer.cancel()
+                    continue
+                self._buffered_bytes += len(event)
+                self._queue.put_nowait(event)
+
+    async def _events(self):
+        while (event := await self._queue.get()) is not None:
+            self._buffered_bytes -= len(event)
+            yield event
+        if self._overflowed:
+            yield error_frame("The response stream fell behind. Reload the conversation to see its saved state.", retry=False)
+        else:
+            self._producer.result()
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        self._producer = asyncio.create_task(self._publish())
+        self._producer.add_done_callback(lambda _: self._queue.put_nowait(None))
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            if not self._producer.done() and not self._producer.cancelling():
+                self._producer.cancel()
+            # Join cleanup even if the HTTP task receives another cancellation.
+            cleanup = asyncio.gather(self._producer, return_exceptions=True)
+            interrupted = False
+            while not cleanup.done():
+                try:
+                    await asyncio.shield(cleanup)
+                except asyncio.CancelledError:
+                    interrupted = True
+            if interrupted:
+                raise asyncio.CancelledError
 
 
 class _Revalidated(StaticFiles):
@@ -81,7 +138,7 @@ def chat_routes(server: HarnessChatServer, *, config: dict, port: int, jaeger_ur
         except UploadRejected as error:
             return JSONResponse({"error": str(error)}, status_code=400)
         if isinstance(result, StreamingResult):
-            return StreamingResponse(result, media_type="text/event-stream")
+            return _ChatKitResponse(result)
         return Response(content=result.json, media_type="application/json")
 
     async def upload(request: Request):

@@ -30,6 +30,10 @@ type roundTrip func(*http.Request) (*http.Response, error)
 
 func (f roundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
+type readBody func([]byte) (int, error)
+
+func (f readBody) Read(dst []byte) (int, error) { return f(dst) }
+
 func grantsFile(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "grants.json")
@@ -100,7 +104,7 @@ func TestRejectsOutOfScopeRequests(t *testing.T) {
 	for _, tc := range []struct {
 		path string
 		size int
-	}{{processPath, maxRequest + 1}, {evictionPath, evictionLimit + 1}} {
+	}{{processPath, maxRequest + 1}, {evictionPath, 1}} {
 		resp = httptest.NewRecorder()
 		g.ServeHTTP(resp, request(t, http.MethodPost, tc.path, "demo/one", alice, strings.NewReader(strings.Repeat("x", tc.size))))
 		if resp.Code != http.StatusRequestEntityTooLarge {
@@ -119,6 +123,28 @@ func TestRejectsOutOfScopeRequests(t *testing.T) {
 	g.ServeHTTP(resp, request(t, http.MethodPost, processPath, "demo/one", alice, nil))
 	if resp.Code != http.StatusServiceUnavailable {
 		t.Fatalf("broken policy: %d", resp.Code)
+	}
+}
+
+func TestLoadsCurrentGrantsAfterBufferingRequest(t *testing.T) {
+	policy := grantsFile(t)
+	writeFile(t, policy, []byte(`{}`))
+	command := `{"command":["true"]}`
+	body := readBody(func(dst []byte) (int, error) {
+		writeFile(t, policy, []byte(`{"`+alice+`":["demo/one"]}`))
+		return copy(dst, command), io.EOF
+	})
+	g := gateway{upstream: *uri(t, "https://router.example"), grantFile: policy,
+		client: &http.Client{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
+			if r.Header.Get(actorHeader) != "demo/one" {
+				t.Fatal("gateway forwarded a different Actor")
+			}
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{}`))}, nil
+		})}}
+	resp := httptest.NewRecorder()
+	g.ServeHTTP(resp, request(t, http.MethodPost, processPath, "demo/one", alice, body))
+	if resp.Code != http.StatusOK {
+		t.Fatalf("gateway did not use grants current at forwarding: got %d", resp.Code)
 	}
 }
 
@@ -220,13 +246,10 @@ func TestMutualTLSForwardingUsesSeparateIdentities(t *testing.T) {
 			if err != nil {
 				t.Error(err)
 			}
-			if len(body) == 0 {
-				io.WriteString(w, `{"eviction_id":17}`)
-			} else if string(body) == `{"acknowledge":17}` {
-				w.WriteHeader(http.StatusNoContent)
-			} else {
-				t.Error("gateway changed the acknowledgement body")
+			if len(body) != 0 {
+				t.Error("eviction poll must have an empty body")
 			}
+			io.WriteString(w, `{"eviction_id":17}`)
 		default:
 			t.Errorf("unexpected path %s", r.URL.Path)
 		}
@@ -249,7 +272,6 @@ func TestMutualTLSForwardingUsesSeparateIdentities(t *testing.T) {
 		{processPath, `{"command":["true"]}`, http.StatusOK},
 		{processPath, `{"command":["redirect"]}`, http.StatusBadGateway},
 		{evictionPath, "", http.StatusOK},
-		{evictionPath, `{"acknowledge":17}`, http.StatusNoContent},
 	} {
 		r, err := http.NewRequest(http.MethodPost, gate.URL+tc.path, strings.NewReader(tc.body))
 		if err != nil {
@@ -278,7 +300,7 @@ func TestMutualTLSForwardingUsesSeparateIdentities(t *testing.T) {
 		resp.Body.Close()
 		t.Fatal("gateway accepted a client certificate from the upstream trust domain")
 	}
-	if got := forwarded.Load(); got != 4 {
-		t.Fatalf("router received %d calls, want 4", got)
+	if got := forwarded.Load(); got != 3 {
+		t.Fatalf("router received %d calls, want 3", got)
 	}
 }

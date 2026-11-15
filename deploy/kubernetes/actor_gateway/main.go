@@ -24,15 +24,15 @@ import (
 )
 
 const (
-	actorHeader     = "Ate-Target-Actor"
-	processPath     = "/process"
-	evictionPath    = "/_substrate/eviction"
-	maxRequest      = 2 << 20
-	maxResponse     = 4 << 20
-	evictionLimit   = 64
-	maxPolicy       = 1 << 20
-	commandDeadline = 6 * time.Minute
-	evictionTimeout = 3 * time.Second
+	actorHeader         = "Ate-Target-Actor"
+	processPath         = "/process"
+	evictionPath        = "/_substrate/eviction"
+	maxRequest          = 2 << 20
+	maxResponse         = 4 << 20
+	maxEvictionResponse = 64
+	maxPolicy           = 1 << 20
+	commandDeadline     = 6 * time.Minute
+	evictionTimeout     = 3 * time.Second
 )
 
 var actorRef = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?/[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
@@ -103,18 +103,9 @@ func (g gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	actor := actors[0]
-	allowed, err := g.allowsActor(identity, actor)
-	if err != nil {
-		http.Error(w, "Actor authorization unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	if !allowed {
-		http.Error(w, "Actor access denied", http.StatusForbidden)
-		return
-	}
 	requestLimit := int64(maxRequest)
 	if path == evictionPath {
-		requestLimit = evictionLimit
+		requestLimit = 0
 	} else {
 		mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 		if err != nil || mediaType != "application/json" {
@@ -131,6 +122,16 @@ func (g gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "request body exceeds limit", http.StatusRequestEntityTooLarge)
 		return
 	}
+	// Check the current grant after the upload, immediately before routing.
+	allowed, err := g.allowsActor(identity, actor)
+	if err != nil {
+		http.Error(w, "Actor authorization unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	if !allowed {
+		http.Error(w, "Actor access denied", http.StatusForbidden)
+		return
+	}
 	g.forward(w, r, path, actor, body)
 }
 
@@ -139,7 +140,7 @@ func (g gateway) forward(w http.ResponseWriter, r *http.Request, path, actor str
 	responseLimit := int64(maxResponse)
 	if path == evictionPath {
 		deadline = evictionTimeout
-		responseLimit = evictionLimit
+		responseLimit = maxEvictionResponse
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), deadline)
 	defer cancel()
@@ -162,10 +163,6 @@ func (g gateway) forward(w http.ResponseWriter, r *http.Request, path, actor str
 		return
 	}
 	defer response.Body.Close()
-	if path == evictionPath && response.StatusCode == http.StatusNoContent {
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
 	if response.StatusCode != http.StatusOK {
 		code := response.StatusCode
 		if code < 400 || code > 599 {

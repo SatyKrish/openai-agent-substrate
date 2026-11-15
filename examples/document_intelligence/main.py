@@ -47,6 +47,16 @@ async def _run(args, local, analysis_id):
     manifest = build_manifest(inputs, analysis_id, str(local.root) if local else ACTOR_WORKSPACE)
     client = build_client(args, local)
     session = await client.create(manifest=manifest, options=SubstrateSandboxOptions(template=args.template or "document-intelligence"))
+    destination = args.output_dir / analysis_id
+
+    async def save_retained_state():
+        destination.mkdir(parents=True, exist_ok=True)
+        state_file = destination / "session.json"
+        pending_file = state_file.with_suffix(".tmp")
+        state = client.serialize_session_state(session.state)
+        pending_file.write_text(json.dumps(state, indent=2) + "\n")
+        pending_file.replace(state_file)
+
     try:
         model = args.model
         if model == "scripted":
@@ -54,7 +64,8 @@ async def _run(args, local, analysis_id):
             from .evals.scripted import DocumentWorkflowModel
             model = DocumentWorkflowModel(sys.executable if local else "python3")
         agent = build_agent(manifest, model)
-        async with session, eviction_watch(client, session):
+        persist_eviction = save_retained_state if args.keep_actor else None
+        async with session, eviction_watch(client, session, persist=persist_eviction):
             boundary = await session.exec('test -z "${OPENAI_API_KEY:-}" && test ! -d /var/run/agent-config')
             if not boundary.ok():
                 raise RuntimeError("The document sandbox must not contain the trusted harness API key or Secret mount")
@@ -78,22 +89,21 @@ async def _run(args, local, analysis_id):
             with await session.read(Path("work/analyze.py")) as handle:
                 generated_code = handle.read()
         response_ids = [response.response_id for response in result.raw_responses if response.response_id]
-        state = client.serialize_session_state(session.state) if args.keep_actor else None
         actor = f"{session.state.atespace}/{session.state.actor_name}"
     finally:
         if not args.keep_actor:
             await client.delete(session)
         else:
-            await session.aclose()
-    destination = args.output_dir / analysis_id
-    destination.mkdir(parents=True, exist_ok=False)
+            try:
+                await session.aclose()
+            finally:
+                await save_retained_state()
+    destination.mkdir(parents=True, exist_ok=args.keep_actor)
     for name, data in artifacts.items():
         (destination / name).write_bytes(data)
     (destination / "analysis.py").write_bytes(generated_code)
     # Only this synthetic task's tool inputs/outputs are saved, never system instructions.
     (destination / "tool-trace.json").write_text(json.dumps(trace, indent=2) + "\n")
-    if state:
-        (destination / "session.json").write_text(json.dumps(state, indent=2) + "\n")
     summary = dict(analysis_id=analysis_id,
         backend="local protocol simulator (host execution; no isolation)" if local else "Agent Substrate on Kubernetes",
         model=args.model, model_inference=args.model != "scripted", skill="document-analysis",

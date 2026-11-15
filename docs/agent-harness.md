@@ -83,11 +83,9 @@ the SDK does not cover:
 
 ## What the harness does on every turn
 
-1. **Lock, then reload.** Turns in one conversation never overlap: they share a
-   workspace. ChatKit loads the thread before the harness takes the
-   conversation's lock, so the harness reloads the thread after taking it.
-   Without that, a second message sent during a running turn overwrote the
-   first turn's record and history.
+1. **Claim the conversation.** The harness takes the same host file lock for
+   turns, retries, and deletion. It claims a turn before ChatKit loads or writes
+   its items and holds the lock through ChatKit's final save.
 2. **Create or resume the sandbox, waiting for capacity.** The harness records
    the intended Actor before creation and saves workspace initialization
    separately. If a creation response is lost, it can recover the same Actor.
@@ -100,8 +98,9 @@ the SDK does not cover:
 4. **Stage uploads** from the host's retained copies, then run the agent's
    processors (PDF text and page images are produced inside the sandbox).
 5. **Run the agent loop** with the conversation's SDK session and this turn's
-   harness tools. Tool calls stream to ChatKit as workflow steps. If the turn
-   fails, the items it added to the session are removed, so a retry starts clean.
+   harness tools. Tool calls stream to ChatKit as workflow steps. The harness
+   records how much SDK history existed before the turn so it can discard an
+   incomplete turn after failure or restart.
 6. **Record evidence.** A harness tool's output is saved on the host and written
    into the workspace under `evidence/`, so code in the sandbox can analyze it.
    Checks compare against the host copy, which the sandbox cannot edit.
@@ -109,8 +108,9 @@ the SDK does not cover:
    the host; the agent's check runs on them and on the host copies.
 8. **Suspend** the sandbox and save its session state with the thread. During a
    turn, the example sandbox images report worker eviction to the harness. The
-   harness stops the turn, acknowledges the notice and suspends the Actor for
-   the next turn. [Substrate eviction guidance](https://ate.dev/docs/reference/api-guide/#eviction)
+   harness stops the turn independently of the browser connection and records
+   the pending notice before requesting a synchronous checkpoint. It saves the
+   handled notice with the Actor state after suspend. [Substrate eviction guidance](https://ate.dev/docs/reference/api-guide/#eviction)
 
 ## The SRE agent
 

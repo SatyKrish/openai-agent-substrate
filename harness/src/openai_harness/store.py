@@ -20,6 +20,7 @@ from pydantic import TypeAdapter
 
 _ITEM = TypeAdapter(ThreadItem)
 _ATTACHMENT = TypeAdapter(Attachment)
+_NEW_THREAD_ID = object()
 
 
 class ThreadBusyError(RuntimeError):
@@ -72,6 +73,14 @@ class SQLiteStore(Store[dict]):
                 return False
         except ThreadBusyError:
             return True
+
+    def reserve_thread_id(self, context: dict) -> tuple[str, dict]:
+        """Choose the ID before publishing the new thread so it can be claimed first."""
+        thread_id = self.generate_thread_id(context)
+        return thread_id, {**context, _NEW_THREAD_ID: thread_id}
+
+    def generate_thread_id(self, context: dict) -> str:
+        return context.get(_NEW_THREAD_ID) or super().generate_thread_id(context)
 
     def close(self) -> None:
         with self._lock:
