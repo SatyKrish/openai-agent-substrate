@@ -5,6 +5,65 @@
 
 A reference implementation of **Kubernetes as a sandbox compute provider for OpenAI Agents SDK `SandboxAgent`**, built on [Agent Substrate v1.0.0](https://github.com/agent-substrate/substrate/releases/tag/v1.0.0). The SDK harness runs in your trusted application. Shell commands and workspace files run in an Actor scheduled onto a Substrate worker.
 
+## Quick start
+
+Run a scripted SDK agent in a real gVisor-backed Actor and verify that its
+workspace survives suspend and resume. This check is key-free. You need macOS
+with Colima or Linux with Docker running, plus the Docker CLI, Git, Go,
+kubectl, uv, and internet access. [Local Kubernetes requirements](docs/local-kubernetes.md#requirements)
+
+```sh
+git clone https://github.com/SatyKrish/openai-agent-substrate.git
+cd openai-agent-substrate
+./scripts/local-kubernetes.sh setup
+./scripts/local-kubernetes.sh test
+```
+
+Setup provisions a dedicated Kind cluster with a local registry, the pinned
+Substrate release, a sandbox worker pool, and the `kubectl ate` plugin. The test
+creates an Actor, runs commands, resumes the Actor from saved session state,
+and deletes the Actor when finished. Look for `"workspace_survived_resume": true`
+in the output and `artifacts/local/results/verification.json`.
+[Test details](docs/local-kubernetes.md#test) · [Stop or tear down the cluster](docs/local-kubernetes.md#stop-restart-and-tear-down)
+
+If you already have an SDK application or a Substrate cluster, start with the
+provider integration and the existing-cluster deployment guide. If you’re
+building an agent, use Starter as a template.
+[SDK integration](docs/usage.md#integrate-into-your-application) · [Existing-cluster deployment](docs/deployment.md) · [Starter agent](examples/starter/README.md)
+
+## Run Starter with a live model
+
+After cluster setup, copy the example settings file and set `OPENAI_API_KEY`
+and `OPENAI_MODEL` in `.env`. The harness uses the key on your machine.
+
+```sh
+cp .env.example .env
+```
+
+Build the Starter sandbox image, register its ActorTemplate, and start the
+terminal chat.
+
+```sh
+./scripts/local-kubernetes.sh starter-setup
+./scripts/local-kubernetes.sh starter-chat
+```
+
+Ask it to compute something, for example the primes below 200. You see each
+step as it happens: the agent writes and runs Python in its own Actor, saves the
+results in `output/`, and the host checks them after the turn. The chat prints
+where each saved file is on your machine. The first message creates the Actor,
+later messages resume it, and `/quit` leaves the conversation suspended for
+later (`/list` and `/open` find it again). To ask one question and exit, pass
+it as an argument: `./scripts/local-kubernetes.sh starter-chat "What is 2**100?"`.
+
+**Optional: open the UI.** `./scripts/local-kubernetes.sh starter-ui` serves
+the same conversations in a browser at <http://localhost:8002>; the terminal
+chat prints each conversation's link. A side panel opens when a turn writes
+files and shows them, the quotes the host checked, and the turn's trace. A turn
+running in one is refused in the other until it ends. For a
+trace of each turn, run `./scripts/local-kubernetes.sh tracing-setup` first; the
+chat and the UI then link each turn to Jaeger.
+
 ## Harness separate from compute
 
 This project follows the [harness separate from compute pattern](https://developers.openai.com/api/docs/guides/agents/sandboxes) in the official OpenAI Sandbox Agents guide.
@@ -29,61 +88,6 @@ Actor for each turn and requests a synchronous suspend when the turn ends.
 Substrate persists the checkpoint to snapshot storage and frees the worker's
 capacity. The next turn resumes the same Actor and workspace. See the
 [architecture and supported capabilities](docs/architecture.md).
-
-## Quick start
-
-Run an agent in a Kubernetes sandbox on your machine. You need macOS with
-[Colima](https://github.com/abiosoft/colima) or Linux with Docker, plus Git, Go,
-kubectl, [uv](https://docs.astral.sh/uv/), and an OpenAI API key.
-
-**1. Set up a local cluster with Agent Substrate.** The setup script adapts the
-[upstream quickstart](https://ate.dev/docs/get-started/quickstart/) to create a
-dedicated Kind cluster with a local registry, the pinned Substrate release, a
-sandbox worker pool and the `kubectl ate` plugin. See the
-[local Kubernetes guide](docs/local-kubernetes.md).
-
-```sh
-git clone https://github.com/SatyKrish/openai-agent-substrate.git
-cd openai-agent-substrate
-./scripts/local-kubernetes.sh setup
-```
-
-**2. Add your OpenAI settings.** Set `OPENAI_API_KEY` and `OPENAI_MODEL` in `.env`.
-The key stays on your machine with the harness; sandboxes never receive it.
-
-```sh
-cp .env.example .env
-```
-
-**3. Set up the starter agent.** This builds its sandbox image and registers it
-as an ActorTemplate.
-
-```sh
-./scripts/local-kubernetes.sh starter-setup
-```
-
-**4. Chat with it** in your terminal.
-
-```sh
-./scripts/local-kubernetes.sh starter-chat
-```
-
-Ask it to compute something, for example the primes below 200. You see each
-step as it happens: the agent writes and runs Python in its own Actor, saves the
-results in `output/`, and the host checks them after the turn. The chat prints
-where each saved file is on your machine. The first message creates the Actor,
-later messages resume it, and `/quit` leaves the conversation suspended for
-later (`/list` and `/open` find it again). To ask one question and exit, pass
-it as an argument: `./scripts/local-kubernetes.sh starter-chat "What is 2**100?"`.
-When you're done, `./scripts/local-kubernetes.sh teardown` deletes the cluster.
-
-**Optional: open the UI.** `./scripts/local-kubernetes.sh starter-ui` serves
-the same conversations in a browser at <http://localhost:8002>; the terminal
-chat prints each conversation's link. A side panel opens when a turn writes
-files and shows them, the quotes the host checked, and the turn's trace. A turn
-running in one is refused in the other until it ends. For a
-trace of each turn, run `./scripts/local-kubernetes.sh tracing-setup` first; the
-chat and the UI then link each turn to Jaeger.
 
 ## Build your own agent
 
@@ -130,8 +134,7 @@ simulator with no sandbox isolation.**
 
 ```sh
 uv sync --locked
-uv run python -m examples.provider_check --backend local
-./scripts/local-kubernetes.sh test   # the same check, and the provider tests, on the Kind cluster
+uv run --locked python -m examples.provider_check --backend local
 ```
 
 ## Verification

@@ -6,7 +6,8 @@ saves results in `output/`. Copy this folder to build your own agent.
 
 ## Run it
 
-After the [quick start](../../README.md#quick-start)'s cluster setup and `.env`:
+Set up the cluster and configure `.env` before starting the agent.
+[Run Starter with a live model](../../README.md#run-starter-with-a-live-model)
 
 ```sh
 ./scripts/local-kubernetes.sh starter-setup   # sandbox image and ActorTemplate
