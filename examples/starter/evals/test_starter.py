@@ -18,7 +18,7 @@ from examples.starter.ui.app import create_app  # noqa: E402
 from examples.starter.card import check_rows, file_status  # noqa: E402
 from openai_harness.chat import HarnessChatServer  # noqa: E402
 from openai_harness.store import SQLiteStore  # noqa: E402
-from openai_harness.testing import Calls, events, message, shell  # noqa: E402
+from testing.harness import Calls, events, message, shell  # noqa: E402
 from agent_substrate import SubstrateSandboxClient  # noqa: E402
 
 PRIMES = "import csv; w = csv.writer(open('output/primes.csv', 'w')); w.writerow(['prime']); " \

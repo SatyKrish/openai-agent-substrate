@@ -143,8 +143,8 @@ harness/                      Harness package openai-harness: src/openai_harness
   capacity.py                 Free sandbox slots for the header
   terminal.py                 Terminal chat on the same server and store as the UIs
   settings.py                 OPENAI_* settings for launchers
-  testing.py                  Scripted model and ChatKit helpers for agents' tests
 harness/tests/                Lock and reload, capacity waits, history, evidence, the UI's routes
+testing/harness.py            Scripted model and ChatKit helpers for agents' tests (repository only)
 deploy/kubernetes/sandbox.py  Sandbox profile to ActorTemplate (deploy time)
 examples/starter/             The golden path: smallest complete agent, terminal chat and optional UI (port 8002)
 examples/document_intelligence/

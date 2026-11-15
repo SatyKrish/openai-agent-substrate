@@ -4,13 +4,18 @@
 
 import asyncio
 from importlib.metadata import PackageNotFoundError, distribution
+from pathlib import Path
 import sys
 
 from agents import set_tracing_disabled
 from agents.sandbox import Manifest
 
 from agent_substrate import SubstrateSandboxClient, SubstrateSandboxOptions
-from agent_substrate.testing.server import LocalExecutionServer
+
+# The local stand-in is repository code, not in the wheel. The provider above was
+# already imported from the wheel, and the checkout has no agent_substrate at its root.
+sys.path.append(str(Path(__file__).resolve().parents[3]))
+from testing.server import LocalExecutionServer  # noqa: E402
 
 
 async def main():

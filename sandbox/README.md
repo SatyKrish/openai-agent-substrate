@@ -61,9 +61,9 @@ Substrate's API and router directly as its own ServiceAccount; see
 [Usage](https://github.com/SatyKrish/openai-agent-substrate/blob/main/docs/usage.md).
 
 The package contains the provider (`SubstrateSandboxClient`, Actor lifecycle
-through `kubectl ate`, the authenticated Actor proxy, direct router mutual TLS, tracing) and testing
-helpers: a scripted model and a local protocol simulator. It is pinned to
-`openai-agents==0.24.0`.
+through `kubectl ate`, the authenticated Actor proxy, direct router mutual TLS, tracing).
+Its test doubles, a scripted model and a local protocol simulator, stay in the
+repository. It is pinned to `openai-agents==0.24.0`.
 
 The [repository](https://github.com/SatyKrish/openai-agent-substrate) also holds
 a shared agent harness, three agents built on it (including a starter to copy), local Kind setup and the

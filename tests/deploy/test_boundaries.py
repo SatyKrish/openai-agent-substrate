@@ -42,8 +42,17 @@ def test_kubernetes_base_is_independent_of_applications_and_sdk():
         assert not {"examples", "scripts", "agents", "agent_substrate"}.intersection(imports(path)), path
 
 
+def test_published_packages_hold_no_test_helpers():
+    # testing/ is repository code for tests and local runs; it never ships.
+    for path in [*LIBRARY.rglob("*.py"), *HARNESS.rglob("*.py")]:
+        module_parts = path.relative_to(ROOT).with_suffix("").parts
+        assert "testing" not in {*imports(path), *module_parts}, path
+    for path in (ROOT / "testing").rglob("*.py"):
+        assert not {"examples", "deploy", "scripts"}.intersection(imports(path)), path
+
+
 def test_repository_python_modules_do_not_import_shell_scripts():
-    for directory in ("sandbox", "harness", "deploy", "examples", "tests"):
+    for directory in ("sandbox", "harness", "deploy", "examples", "testing", "tests"):
         for path in (ROOT / directory).rglob("*.py"):
             assert "scripts" not in set(imports(path)), path
 

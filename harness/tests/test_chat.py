@@ -18,7 +18,7 @@ from chatkit.types import ThreadMetadata  # noqa: E402
 from openai_harness.chat import HarnessChatServer  # noqa: E402
 from openai_harness.spec import AgentSpec, Conversation, TurnContext  # noqa: E402
 from openai_harness.store import SQLiteStore  # noqa: E402
-from openai_harness.testing import Calls, events, message, shell, titles  # noqa: E402
+from testing.harness import Calls, events, message, shell, titles  # noqa: E402
 from agent_substrate import ActorCapacityError, SubstrateSandboxClient, SubstrateSandboxOptions  # noqa: E402
 
 

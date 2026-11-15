@@ -17,7 +17,6 @@ from agents.run import RunConfig
 from agents.sandbox import SandboxRunConfig
 
 from agent_substrate import SubstrateSandboxOptions
-from agent_substrate.testing.server import LocalExecutionServer
 from agent_substrate.tracing import configure_tracing, current_trace_ids, operation, tracing_enabled
 
 from .agent.agent import build_agent
@@ -131,11 +130,19 @@ def parse_args(argv=None):
     return args
 
 
+def local_backend():
+    # Repository code that runs commands on this host. The harness image's Job runs
+    # this module but never this backend, so it does not ship testing/.
+    from testing.server import LocalExecutionServer
+
+    return LocalExecutionServer()
+
+
 def main():
     args = parse_args()
     configure_tracing(operation_names=TRACE_OPERATIONS)
     try:
-        with LocalExecutionServer() if args.backend == "local" else nullcontext(None) as local:
+        with local_backend() if args.backend == "local" else nullcontext(None) as local:
             print(json.dumps(asyncio.run(run(args, local)), indent=2))
     finally:
         # The workflow context (including Actor cleanup) has closed before export.

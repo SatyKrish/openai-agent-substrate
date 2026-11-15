@@ -9,7 +9,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 
 from agent_substrate import tracing
 
-from agent_substrate.testing.server import LocalExecutionServer
+from testing.server import LocalExecutionServer
 from agent_substrate.provider import SubstrateSandboxClient
 
 

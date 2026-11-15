@@ -17,7 +17,7 @@ from agents.sandbox.manifest import Environment
 from agents.sandbox.snapshot import NoopSnapshot
 
 from agent_substrate.provider import MAX_FILE_BYTES, SubstrateSandboxClient, SubstrateSandboxOptions
-from agent_substrate.testing.model import ScriptedModel
+from testing.model import ScriptedModel
 
 
 def options():
@@ -190,7 +190,7 @@ async def test_portable_snapshots_are_explicitly_unsupported(client, server):
 
 
 async def test_authenticated_proxy_is_owned_per_session_and_reopened_on_resume(server):
-    from agent_substrate.testing.server import LocalActorControl
+    from testing.server import LocalActorControl
 
     class Proxy:
         url = server.url

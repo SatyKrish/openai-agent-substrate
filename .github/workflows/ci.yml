@@ -41,7 +41,7 @@ jobs:
       - name: Install poppler for the PDF upload test
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends poppler-utils
       - name: Lint Python sources
-        run: uv run --locked ruff check sandbox harness scripts deploy examples tests conftest.py
+        run: uv run --locked ruff check sandbox harness scripts deploy examples testing tests conftest.py
       - name: Type-check transport, proxy, and lifecycle contracts
         run: uv run --locked mypy
       - name: Run unit and integration tests
