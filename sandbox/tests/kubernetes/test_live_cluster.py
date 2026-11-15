@@ -16,7 +16,7 @@ from agents.sandbox.capabilities import Filesystem, Shell
 from agents.sandbox.entries import File
 
 from agent_substrate import KubectlActorControl, SubstrateSandboxClient, SubstrateSandboxOptions
-from agent_substrate.testing.model import ScriptedModel
+from testing.model import ScriptedModel
 
 pytestmark = pytest.mark.skipif(
     os.getenv("SUBSTRATE_RUN_KUBERNETES_TESTS") != "1",

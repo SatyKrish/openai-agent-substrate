@@ -22,7 +22,7 @@ The default tests and the provider check use a deterministic model and temporary
 ## Tests and execution checks
 
 ```sh
-uv run ruff check sandbox harness scripts deploy examples tests conftest.py
+uv run ruff check sandbox harness scripts deploy examples testing tests conftest.py
 uv run mypy
 uv run pytest -q
 uv run python -m examples.provider_check --backend local --output-dir artifacts/local
@@ -38,7 +38,7 @@ agent's tests run a turn end to end, check its host check and sandbox profile,
 and confirm its terminal chat and UI share a conversation. The SRE agent's tests
 cover its tool allowlists, the reader's Role, the evidence check, and an
 investigation end to end with a fake cluster. Agents' tests build on
-`openai_harness.testing`.
+`testing.harness`.
 
 For wire compatibility with the actual upstream Go execution server:
 
@@ -111,15 +111,15 @@ uv run --locked twine check dist/*
 The repository is a uv workspace with two packages: the provider library in
 `sandbox/` (`openai-agent-substrate`) and the shared agent harness in `harness/`
 (`openai-harness`). Only the provider is meant for publishing.
-Its wheel and source distribution contain the SDK adapter, tracing, testing
-helpers, and license notices; they install no console command, harness or
-example application. Guides, examples, tests and the upstream execution server
+Its wheel and source distribution contain the SDK adapter, tracing and license
+notices; they install no console command, harness or example application.
+Guides, examples, tests, the `testing/` helpers and the upstream execution server
 stay in the repository. `uv sync --locked` installs the provider for development;
 `--group ui` adds the harness and its ChatKit dependencies.
 
 The package CI also installs the base wheel in a fresh environment and runs
 `sandbox/tests/packaging/core_smoke.py`. It verifies provider import and sandbox execution
-without the OpenTelemetry SDK or OTLP exporter; the upstream SDK may still bring
+without the OpenTelemetry SDK or OTLP exporter, against the checkout's local stand-in; the upstream SDK may still bring
 the OpenTelemetry API through MCP. Development dependencies include the exporter
 for tracing tests and source examples.
 
@@ -144,7 +144,7 @@ workspace root with its environment.
 - Implement backend behavior in `sandbox/src/agent_substrate/`, and agent-runtime behavior in `harness/src/openai_harness/`.
 - Keep domain agent definitions and skills under `examples/DOMAIN/agent/` and their evaluations under sibling `evals/`.
 - Keep runnable session utilities under `examples/provider_check/` and shared Kubernetes setup under `deploy/kubernetes/base/`. `scripts/` contains only the shell bootstrap.
-- Keep provider scripted models and loopback emulation under `sandbox/src/agent_substrate/testing/`, and agent test helpers in `openai_harness.testing`.
+- Keep test doubles in `testing/` at the repository root: the provider's scripted model and local Substrate stand-in (`testing.model`, `testing.server`) and the harness's scripted streaming model and ChatKit helpers (`testing.harness`). Tests and the examples' `--backend local` import them; no published package does, and the boundary tests check that.
 - Put pure lifecycle tests in `sandbox/tests/unit/` and HTTP/SDK contract tests in `sandbox/tests/integration/`; harness tests go in `harness/tests/`, and repository-wide checks (deployment resources, layer boundaries) in `tests/`.
 - Keep unsupported capabilities explicit and preserve saved-session compatibility.
 - Update [architecture and limits](architecture.md) when behavior changes.

@@ -32,4 +32,5 @@ uv run --locked python -m examples.provider_check.resume \
 Pass `--delete` to the resume utility to delete the retained Actor after use.
 The library wheel ships neither this example nor the former
 `openai-agent-substrate` demo command. Downstream applications import the provider
-from `agent_substrate` and may reuse its `testing/` helpers.
+from `agent_substrate`. The scripted model and local stand-in this check uses
+are in the repository's [`testing/`](../../testing/) folder, not in the wheel.

@@ -24,7 +24,6 @@ the [design](../docs/agent-harness.md) lists what it needs first.
 | `capacity.py` | Free sandbox slots for a template, from `kubectl ate get worker` |
 | `terminal.py` | `TerminalChat`: a terminal front end on the same server and store as an agent's UI |
 | `settings.py` | `OPENAI_*` settings for launchers |
-| `testing.py` | A scripted streaming model and ChatKit request helpers for agents' tests |
 
 An agent's sandbox image and size are deploy-time concerns:
 `deploy/kubernetes/sandbox.py` builds and registers them.
@@ -119,8 +118,8 @@ SPEC = AgentSpec(
 Then give the agent a sandbox profile and a UI: a Dockerfile registered through
 `deploy/kubernetes/sandbox.py`, a launcher that builds `HarnessChatServer(SPEC, ...)`
 with its `card` and `file_status`, and a `ui/app.py` with its `UI` settings for the
-shared page. Its tests can use
-`openai_harness.testing`: a scripted streaming model and ChatKit request helpers. See [Document Intelligence](../examples/document_intelligence/README.md) and the
+shared page. Its tests can use the repository's
+[`testing.harness`](../testing/harness.py): a scripted streaming model and ChatKit request helpers. See [Document Intelligence](../examples/document_intelligence/README.md) and the
 [SRE agent](../examples/sre/README.md).
 
 ## Tests

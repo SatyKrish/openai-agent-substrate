@@ -17,10 +17,10 @@ from agents.sandbox.capabilities import Filesystem, Shell
 from agents.sandbox.entries import Dir, File
 
 from agent_substrate.lifecycle import KubectlActorControl
-from agent_substrate.testing.server import LocalExecutionServer
 from agent_substrate.provider import SubstrateSandboxClient, SubstrateSandboxOptions
-from agent_substrate.testing.model import ScriptedModel
 from agent_substrate.tracing import configure_tracing, current_trace_ids, tracing_enabled
+from testing.model import ScriptedModel
+from testing.server import LocalExecutionServer
 
 _FIRST_COMMAND = (
     "mkdir -p output && cat input.txt > output/report.txt && "
