@@ -1,32 +1,82 @@
 # Architecture
 
-This project follows the **harness separate from compute** pattern in the [OpenAI Sandbox Agents guide](https://developers.openai.com/api/docs/guides/agents/sandboxes). The Agents SDK harness runs in the trusted application. Kubernetes provides sandbox compute through Agent Substrate, which manages the Actors that execute shell commands and own the workspace. `SubstrateSandboxClient` adapts this Kubernetes-backed execution environment to the SDK sandbox interface. The agents in this repository run on a [shared agent harness](agent-harness.md) built on that client: it runs each agent's loop and gives each conversation its own Actor.
+The Agents SDK harness runs the model and agent loop in the trusted application. `SubstrateSandboxClient` adapts Agent Substrate v1.0.0 to the SDK sandbox interface, and the shared harness gives each conversation an Actor for command execution and workspace files. [OpenAI Sandbox Agents guide](https://developers.openai.com/api/docs/guides/agents/sandboxes) · [Shared agent harness](agent-harness.md) · [Agent Substrate v1.0.0](https://github.com/agent-substrate/substrate/releases/tag/v1.0.0)
 
 ![Harness separate from compute: the agent harness accesses trusted services while sandbox compute executes commands against a filesystem.](assets/harness-separate-from-compute.png)
 
 *Diagram from the [official OpenAI documentation](https://developers.openai.com/api/docs/guides/agents/sandboxes).*
 
-The following diagram shows Kubernetes as the sandbox compute provider and Agent Substrate as its sandbox runtime and lifecycle layer:
+## Kubernetes and Substrate
+
+Kubernetes manages `WorkerPool` and `SandboxConfig` custom resources. The
+Substrate controller reconciles a `WorkerPool` into Deployments of worker pods.
+The pool selects sandbox classes and resolves their runtime assets from
+`SandboxConfig`. The reference Kind deployment uses gVisor. Substrate also
+supports microVM workers on suitable clusters. [Upstream resource model and sandbox classes](https://ate.dev/docs/concepts/architecture/#api-resource-models)
+
+Substrate's gRPC API manages `ActorTemplate`, `Actor`, `Worker` and
+`ActorAssignment` records in PostgreSQL. An `ActorTemplate` defines the
+workload and selects eligible workers by label. A worker pod can host several
+Actors, and the scheduler can place a resumed Actor on a different worker.
+`atelet`, the node supervisor, asks `ateworker` to start, checkpoint and restore
+the workload. Snapshot files move through object-store plugins that serve the
+node supervisor and control plane. [Upstream system components](https://ate.dev/docs/concepts/architecture/#system-components)
 
 ```mermaid
 flowchart LR
     Harness["Trusted application: Agents SDK harness"] --> Adapter[SubstrateSandboxClient]
-    subgraph Kubernetes["Kubernetes: sandbox compute provider"]
-        Control["Agent Substrate control plane"]
-        Router["Agent Substrate ingress router"]
-        Actor["Sandboxed Actor: execution server and workspace"]
-        Router --> Actor
+    subgraph Kubernetes["Kubernetes cluster"]
+        Pool["WorkerPool and SandboxConfig"]
+        Control["ate-api-server"]
+        Postgres[(PostgreSQL)]
+        Router["atenet-router"]
+        Atelet["atelet node supervisor"]
+        subgraph Worker["Worker pod"]
+            Tunnel["ateworker and atunnel"]
+            Actor["Actor: HTTP execution server and workspace"]
+        end
+        Pool --> Worker
+        Control --> Postgres
+        Router -->|"Resolve assignment or resume"| Control
+        Control -->|"Start, checkpoint, restore"| Atelet
+        Atelet --> Tunnel
+        Router -->|"mTLS CONNECT"| Tunnel
+        Tunnel -->|"HTTP to Actor port 80"| Actor
     end
     Adapter -->|"kubectl ate: Actor lifecycle"| Control
     Adapter -->|"POST /process, outside the cluster"| Proxy["Owned loopback kubectl Actor proxy"]
-    Proxy -->|"Authenticated tunnel"| Router
+    Proxy -->|"Mutual TLS"| Router
     Adapter -->|"POST /process in the cluster: mutual TLS, pod certificate"| Router
     Harness --> API[OpenAI API]
 ```
 
-The adapter sends `POST /process` with `command`, `cwd`, and a Go-duration `timeout`, plus `ate-target-actor: ATESPACE/ACTOR_NAME`. By default it owns a `kubectl ate proxy actor` process per session; the proxy obtains the required Pod Identity certificate and authenticates to Substrate ingress. It listens only on an ephemeral loopback port and is closed when the session closes. This local port has no application authentication: any process able to connect to it can execute commands in that Actor. Loopback binding limits network exposure, but does not isolate users or processes sharing a host or pod network namespace. A harness in the cluster skips the proxy: `router_url` names Substrate's router and `router_tls` presents the pod's own certificate, so there is no local port at all. An explicit `router_url` without TLS selects a trusted external gateway instead. Control-plane credentials and the router endpoint are bound to the client, rather than restored from saved session state. Commands are never automatically retried, including on malformed responses, HTTP errors, or redirects: an ambiguous failure may have already executed a side effect.
+The adapter sends `POST /process` with `command`, `cwd` and a Go-duration
+`timeout`. The `Host` header retains its HTTP authority. `atenet-router` uses
+`ate-target-actor: ATESPACE/ACTOR_NAME` to resolve the assignment and can resume a
+suspended Actor on demand. The router then
+opens an authenticated tunnel to `atunnel` in the assigned worker, which forwards
+the request to the Actor's HTTP server on port 80. The adapter explicitly resumes
+the session before staging files or running tools, so the harness can report
+worker-capacity waits at the start of the turn. [Upstream networking and lifecycle](https://ate.dev/docs/concepts/architecture/#networking-stack-atenet--atunnel)
 
-The upstream demo has no application authorization and buffers command output in memory. Use it only behind a trusted private ingress. Substrate provides the sandbox boundary; this adapter does not add authentication or make the demo production-ready.
+By default each session owns a `kubectl ate proxy actor` process. The proxy
+obtains a Pod Identity certificate and authenticates to the router. It opens an
+ephemeral loopback port and closes it with the session. Processes that can reach
+the loopback port can execute commands in the Actor. In a Kubernetes-hosted
+harness, `router_url` names the router and `router_tls` presents the pod's own
+certificate. An explicit `router_url` can also name a trusted gateway. The
+application supplies the routing endpoint and credentials when it constructs the
+client. The adapter sends each command once because an ambiguous failure can
+already have caused a side effect.
+
+The upstream demo buffers command output in memory. Access control belongs at
+the trusted private ingress because the demo accepts commands from callers that
+reach it.
+
+`atunnel` sends outbound TCP through `atenet-egress` for policy enforcement.
+The reference deployment keeps the default-deny rules for Actor egress and
+credential injection, and the trusted harness makes model calls using its own
+credentials. [Upstream egress policy](https://ate.dev/docs/guides/egress-traffic/) · [Credential injection](https://ate.dev/docs/guides/egress-credential-injection/)
 
 | Supported by this reference implementation | Explicit limit |
 | --- | --- |
@@ -56,82 +106,69 @@ Cancelling the Python coroutine does not guarantee cancellation of an in-flight 
 
 ## Kubernetes-hosted harness
 
-The agents' terminal chats and UIs run their harness on the operator's host. The Document
-Intelligence command-line workflow can also run as a Kubernetes Job, with the
-harness in a pod:
+The terminal chats and UIs run on the operator's host. The Document Intelligence
+Job runs the trusted harness in a Kubernetes pod. The Job receives configuration
+from `envFrom.secretRef` and a read-only Secret volume, and keeps the SDK model
+connection, Kubernetes ServiceAccount and Substrate CLI in the pod. A preflight
+checks the Actor for the harness API key and Secret mount before processing.
+[Document Intelligence Job](../examples/document_intelligence/deploy/README.md)
 
-The trusted application may itself run in a Kubernetes pod. The
-[agent Job](../examples/document_intelligence/deploy/README.md) receives `.env` configuration through
-`envFrom.secretRef` and a read-only Secret volume. The SDK model connection,
-Kubernetes ServiceAccount, and Substrate CLI remain in that harness pod. The
-untrusted execution Actor is a separate workload with its own image and workspace.
-A preflight check confirms the Actor has neither the harness API key nor its
-Secret mount before document processing begins.
-
-The harness pod calls Substrate as its own ServiceAccount, `openai-agent`, the
-way Substrate expects an in-cluster client to:
+The harness pod authenticates as its own ServiceAccount, `openai-agent`.
 
 - Actor lifecycle goes to the API service at `api.ate-system.svc:443` with a
-  projected token for that account. An access policy makes it `editor` of its
-  atespace and nothing more.
+  projected token for that account. A Substrate access policy grants it `editor`
+  on its atespace.
 - Commands go to the router at `atenet-router.ate-system.svc` over mutual TLS
   with the pod's own certificate, which the router admits because the install
   lists the account's SPIFFE ID.
 - Its only Kubernetes permission is reading ClusterTrustBundles, which
   `kubectl ate` uses to verify the API.
 
-It cannot port-forward, request certificates in Substrate's namespace, or mint
-tokens for the shared `ate-client` account, which a default install makes a
-global owner. Earlier versions ran `kubectl ate proxy` in the pod and needed all
-three. The UIs that run on a developer's machine still use the proxy under the
-operator's own kubeconfig. See [deployment](deployment.md#a-harness-in-the-cluster).
+The host UIs use the CLI proxy under the operator's kubeconfig. The router's
+ingress allowlist admits clients across Actors. `ate-api-server` separately
+applies per-atespace OpenFGA policy to lifecycle calls. [Substrate authorization](https://ate.dev/docs/guides/authorization/) · [In-cluster deployment](deployment.md#a-harness-in-the-cluster)
 
 ## Workspace persistence and conversations
 
-The provider maps the SDK workspace root to a directory in the Actor and leaves
-persistence to Substrate: closing a session suspends the Actor, and resuming it
-restores what the template's snapshots hold. A template can make the workspace
-independent of process memory by mounting a per-Actor `durableDir` volume at the
-workspace root. The Document Intelligence template does this at `/workspace`:
-the volume is created with the Actor, kept by every snapshot across suspend and
-resume, and deleted with the Actor. Kubernetes ephemeral volumes are not an
-option here: an ActorTemplate mounts only `durableDir`, external CSI (a preview
-feature) or `systemInfo` volumes, and a worker pod's emptyDir would not follow
-an Actor that resumes on another worker.
+Creating an Actor registers it as suspended with an initial golden snapshot
+from its template. The first explicit start restores that initial state. Later
+starts restore the Actor's own checkpoint. Each example template requests
+`MEMORY` snapshots and mounts a per-Actor `durableDir` at `/workspace`, with the
+SDK workspace root pointing there. The workspace files are included with the
+Actor's snapshots and the volume follows the Actor across workers. Deleting the
+Actor removes its workspace. [Upstream Actor lifecycle](https://ate.dev/docs/concepts/architecture/#actor-lifecycle)
 
-A multi-turn application keeps one Actor per conversation. It creates the Actor
-on the first message, stores the serialized session state with the
-conversation, resumes the Actor for each later message, and deletes it with the
-conversation. Different conversations run concurrently in separate Actors and
-cannot see each other's files; turns within one conversation must not overlap
-(see the table above). Files added later, such as user uploads, go through the
-provider's file API (10 MiB per file by default) into the same volume. The
-[shared agent harness](agent-harness.md) implements this pattern with ChatKit
-threads for the starter, Document Intelligence and SRE agents.
+On close the adapter requests `SuspendActor` in synchronous mode (`--mode sync`).
+Substrate checkpoints the Actor, waits for durable object storage upload and
+reclaims the worker capacity. The next turn can restore from a node-local copy
+when one is available or from durable storage. Asynchronous suspend is an
+upstream option that returns after the local checkpoint and uploads later.
+[Upstream snapshot persistence](https://ate.dev/docs/concepts/architecture/#state-management--persistence)
+
+The shared harness stores serialized Actor session state with each ChatKit
+thread. Different conversations run concurrently in separate Actors with their
+own workspace volumes. Turns within one conversation require exclusive ownership
+of the Actor. User uploads enter the volume through the provider's file API,
+which defaults to 10 MiB per file. [Shared agent harness](agent-harness.md)
 
 ## Conversation lifecycle and density
 
-The harness suspends a conversation's Actor at the end of every turn, not after
-an idle timeout. A turn always runs to completion first; there is no suspension
-in the middle of one. While the user reads or types, the Actor holds no CPU or
-memory on a worker:
+The harness owns the Actor's active session for the turn, including workspace
+setup, tool execution and output collection. Closing the session suspends the
+Actor and releases its worker capacity between turns.
 
 | Moment | What happens |
 | --- | --- |
 | First message | The harness creates the Actor (created suspended) and starts it on a worker with room; the workspace volume is created with it |
-| During the turn | The agent loop runs in the harness; each tool call runs in the Actor |
+| During the turn | The agent loop and credentialed tools run in the harness. Sandbox tools run in the Actor |
 | End of the turn | The harness copies outputs to the host, runs the agent's check, and suspends the Actor (`--mode sync`), which frees its worker |
-| Next message | The harness resumes the same Actor, possibly on another worker, with the workspace as it was; about 1 to 3 s in local runs |
+| Next message | The harness resumes the same Actor, possibly on another worker, and reopens the workspace |
 | Conversation deleted | The harness deletes the Actor and its volume |
 
-Concurrency is bounded by running turns, not by conversations. A worker runs as
-many Actors as its reported CPU and memory hold: at the templates' 0.5 CPU and
-480 MiB, a local Kind worker (2,000 millicores, 1,984 MiB) runs four. The local
-setup's single default worker runs four turns at once, and `SANDBOX_WORKERS=2`
-runs eight. A further turn waits, with a visible
-step, until a worker has room. A suspended conversation costs only snapshot
-storage, about 2 MB each for the documents in the local runs. The
-[verification record](verification.md) has the measurements.
+Each active turn needs space on a worker. At the example templates' 0.5 CPU and
+480 MiB, the pre-release Kind deployment ran four turns per worker. When the
+worker pool is full, the harness shows a waiting step and retries Actor startup
+up to its configured deadline. [Historical measurements](verification.md)
 
 Raw documents, rendered pages and intermediate files stay in the sandbox's
 workspace. What reaches the model, and therefore the conversation history, is
@@ -153,11 +190,12 @@ with the harness. Scripted mode exercises the same SDK tools without inference.
 
 - [Official OpenAI Sandbox Agents guide](https://developers.openai.com/api/docs/guides/agents/sandboxes)
 - [OpenAI sandbox-as-a-tool cookbook](https://developers.openai.com/cookbook/examples/agents_sdk/sandboxed-code-migration/sandboxed_code_migration_agent)
-- [Agent Substrate sandbox demo](https://github.com/agent-substrate/substrate/tree/6949841e9dc98edbd2e0042ef95c19b4ce20aef5/demos/sandbox)
-- [Verified Actor lifecycle CLI](https://github.com/agent-substrate/substrate/blob/6949841e9dc98edbd2e0042ef95c19b4ce20aef5/cmd/kubectl-ate/internal/cmd/actor.go)
+- [Agent Substrate architecture](https://ate.dev/docs/concepts/architecture/)
+- [Agent Substrate v1.0.0 release](https://github.com/agent-substrate/substrate/releases/tag/v1.0.0)
+- [Agent Substrate v1.0.0 sandbox demo](https://github.com/agent-substrate/substrate/tree/v1.0.0/demos/sandbox)
+- [Agent Substrate CLI reference](https://ate.dev/docs/reference/kubectl-ate/)
 
-Upstream changes quickly. The provider was developed against the SDK above and Substrate commit `6949841e9dc98edbd2e0042ef95c19b4ce20aef5` (2026-10-29). The sandbox images build the upstream execution server unmodified from that commit's Go module (`scripts/build-sandbox-server.sh`) and carry its Apache-2.0 license. See [verification record](verification.md) for the checks performed in this environment.
-
-The dedicated harness namespace carries `ate.dev/api-access=true`, as required by
-Substrate's existing API ingress policy. Secret refresh preserves this label;
-no control-plane NetworkPolicy is relaxed to enable the direct API connection.
+`.substrate-revision` pins the v1.0.0 release commit
+`b34fbee742906494b5eb4f1f36987176bf8770a4`. `scripts/build-sandbox-server.sh`
+builds the stock execution server from the pinned Go module, and each sandbox
+image carries its Apache-2.0 license. [Verification record](verification.md)

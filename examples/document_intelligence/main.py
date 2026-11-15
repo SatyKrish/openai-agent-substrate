@@ -97,7 +97,7 @@ async def _run(args, local, analysis_id):
         backend="local protocol simulator (host execution; no isolation)" if local else "Agent Substrate on Kubernetes",
         model=args.model, model_inference=args.model != "scripted", skill="document-analysis",
         api_response_ids=response_ids, execution_mode="scripted-eval" if args.model == "scripted" else "openai-live",
-        tools_used=sorted(tools_used), tracing=current_trace_ids(),
+        tools_used=sorted(tools_used), tracing=current_trace_ids(), uses_actor_proxy=client.transport is None,
         actor=actor, actor_retained=args.keep_actor, artifact_directory=str(destination.resolve()),
         host_contract_verified=True, actor_api_key_absent=True, inputs=digests(inputs), artifacts=digests(artifacts),
         operating_margins_pct={row["company"]: row["operating_margin_pct"] for row in verified["rows"]})

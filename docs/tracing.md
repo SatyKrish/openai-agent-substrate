@@ -110,7 +110,9 @@ Actor creation, startup, the runner, verification, suspension and deletion.
 SDK agent/task/turn/model spans retain their timing and parent relationships.
 Known native tools appear as `tool.load_skill`, `tool.exec_command`, and
 `tool.apply_patch`. Provider spans include `sandbox.create`, `sandbox.resume`,
-`sandbox.proxy`, `sandbox.exec`, `sandbox.suspend`, and `sandbox.delete`.
+`sandbox.exec`, `sandbox.suspend`, and `sandbox.delete`. The host CLI path also
+emits `sandbox.proxy`. The run summary records `uses_actor_proxy` so Jaeger
+verification can check the transport used by the run.
 `document_intelligence.verify` records independent host artifact checks.
 A nonzero command marks that execution span as an error; SDK file-existence
 probes can intentionally return nonzero. The report verifier records whether

@@ -19,20 +19,29 @@ From the repository root:
 ```
 
 The script follows Agent Substrate's own
-[quickstart](https://ate.dev/docs/get-started/quickstart/), at Substrate commit
-`6949841e9dc98edbd2e0042ef95c19b4ce20aef5`, which it checks out first:
+[quickstart](https://ate.dev/docs/get-started/quickstart/) using the
+[v1.0.0 release](https://github.com/agent-substrate/substrate/releases/tag/v1.0.0).
+It checks out the commit in `.substrate-revision` under
+`artifacts/local/substrate-<revision>/` and builds the tools from that source.
 
 | Quickstart step | This script |
 | --- | --- |
 | 1. `hack/create-kind-cluster.sh` | Creates `kind-openai-agent-substrate` with its registry on port 5501 |
 | 2. `export ATE_INSTALL_KIND=true` | Exported for every command |
-| 3. `ate-setup deploy ate-system` with the bundled `k8s.io` credential provider and the ingress SPIFFE ID | The same flags, plus a longer rollout timeout for Colima and `--no-dev-env`, which ignores a personal `.ate-dev-env.sh` in the checkout. The router's allowlist also names the in-cluster harness's ServiceAccount, so its Jobs reach Actors with their own pod certificates |
+| 3. `ate-setup deploy ate-system` with the bundled `k8s.io` credential provider and the ingress SPIFFE ID | Adds `--sandbox-classes=gvisor` to install only the runtime this project uses, a longer rollout timeout for Colima, and `--no-dev-env` to ignore a personal `.ate-dev-env.sh` in the checkout. The router's allowlist includes the in-cluster harness's ServiceAccount so its Jobs reach Actors with their own pod certificates |
 | 4. `ate-setup deploy demo counter` | `ate-setup deploy demo sandbox` instead: its `sandbox-workerpool` (label `workload=sandbox`) runs every agent's Actors, and the provider check uses its `sandbox-template` |
 | 5. `go install ./cmd/kubectl-ate` | Builds it into `artifacts/local/bin/`, matching the pinned commit and leaving any other `kubectl-ate` on the machine alone |
 | 6. and verification: a counter Actor through `kubectl ate proxy` | `./scripts/local-kubernetes.sh test`: the provider check and the Kubernetes tests create Actors, run commands through the authenticated proxy, suspend and resume |
 | Teardown: `hack/delete-kind-cluster.sh` | `./scripts/local-kubernetes.sh teardown` |
 
-A repeat setup reuses the existing cluster instead of deleting it.
+A repeat setup reuses a cluster recorded at the same release. Setup detects an
+older or unrecorded Substrate install and stops before deploying into it.
+Upstream's [rolling-upgrade policy](https://ate.dev/docs/reference/version-skew-policy/)
+starts at v1.0.0. To move a pre-release demo cluster to v1.0.0, save any reports
+or workspace files you need, [tear down the old cluster](#stop-restart-and-tear-down)
+and run setup again. Teardown deletes the Actors and their snapshots. Start new
+conversations after setup because earlier conversations refer to the deleted
+Actors.
 
 ### Cluster size
 
@@ -62,7 +71,7 @@ Use the same variables on every later setup: setup reapplies Substrate's
 manifests and then these sizes. `status` shows each node's allocated CPU and
 memory.
 
-The cluster enables the PodCertificateRequest and ClusterTrustBundle APIs required by Substrate. gVisor is used on the tested ARM64 Colima VM; microVM/KVM support is not required for this workflow. The bundled credential provider starts with a default-deny namespace policy, and this repository grants no atespace any namespace, so sandboxes receive no credentials; the harness keeps its own on the host. A Linux host that will run more than about a thousand sandboxes also needs a larger kernel neighbor table, as the quickstart notes.
+The cluster enables the PodCertificateRequest and ClusterTrustBundle APIs required by Substrate. The gVisor WorkerPool runs on ARM64 Colima and standard Linux nodes. The bundled credential provider starts with a default-deny namespace policy. The harness keeps its credentials on the host or in its own pod. A Linux host that will run more than about a thousand sandboxes also needs a larger kernel neighbor table, as the quickstart notes.
 
 State, kubeconfig, tool binaries, setup logs, and test results stay under the ignored `artifacts/local/` directory. Do not commit or share that directory as a whole; it contains cluster credentials.
 

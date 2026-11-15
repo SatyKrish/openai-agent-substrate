@@ -37,6 +37,7 @@ def test_kubernetes_agent_exports_linked_sdk_and_sandbox_spans(tmp_path):
         assert "jaeger-test-not-a-real-key" not in logs
         summary = json.loads("\n".join(logs.splitlines()[1:]))
         assert summary["execution_mode"] == "scripted-eval"
+        assert summary["uses_actor_proxy"] is False
         assert summary["api_response_ids"] == []
         assert summary["host_contract_verified"] and summary["actor_api_key_absent"]
         payload = jaeger.fetch_trace(os.getenv("SUBSTRATE_JAEGER_QUERY_URL", "http://127.0.0.1:16686"), summary["tracing"]["otel_trace_id"])

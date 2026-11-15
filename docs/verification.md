@@ -594,6 +594,30 @@ at the pinned commit).
   match what `setup` now passes to `ate-setup`. A fresh `setup` with the new
   flag was not rerun here.
 
+## Agent Substrate v1.0.0
+
+On 2026-11-15, a fresh ARM64 Kind cluster on macOS Colima installed Substrate
+from the v1.0.0 release commit `b34fbee742906494b5eb4f1f36987176bf8770a4`, with
+Kubernetes 1.37, gVisor, RustFS snapshot storage, and both harness and CLI proxy
+SPIFFE identities in the router allowlist. The checks used the sample `.env`
+with an empty API key.
+
+- The local Python 3.14 suite passed 174 tests with six skips. Eight of those
+  tests exercise the setup guard, repeated setup, and interrupted setup with
+  stand-ins for Kind and Kubernetes.
+- The v1.0.0 execution-server compatibility suite passed 98 tests. The host PDF
+  test skipped because Poppler was absent. That suite uses simulated Actor
+  lifecycle operations.
+- The scripted provider check and the Kubernetes integration test passed
+  against the fresh cluster. The check used the authenticated CLI proxy and
+  verified that its workspace survived synchronous suspend and resume.
+- The scripted Document Intelligence Job passed its host artifact check using
+  the Secret-mounted harness and direct mutual TLS to the router. Four live
+  tests covered the document workflow, Secret configuration, harness
+  permissions, and linked SDK and sandbox traces in Jaeger. The trace verifier
+  checks for a proxy span only on runs that use the CLI proxy. Artifact
+  collection copied the Job outputs from the Kubernetes PVC to the host.
+
 ## Limits of this verification
 
 These checks establish local functional execution and snapshot recovery on a single-node Kind cluster. They do not establish production availability, multi-tenant authorization policy, resistance to sandbox escape, host/node-loss durability, or model quality beyond the documented live fixture workflow. The in-cluster harness uses its own ServiceAccount; the operator's commands and the laptop UIs still use the shared `ate-client` development identity, and shared deployments need operator-defined principals. Substrate's router lets any allowlisted identity reach any Actor.

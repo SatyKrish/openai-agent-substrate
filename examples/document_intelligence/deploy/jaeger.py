@@ -77,8 +77,12 @@ def verify_trace(payload, summary):
             raise ValueError("Disconnected span hierarchy")
     names = {span["operationName"] for span in spans}
     required = {"agents.agent", "tool.load_skill", "tool.exec_command", "tool.apply_patch",
-                "sandbox.create", "sandbox.resume", "sandbox.proxy", "sandbox.exec", "sandbox.suspend",
+                "sandbox.create", "sandbox.resume", "sandbox.exec", "sandbox.suspend",
                 "sandbox.delete", "document_intelligence.verify", "document_intelligence.run"}
+    if summary.get("uses_actor_proxy", True):
+        required.add("sandbox.proxy")
+    elif "sandbox.proxy" in names:
+        raise ValueError("Unexpected proxy span for direct sandbox transport")
     if not required <= names:
         raise ValueError("Missing expected trace operations: " + ", ".join(sorted(required - names)))
     # At least one actual sandbox execution must be a descendant of an SDK tool.
