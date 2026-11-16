@@ -16,9 +16,11 @@
 2. Install the release's `kubectl-ate` binary on `PATH` and verify its
    published checksum. You can also build the plugin from the pinned source.
    [v1.0.0 release assets](https://github.com/agent-substrate/substrate/releases/tag/v1.0.0)
-3. Register the ActorTemplate through Substrate's API with `kubectl ate`.
-   Install the upstream sandbox demo to get `sandbox-template` in
-   `ate-demo-sandbox` for the provider check and Python example. [Upstream sandbox demo](https://github.com/agent-substrate/substrate/tree/v1.0.0/demos/sandbox) · [Example application templates](#agent-sandbox-templates)
+3. Install the upstream sandbox demo to get `sandbox-template` in
+   `ate-demo-sandbox` for the provider check and Python example. Register a
+   template with the required tools for your application's sandbox image
+   through `kubectl ate`.
+   [Upstream sandbox demo](https://github.com/agent-substrate/substrate/tree/v1.0.0/demos/sandbox) · [Example application templates](#agent-sandbox-templates)
 
 ### An application outside the cluster
 
@@ -92,32 +94,36 @@ direct router access restricted to trusted infrastructure. [Actor gateway deploy
 Each agent registers an ActorTemplate for its sandbox image through the
 Substrate API. The template selects the worker pool by `workload=sandbox`,
 requests `MEMORY` snapshots and mounts a per-Actor `durableDir` at `/workspace`.
-The deploy commands push an image, register the content-addressed template
-and record it for the agent's launcher.
+The deploy commands push an image, register the content-addressed template,
+and record it in the checkout for the agent's launcher. Build on the same
+architecture as the sandbox workers.
+
+Follow the example guide to deploy Document Intelligence and pass its template
+to the command-line workflow. [Document Intelligence sandbox deployment](../examples/document_intelligence/README.md#deploy-and-test-on-local-kubernetes)
+
+To register the Starter or SRE sandbox with your own registry and cluster, run
+the corresponding command. With a separate kubeconfig, pass `--kubeconfig PATH`.
 
 ```sh
-uv run python -m examples.document_intelligence.deploy sandbox \
-  --context YOUR_KUBERNETES_CONTEXT --image YOUR_REGISTRY/document-intelligence:example
 uv run python -m examples.sre.deploy sandbox \
   --context YOUR_KUBERNETES_CONTEXT --image YOUR_REGISTRY/sre:example
 uv run python -m examples.starter.deploy sandbox \
   --context YOUR_KUBERNETES_CONTEXT --image YOUR_REGISTRY/starter:example
 ```
 
-The launchers find the template from that record. Run them from the same
-checkout with `uv run --locked --group ui python -m examples.starter` (the
-terminal chat) or `-m examples.starter.ui`, passing `--context` and, if needed,
-`--kubeconfig`.
+Launch Starter from the same checkout with
+`uv run --locked --group ui python -m examples.starter` for terminal chat or
+`uv run --locked --group ui python -m examples.starter.ui` for the browser.
+Pass `--context` and, if needed, `--kubeconfig`.
 
 Each template limits an Actor to 0.5 CPU and 480 MiB by default
 (`deploy/kubernetes/sandbox.py`). The pool's sandbox class and reported worker
 capacity determine how many Actors fit. When workers are full, the harness
 reports the wait and retries startup up to its configured deadline.
 
-The SRE agent also needs read access to the namespaces it investigates. With an
-operator kubeconfig, this creates the `sre-agent-reader` ServiceAccount and a
-read-only Role in each existing namespace you name; see the
-[SRE agent](../examples/sre/README.md) for what it can read:
+The SRE agent also needs read access to the namespaces it investigates. Run this
+with an operator kubeconfig to create the `sre-agent-reader` ServiceAccount and a
+read-only Role in each existing namespace you name. [SRE agent permissions](../examples/sre/README.md#access)
 
 ```sh
 uv run python -m examples.sre.deploy access --context YOUR_KUBERNETES_CONTEXT \

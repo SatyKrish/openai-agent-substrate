@@ -1,656 +1,79 @@
 # Verification record
 
-Start with the current v1.0.0 Kind results, the installed-wheel session
-round-trip, and the worker-drain check. [Substrate v1.0.0 results](#agent-substrate-v100) · [Actor lifecycle checks](#actor-lifecycle-and-gateway-checks) · [Scope and limits](#limits-of-this-verification)
-
-The first set of measurements below was recorded on 2026-10-29.
-
-## Versions and environment
-
-- Host: macOS ARM64, Python 3.14.3.
-- Local VM: dedicated Colima profile, 6 CPUs and 12 GiB RAM.
-- Kubernetes: Kind, v1.37.0, Linux ARM64.
-- Sandbox runtime: gVisor (`gvisor-default`), two sandbox worker pods.
-- Snapshot storage: in-cluster RustFS through Substrate's object-store plugin.
-- OpenAI Agents SDK: `openai-agents==0.24.0`.
-- Substrate source: `6949841e9dc98edbd2e0042ef95c19b4ce20aef5`.
-
-## Results
-
-| Check | Result |
-| --- | --- |
-| Default unit/integration suite, with the `ui` group | 142 passed; six opt-in or poppler-gated checks skipped |
-| Unit/integration suite using the actual upstream Go execution server (before tracing change) | 63 passed; four real-cluster tests skipped |
-| Opt-in Kubernetes integration test | Passed against a fresh real Actor |
-| SDK scripted workflow on Kubernetes | Passed: shell tool execution, report creation, serialized session resume, and preserved edits |
-| Kubernetes filesystem behavior | Passed: binary file round trips, SDK patching, and nonzero shell exit codes |
-| Repeated setup | Reused the existing cluster; the retained Actor and its files remained usable |
-| Scripted Document Intelligence on Kubernetes | Passed: native `load_skill`, shell inspection/extraction, `apply_patch`, Python execution, exact citations, and independent host artifact checks |
-| Domain artifact rejection tests | Passed: altered citations, calculations, CSV, missing report evidence/limitations, staged digest mismatches, and source-table disagreements are rejected |
-| Secret-backed Kubernetes agent pod | Passed: five OpenAI settings match mounted files and environment, an explicit evaluation override is required, and real document analysis runs with no harness credential in the Actor |
-| Live OpenAI Document Intelligence on Kubernetes | Passed with `gpt-6.1-terra`: seven API responses, native skill/shell/patch tools, model-authored Python, independent artifact validation, and Actor cleanup |
-| Full suite with all local Kubernetes and Jaeger checks enabled | 94 passed, no skips; includes the Secret-backed harness and Jaeger query API |
-| Source distribution and wheel | Built successfully; `twine check` passed |
-| ChatKit UI, multi-turn on Kubernetes | Passed with `gpt-6.1-terra`: three turns on one Actor across a UI server restart, live per-turn traces, and thread deletion removing the Actor |
-| Per-Actor workspace volume | Passed: a `durableDir` mounted at `/workspace` kept a file across suspend and resume; the sample workflow passed on the new template |
-| Batched file transfer on Kubernetes | Passed: 1 MiB writes went from 10.4 s to 0.82 s, files up to 10 MiB round trip, sample staging went from 13.9 s to 5.9 s, and the real-cluster suite passed on the upstream and Document Intelligence images |
-| Uploads and parallel conversations | Passed with `gpt-6.1-terra`: two conversations with different uploaded documents ran concurrently in separate Actors, each saw only its own files, all quotes matched, and follow-ups resumed the right Actor |
-| PDF uploads on Kubernetes | Passed with `gpt-6.1-terra`: poppler in the Actor extracted and rendered a four-page PDF, the agent used `view_image` for a chart and a scanned page, page-level quotes were checked against the extracted text, image-read quotes were marked for review, a 9.8 MiB PDF went through, and an 11 MiB file and a fake PDF were refused |
-| Sandbox size on Kubernetes | Passed: at 0.5 CPU and 480 MiB per Actor, 8 Actors ran at once on two workers instead of 2; four live conversations started together all passed in 38–42 s |
-| Shared agent harness on Kubernetes | Passed with `gpt-6.1-terra`: nine conversations started together all completed and passed their checks, the one beyond capacity waited 41 s for a worker, and two messages sent to one conversation at once both kept their turn |
-| SRE agent on Kubernetes | Passed with `gpt-6.1-terra`: read-only cluster reads ran in the harness, analysis ran in the sandbox, and every quote in its findings matched the host's copy of the evidence |
-| Golden path on Kubernetes | Passed with `gpt-6.1-terra`: `starter-setup` registered the starter's template; `starter-chat` ran a two-turn conversation in one Actor from the terminal (one question, then an interactive follow-up) with passing host checks and traces; `starter-ui`, running at the same time, showed the same conversation |
-| Setup aligned with Substrate's quickstart | Passed: rerunning `setup` with the quickstart's bundled `k8s.io` credential provider (default-deny) rolled out cleanly; the provider check and Kubernetes test passed, an existing conversation resumed its Actor, and a new sandbox had no credentials |
-| Execution server built from the pinned module | Passed: `third_party/` removed; the three sandbox images built the server from `go.ate.dev/substrate/demos/sandbox` at the pinned commit, each ran it with upstream's license and its tools, and the scripted, upstream-server and live checks passed |
-
-The Kubernetes path uses owned loopback `kubectl ate proxy actor` processes and authenticated Substrate ingress. The scripted infrastructure tests exercise the real SDK runner and actual sandbox execution without model calls. The separate live OpenAI run is recorded below.
-
-## Scripted Document Intelligence
-
-The domain example uses the native SDK `Skills` capability with a lazy local
-bundle, `Shell`, and `Filesystem`. Its real-cluster execution image is
-`localhost:5501/openai-agent-substrate-document-intelligence@sha256:3a60dcbbd55ce4a00cb5f351a628386a5093eaf014d0d6290b693fa40a8edaaf`,
-registered as `document-intelligence-46668a69e650` in the dedicated local cluster.
-The input Markdown and CSV fixtures are synthetic and retain their MIT license.
-
-The SDK trace records eight actual tool calls: load the skill, read its contract,
-inspect documents, extract and reconcile facts, patch an analysis program, run
-that Python program, verify its outputs, and reopen them. The host independently
-validated the downloaded report, CSV, and JSON against the original sources.
-ACME and BETA operating margins were 22.93% and 30.19%, with a USD 117.8 billion
-revenue gap and an explicit missing-EBITDA limitation.
-
-These runs used fixed scripted model decisions, including a code fixture emitted
-through the real patch tool. They prove sandbox execution and the required
-artifact checks, not live model reasoning or general document understanding.
-See [the domain guide](../examples/document_intelligence/README.md).
-
-## Environment configuration in the agent pod
-
-A temporary Secret carried a dummy key, `https://example.invalid/v1`,
-a configured model name, and test organization/project IDs. Evaluation was
-explicitly selected with `--test`. The dedicated non-root
-harness Job confirmed that all five environment values matched the read-only
-Secret files. The mounted model configuration was preserved, and `--test` explicitly selected
-the scripted evaluation model. The native skill, shell, patch, and Python workflow completed against a
-real Substrate Actor, whose credential preflight passed. No OpenAI API call was
-made. The test deleted its Job and Secret; report artifacts were collected from
-the retained PVC using a temporary reader pod without credential mounts.
-
-Local unit tests also construct the actual OpenAI client without requests and
-verify its endpoint, API key, organization, and project settings from environment
-variables. A subsequent live endpoint/model run passed as described below.
-
-## Authored agent layout and live defaults
-
-The domain project now has `agent/agent.py`, `agent/instructions.md`, native tool
-registration, skills, trusted `lib/` helpers, and a `sandbox/` workspace and image.
-Sibling `evals/` contains scripted decisions, code fixtures, and execution checks.
-This organization follows [Eve's project conventions](https://eve.dev/docs/concepts/project-structure)
-with explicit Python loading through the OpenAI Agents SDK.
-
-Normal domain execution selects a configured live model and requires an API key.
-Missing credentials cause an error. Scripted evaluation requires `--test` or an
-explicit `--model scripted`; an environment value alone cannot select it. Run
-records identify `openai-live` or `scripted-eval` and include returned API response
-IDs. Scripted evaluations have no API response IDs. The reorganized harness passed
-its real Kubernetes pod evaluation. Those initial checks used no API credentials;
-the later live run below uses the updated local `.env`.
-
-## Live OpenAI execution
-
-The updated local `.env` was imported into the `openai-agent-env` Kubernetes
-Secret and exposed to the trusted harness through environment variables and
-read-only mounted files. The harness confirmed they matched. `OPENAI_MODEL` was
-`gpt-6.1-terra`; `OPENAI_BASE_URL` was unset, so the SDK used the actual default
-OpenAI endpoint, `https://api.openai.com/v1`.
-
-Job `openai-agent-8692fb0e0eae` completed successfully on the dedicated local
-Kind cluster. The run recorded `execution_mode: openai-live`,
-`model_inference: true`, and seven returned OpenAI API response IDs. No scripted
-evaluation flag was supplied. Its six native tool calls were `load_skill`, three
-`exec_command` calls, `apply_patch`, and a final `exec_command` call. The model
-loaded the document-analysis skill, inspected and extracted the source facts,
-wrote a Python program through the patch tool, and executed it in the Substrate
-Actor. The downloaded program differs from the scripted evaluation fixture.
-
-The independent host verifier accepted `comparison.md`, `kpis.csv`, and
-`result.json`, including exact source citations, calculations, required schema,
-and limitations. Downloaded artifact hashes matched the run record. Operating
-margins were ACME 22.93% and BETA 30.19%; the revenue gap was USD 117.8 billion.
-The Actor credential preflight confirmed no `OPENAI_API_KEY` or harness Secret
-mount was present. Downloaded outputs were checked against the configured
-credential, and the temporary Actor was confirmed deleted after completion.
-
-The report, model-authored program, tool trace, API response IDs, and verification
-receipt are stored under ignored `artifacts/local/`. Credentials and kubeconfig
-files must stay out of published artifacts. This validates one bounded workflow
-on synthetic Markdown/CSV fixtures; it does not establish general PDF/OCR or
-document-understanding quality.
-
-## SDK tracing to local Jaeger
-
-Jaeger all-in-one 1.76.0 was deployed by digest in the dedicated local Kind
-cluster. The updated trusted harness completed a new live Document Intelligence
-run with `gpt-6.1-terra`. Jaeger's query API returned one complete trace with
-149 spans over 54.302 seconds, including seven model response spans, the skill,
-shell and patch tools, sandbox commands, Actor lifecycle, and independent host
-verification. The UI timeline was opened and inspected.
-
-The trace verifier checked every parent reference, root and child timing, and
-sandbox execution nested beneath SDK tool calls. All three report artifacts
-passed source and hash validation; the Actor was confirmed deleted. A private
-scan found no configured API credential in the downloaded outputs or Jaeger
-payload, and the trace omitted sampled document text, generated code and paths.
-The model-authored program differs from the scripted evaluation fixture.
-
-The full suite passed with all local Kubernetes and Jaeger flags enabled: 77
-passed, with no skips. The key-free Kubernetes tracing regression also passed
-against Jaeger's API.
-Unit tests cover payload exclusion, parentage, concurrent trace isolation,
-explicit disable, hosted exporter replacement, invalid spans, and export failure.
-See [tracing setup and verification](tracing.md) for repeatable commands.
-
-## Review follow-up verification
-
-Directory writes and directory-symlink writes now fail without leaving uploaded
-children. Injected upload/cleanup failures confirm cleanup cannot replace the
-original upload error or turn a completed write into a failure. Both execution
-servers exercise those regressions. A binary-output check documents that command
-stdout is UTF-8 JSON text while the file API preserves the original bytes.
-
-The harness connects directly to `api.ate-system.svc:443`, using the namespace
-label required by Substrate's existing ingress policy. The pinned router proxy
-still requires port forwarding, so setup restricts that permission to discovered
-router pod names. Authorization checks allow the router and deny API/database
-pod forwarding. The Secret-mounted harness workflow passes with that narrower
-Role. The hardened artifact reader also passed server-side Restricted Pod Security
-admission and collected its reports successfully.
-
-Ruff and the focused mypy targets pass. The manual Kubernetes CI dispatch is
-configured; its GitHub-hosted run remains unverified. Those infrastructure checks
-used explicit scripted evaluations. The live run is recorded separately above.
-
-## External snapshot recovery
-
-The retained demo Actor was synchronously suspended. Its API status reported `ACTOR_STATE_SUSPENDED`, `SNAPSHOT_FIDELITY_MEMORY`, and `SNAPSHOT_STORAGE_STATE_COMPLETED`.
-
-To test recovery beyond the node-local checkpoint, the test reverted this already-durably-suspended Actor to its external snapshot, confirmed its node-local snapshot reference was removed, and replaced both idle sandbox worker pods. The old and new worker UIDs were disjoint.
-
-A new SDK session then resumed the same Actor through authenticated ingress. The report matched the host's original bytes and the edited input remained intact. The Actor was suspended again with another completed durable snapshot.
-
-Evidence is saved locally under ignored `artifacts/local/`, including `recovery-verification.json`, before/after Actor status, demo reports, and the setup/test logs. The directory also contains kubeconfig credentials and must not be published as a whole.
-
-## Library, base deployment and example boundaries
-
-The deployment split passed the existing local suite and a Kubernetes test of
-its relocated harness entrypoint. Both Actor and harness images built from the
-new example-owned Dockerfiles. The library wheel was inspected and imported
-outside the checkout: it contains the provider and testing helpers, with no
-example application or installed demo command.
-
-Python builders now produce the reusable base resources and the example Job,
-reader and Jaeger resources. Their full output matches saved manifests from
-before the refactor. Dependency tests enforce the library/base/example direction,
-and configurable base names are tested independently of Document Intelligence.
-The rebuilt harness and applied base/Jaeger resources passed the full local
-suite with every Kubernetes flag enabled: 90 passed, with no skips.
-
-The wheel and source distribution pass `twine check`. The source archive contains
-both relocated Dockerfiles and the JSON test expectations. An extracted source
-distribution passed 85 tests, with its five cluster checks disabled. This run used
-a temporary directory because macOS blocks the SDK's directory-descriptor
-traversal into Documents; the SDK file checks were preserved. Ruff and the
-focused mypy targets pass. These refactor checks used explicit scripted models;
-the earlier live OpenAI and Jaeger evidence remains recorded above.
-
-## Tracing review follow-up
-
-Application-specific operation names are now supplied by the example through the
-processor constructor and configuration helper. The library's built-in operation
-names cover only sandbox lifecycle and execution. Regression tests verify that
-unregistered names and custom payloads stay out of exported traces.
-
-The OpenTelemetry SDK and OTLP exporter moved to the optional `tracing` extra.
-A fresh environment installed the base wheel without those distributions and
-successfully imported the provider and executed a command through its local
-protocol simulator. The Agents SDK currently still brings `opentelemetry-api`
-through MCP. Lightweight SDK span helpers are independent of the OTLP module.
-The harness image explicitly installs the extra; development dependencies include
-the exporter for tests and source examples.
-
-The rebuilt harness passed the full local Kubernetes/Jaeger suite: 94 passed,
-with no skips. The local and extracted source-distribution suites passed 89 tests
-with five cluster checks skipped. The selected upstream Go-server suite passed
-40 tests. Ruff, focused mypy and distribution metadata checks passed. The usage
-command, tracing description, package description and source manifest patterns
-were corrected. These checks made no new model API calls.
-
-## Document Intelligence UI
-
-The ChatKit UI ran on the host as the trusted harness, against the Kind cluster,
-with `gpt-6.1-terra` and the local Jaeger collector.
-
-- **Multi-turn:** turn 1 created an Actor and passed the host contract check in
-  55.3 s (7 model calls, 62,184 tokens). Turn 2 resumed the same Actor in 0.9 s
-  and wrote a new output that the panel marked as not host-checked. After a UI
-  server restart, the thread reloaded from SQLite and turn 3 resumed the same
-  Actor and still saw turn 2's file. Jaeger held one trace per turn, with
-  `sandbox.create` only in turn 1. Deleting the thread from ChatKit's history
-  deleted the Actor (`NotFound`).
-- **Workspace volume:** the sandbox template `document-intelligence-272cce09f181`
-  mounts a `durableDir` at `/workspace`. A direct provider check showed it as a
-  separate mount, wrote a file, suspended and resumed the Actor, and read the
-  file back. Creating an Actor with an empty workspace took 5.8 s, against
-  about 14 s when the sample reports are staged. The key-free sample workflow
-  passed its host contract check on this template.
-- **Parallel conversations with uploads:** conversation A uploaded one Markdown
-  report and conversation B a Markdown report and a CSV, all fictional. Their
-  first turns overlapped for 45 s and their follow-ups for 9.9 s, in two
-  separate Actors whose traces started in the same second. Asked to list every
-  visible file, each agent found only its own uploads. The host citation check
-  passed for every quote (2 in A, 4 in B including the CSV), and the computed
-  figures matched the documents. Both Actors were suspended between turns and
-  deleted with their threads, along with the host copies.
-- **Browser upload:** ChatKit's own two-phase uploader sent a file to the UI
-  server, and the turn passed the citation check. This run found that ChatKit
-  refuses to start with attachments enabled unless `uploadStrategy` is set, and
-  that uploads-only threads must tell the agent not to run the samples-only
-  verifier; both are fixed.
-
-## File transfer
-
-The same benchmark ran against one fresh Actor from the Document Intelligence
-template, before and after batching writes and chunking reads. Each `/process`
-round trip took a median of 400 ms on local Kind, and eight concurrent 0.2 s
-commands took 3.4 s in that benchmark. A single command carried 16 arguments of
-120 KiB (1.4 MiB) in the same 0.41 s as an empty one.
-
-| Operation | Before | After |
-| --- | --- | --- |
-| Write 64 KiB | 2.2 s | 0.21 s |
-| Write 1 MiB | 10.4 s (26 commands) | 0.82 s (2 commands) |
-| Write 4 MiB / 10 MiB | over the 1 MiB limit | 2.8 s / 6.7 s |
-| Read 1 MiB | 0.45 s | 0.42 s |
-| Read 4 MiB / 10 MiB | over the 1 MiB limit | 1.6 s / 4.1 s |
-| Stage the sample reports into a new Actor | 13.9 s | 5.9 s |
-
-Every round trip matched byte for byte and no partial files remained. The
-provider suite passed 25 tests against both the Python simulator and the upstream
-Go server, including multi-command round trips, one command for small and empty
-files, the configurable limit, and a failure between write commands leaving no
-partial file. The real-cluster suite passed against the upstream
-`sandbox-template` image (binary write, read and resume) and the Document
-Intelligence image, which shows both provide the `dd`, `wc`, `base64` and
-`dirname` the transfer scripts use. These checks made no model API calls.
-
-## UI upload review follow-up
-
-The citation lookup now resolves canonical workspace paths first, exact filenames
-second, and unique short document IDs last. Ambiguous filenames or short IDs fail
-with a request for the full source path. Regression cases cover filename/stem
-collisions in both upload orders and an upload sharing a bundled sample's name.
-
-Uploads retain their ChatKit attachment IDs with the original host copy before
-staged bytes are removed. Retrying after a successful or failed turn, including
-a server restart, restores the original bytes under the same workspace filename
-without creating another Actor or a renamed duplicate. Missing or altered host
-copies are rejected with instructions to attach the file again. Uploads saved
-before this mapping was introduced need to be attached again when retrying.
-
-Uploads added to sample-started threads receive quote checks against both the
-sample fixtures and retained uploads. The UI identifies this as quote validation;
-calculated figures and other output files remain unchecked. The full contract
-check still applies to sample-only reports, so matching sample quotes cannot
-hide a failed calculation or CSV check.
-
-The follow-up added 13 regression cases. On Python 3.11, the full local suite
-passed 110 tests, with five opt-in Kubernetes/Jaeger tests skipped. All 20 UI
-tests also passed against the upstream Go execution server. Ruff, the configured
-mypy targets, JavaScript syntax, wheel/source builds and `twine check` passed.
-These follow-up checks used scripted models and made no new OpenAI API calls;
-the earlier live Kubernetes and model evidence is recorded above.
-
-After integrating the file-transfer improvements from `main`, the combined local
-suite passed 114 tests with five cluster checks skipped. The CI protocol suite
-passed 64 tests against the upstream Go execution server. Lint, configured type
-checks, JavaScript syntax, distribution builds and metadata checks passed again.
-
-## PDF uploads
-
-A four-page PDF built for this run (a text page with a word hyphenated across
-lines, a segment table, a bar chart whose values exist only as bar heights, and
-a scanned auditor's statement with no text layer) went through the UI against
-the sandbox template on local Kind, with `gpt-6.1-terra`:
-
-- **Processing in the Actor:** one server-run command extracted each page's text
-  and rendered each page at 100 DPI, all four pages, three with a text layer.
-  Workspace setup for the first turn, including the upload and the PDF
-  processing, took 22 commands and 5.6 s.
-- **First turn (42 s):** the agent read the extracted text, then called
-  `view_image` on two page images (traced as `tool.view_image` spans). The host
-  checked its page 1 and page 2 quotes against its own copy of those pages'
-  text; the quote read from the scanned page 4 was counted as one to review.
-  The answers matched the document: USD 3.2 billion, 14.0%, Cloud at 17.0%, and
-  1,240 employees.
-- **Follow-up turn (22–23 s, same Actor resumed):** asked about the chart, the
-  agent called `view_image` on page 3 and read the four quarters exactly (720,
-  770, 810 and 900, summing to the annual USD 3.2 billion).
-- **Panel:** the PDF tab showed the rendered pages with "no text layer" and
-  "cited" markers, checked and to-review quotes under their pages, and each
-  page's extracted text on request. The browser received only JPEG pages and
-  text; the PDF itself is served only as a download.
-- **Limits:** a 10,241,030-byte (9.8 MiB) PDF went through in its own
-  conversation, and copying it into the Actor added about 6 s (37 commands,
-  11.6 s of setup). An 11 MiB PDF was refused when the upload was created, and
-  an HTML file named `.pdf` was refused at upload.
-
-The run found two defects, both fixed and rerun:
-
-- The Alpine sandbox image had no fonts, so poppler rendered pages that use the
-  standard PDF fonts without embedding them with no text at all; the
-  extracted text was unaffected, but `view_image` would have seen blank pages.
-  The image now installs the URW base 35 fonts (3.1 MB), and the rerun rendered
-  every page with its text.
-- In a follow-up turn the agent kept `output/result.json` as it was, because the
-  instructions said not to rewrite it, so the card reported the earlier quotes
-  as passing for an answer they did not cover. The instructions now ask for each
-  answer's citations to be added to the list, and the rerun's follow-up added a
-  checked page 3 quote. When `result.json` is unchanged, the card and panel now
-  say "No new citations this turn" instead.
-
-With these changes the full local suite passed 119 tests (six opt-in or
-poppler-gated tests skipped), and the CI protocol suite passed 69 tests against
-the upstream Go execution server. The end-to-end PDF test needs poppler on the
-host, so it runs in CI, which installs poppler-utils.
-
-## Shared agent harness and SRE agent
-
-Document Intelligence moved onto the [shared harness](agent-harness.md), and the
-SRE agent was added on it. Checked on local Kind with `gpt-6.1-terra`.
-
-**Sandbox size.** Each worker reports 2,000 millicores and 1,984 MiB. At 2 CPUs
-and 1 GiB per Actor, memory as well as CPU allowed one Actor per worker. A
-benchmark with both templates:
-
-| | 2 CPU, 1 GiB | 0.5 CPU, 480 MiB |
-| --- | --- | --- |
-| Actors running at once | 2 of 3 requested | 8 of 9 requested |
-| Fixed Python loop / two at once | 0.32 s / 0.34 s | 0.79 s / 1.51 s |
-| Processing the four-page PDF in the Actor | 0.3 s | 0.9 s |
-| Peak memory of PDF processing | 22 MiB | 22 MiB |
-| Resume / suspend | 2.7 s / 0.2 s | 2.7 s / 0.2 s |
-
-Both sandbox templates now use 0.5 CPU and 480 MiB. Turns mostly wait on the
-model, so the slower CPU did not lengthen them noticeably.
-
-**Concurrency on the harness.**
-
-- Nine conversations at once (two PDF, two Markdown and CSV, two Markdown, three
-  sample reports): all nine completed and passed their host checks. Eight ran
-  immediately; the ninth showed "Waiting for a sandbox worker" for 41 s, started
-  when one finished, and passed. Before the harness, turns beyond capacity
-  failed within 0.1 s with a generic error.
-- Two messages sent to one conversation at the same moment: both were answered,
-  the second starting when the first finished, and all three of the
-  conversation's turns were recorded with passing checks. Before, the second
-  message overwrote the first one's turn record and history.
-
-**SRE agent.** `sre-setup` deployed the SRE sandbox template, a demo namespace
-(a crash-looping `checkout`, an unpullable `catalog`, a healthy `frontend`) and
-the reader's Role. The reader's token could list pods and read logs in
-`sre-demo`, and was refused Secrets, `kube-system`, deletes and `exec`.
-
-- "Which workloads in sre-demo are unhealthy, and why?" took 54.7 s: 10 cluster
-  reads in the harness (2.4 s in all, saved as evidence), the triage skill and 6
-  commands in the sandbox, and 2 findings whose 9 quotes all matched the host's
-  copies. The diagnosis was right: the `catalog` image was not found, and the
-  `checkout` command exits 1 unconditionally after printing the database error.
-- A follow-up about `frontend` resumed the same Actor and answered from the
-  saved evidence in 12.3 s without reading the cluster again.
-
-**Defects found and fixed.**
-
-- The model ran harness tool calls in parallel, and evidence files from one
-  batch got the same number (`001-pods…`, `001-deployments…`). Two reads with
-  the same label would have overwritten each other. The number is now taken
-  before the first await; a rerun numbered its ten files 001 to 010.
-- The waiting time on the turn card counted every sandbox start longer than a
-  second (3–6 s for a normal start), not only waits for a worker. It now
-  records only waits after Substrate refuses for lack of room.
-
-After the fixes the full local suite passed 133 tests (six opt-in or
-poppler-gated tests skipped), and the protocol suite, now including the harness
-and SRE tests, passed 81 against the upstream Go execution server.
-
-**Workspace layout.** The repository then became a uv workspace: the provider
-moved to `sandbox/` and the harness became its own package. No dependency
-version changed in the lock. The provider wheel holds only
-`openai_agent_substrate` and its license files, passes `twine check`, and passed
-the base-wheel smoke test without OpenTelemetry; its source distribution now
-contains the library only, not the repository's examples and guides. The
-harness builds as its own wheel. New boundary tests keep the provider from
-importing the harness and the harness from importing examples or `deploy/`. On
-Kind, the agent Job image rebuilt with the workspace layout (uv built the
-provider from `sandbox/` inside the image), the scripted agent Job completed
-with the host contract verified, both sandbox template names stayed the same,
-and both UIs served their earlier conversations. The full local suite passed
-135 tests and the upstream-server protocol suite 81.
-
-## Golden path: the starter agent
-
-The quick start was followed on the existing local Kind cluster with
-`gpt-6.1-terra`. `starter-setup` built the starter's sandbox image and
-registered `starter-dd6e581f206c` (0.5 CPU, 480 MiB).
-
-- **Terminal, one question:** `starter-chat "Find the primes below 200 …"`
-  created an Actor and streamed each step: the workspace (1.7 s), four tool
-  calls with their commands (one exited 1 and the agent fixed its script), the
-  answer, the passing host check, the host path of `output/primes.csv` (46
-  primes, 2 to 199) and the turn's Jaeger link. 19.7 s in all.
-- **Terminal, interactive:** `starter-chat --thread ID` with a follow-up resumed
-  the same Actor (0.8 s) and saved the count and sum, 46 and 4,227, both
-  correct, in 8.7 s; `/files` and `/list` worked and `/quit` left it suspended.
-- **UI alongside:** `starter-ui` ran at the same time on the same data folder
-  and listed the terminal's conversation with both turns. An earlier
-  conversation started in the UI (14.5 s and 9.4 s turns, same results) showed
-  its cards, files, check and trace link in the browser.
-
-The quickstart, which only exercised the provider, is now the provider check
-(`examples/provider_check`); `./scripts/local-kubernetes.sh test` and CI still
-run it.
-
-## Setup aligned with Substrate's quickstart
-
-`setup` now runs Agent Substrate's quickstart steps with its flags, including
-the bundled `k8s.io` credential provider in place of `{"enabled":false}`; the
-local Kubernetes guide maps each step. Rerunning it on the existing cluster
-deployed `k8s-credential-provider` and rolled out the other components. Then:
-
-- `./scripts/local-kubernetes.sh test`: the provider check on Agent Substrate
-  passed (workspace survived resume, initial manifest not reapplied), and so
-  did the opt-in Kubernetes test.
-- A starter conversation from before the change resumed its Actor in 0.7 s and
-  answered from its saved files.
-- A new conversation passed the harness's no-credentials check, and the agent
-  reported that `OPENAI_API_KEY` is not set in its sandbox: the provider's
-  default-deny policy grants this repository's atespaces nothing.
-
-`teardown` (the quickstart's `hack/delete-kind-cluster.sh`) was added but not
-run, to keep the cluster.
-
-## Execution server built from the pinned module
-
-`third_party/` held an unmodified copy of upstream's `demos/sandbox/main.go`.
-It is gone: `scripts/build-sandbox-server.sh` downloads that package at the
-commit in `.substrate-revision` through the Go module proxy (checked against
-the Go checksum database) and builds it, the way upstream's ko build does. The
-source it fetched is byte-identical to the removed copy. The three sandbox
-Dockerfiles, CI and the development guide use the script.
-
-- Locally: lint, mypy and the full suite (142 passed) passed, and the protocol
-  suite passed 88 tests against the server the script built.
-- On Kind, the three images were rebuilt, giving new templates
-  `document-intelligence-e424943936bc`, `sre-2312cede3fca` and
-  `starter-5274a60d228c`. The Document Intelligence scripted workflow and its
-  Kubernetes test passed on its new template.
-- An Actor from each new template ran the server and held upstream's license
-  at `/usr/share/licenses/substrate/LICENSE`, with Python 3.14.10 in all three,
-  poppler 25.12 in Document Intelligence (which processed the four-page PDF:
-  three pages with text, four images) and jq 1.8.2 in SRE.
-- A live starter turn on the new template passed its host check, and a
-  conversation on the previous template still resumed.
-
-## Small default cluster
-
-Checked on 2026-10-30 on ARM64 Colima with the cluster from the earlier sections.
-
-- The stopped Colima profile restarted at the new default, 4 CPUs and 8 GiB.
-  The first setup run failed in `ate-setup deploy ate-system` with
-  `while resolving /v1, Kind=Namespace: unknown`. Substrate's pods were still
-  waiting for new pod certificates after the restart, and they were ready about
-  a minute later. Setup now waits for the node and the `ate-system` pods before
-  it runs `ate-setup` on an existing cluster. The rerun passed.
-- After setup, `ate-api-server` and `ate-idp-server` each had one replica and
-  `sandbox-workerpool` one worker. Node requests fell from 2,740m CPU and
-  6,514 MiB to 2,440m and 4,978 MiB, which is 61% and 62% of the smaller VM.
-- `./scripts/local-kubernetes.sh test` passed. A live `starter-chat` turn
-  created its Actor in 1.8 s and passed its host check in 15.9 s.
-- Five Actors from `starter-5274a60d228c` were created and started together.
-  Four ran, and the fifth was refused with `ActorCapacityError`, which the
-  harness shows as a wait for a sandbox worker. All five were then deleted.
-
-## Shared UI page
-
-Checked on 2026-10-31 on the small default cluster, with `gpt-6.1-terra`, the
-three agents on the harness's shared page, and the browser at 1280×800, at
-375×812 and in light and dark appearance.
-
-- **Starter.** A suggestion filled the composer without sending. The first turn
-  took 14.1 s. The panel then opened on `primes.csv`, marked host-checked, and
-  the bar under the chat read "Checked on the host: primes.csv". The trace view
-  showed the workspace created in 1.6 s, 4 model calls, the check passed, and
-  each step's lane. With the panel collapsed, the second turn (resumed in
-  0.7 s) left it closed and counted one new file. A `?thread=` link reopened
-  the conversation.
-- **Document Intelligence.** Before the first message the panel listed the
-  four sample reports. The comparison took 38.8 s. The panel moved to
-  `comparison.md`, checked against the original documents, with four checked
-  quotes; "Show in source" highlighted line 7 of `beta-2024.md`. During the turn
-  the header showed 3 of 4 sandbox slots free and the trace updated live.
-- **PDF upload.** A three-page PDF went through ChatKit's own uploader
-  (`setComposerValue` with `files`), since the browser pane cannot use the file
-  picker. While the model worked, the panel showed the pages the sandbox
-  extracted (2 with text, page 2 without a text layer). The answer's two page
-  quotes passed the host check, and "Show in source" scrolled to page 3. Deleting
-  the conversation from the header's menu, after a confirmation naming the
-  Actor, removed the Actor (`NotFound`) and its host copies.
-- **SRE.** The investigation took 63.7 s: 3 findings and 10 quotes checked
-  against the evidence, each opening the evidence file with the quote
-  highlighted. The follow-up suggestion for fixes ran in 29.1 s and was no
-  longer offered afterwards.
-- **Another process.** While `starter-chat` ran a turn of the same
-  conversation, the UI showed it running elsewhere; a message sent from the UI
-  was refused and not stored, and when the terminal's turn ended the UI loaded
-  its answer and card.
-- Dogfooding found and fixed: suggestions rendered as `[object
-  HTMLButtonElement]`; the file list collapsing under a tall file; cached
-  scripts after an edit (the page's files now revalidate); a page quote not
-  scrolling to its page; a header that overlapped at phone width; a refused
-  message that was stored without a reply and shown only in the console; and
-  `local-kubernetes.sh` exiting 1 after a chat when another UI held the
-  port-forward ports.
-- `uv run --locked --group ui pytest -q`: 149 passed, 6 skipped.
-
-## Harness identity in the cluster
-
-Checked on 2026-10-31 on the small default cluster (Kubernetes 1.37, Substrate
-at the pinned commit).
-
-- A pod running as `openai-agent` with a projected token for
-  `api.ate-system.svc` was refused `can_list_actors` until an access policy made
-  it `editor` of `ate-demo-sandbox`. It could then list Actors there, and it was
-  still refused `can_list_workers` on the global scope.
-- The same pod's certificate named
-  `spiffe://cluster.local/ns/openai-agent-substrate/sa/openai-agent` and was
-  valid for 24 hours. With no client certificate the router closed the TLS
-  handshake (`certificate required`); with the certificate but before the ID was
-  on the router's allowlist, it refused it (`certificate unknown`). Once listed,
-  `POST /process` to `atenet-router.ate-system.svc` resumed a suspended Actor and
-  returned its output.
-- `agent-setup` rebuilt the harness image; its resources step deleted the old
-  `openai-agent-client` Role and RoleBinding from `ate-system`. `agent-test`
-  ran the scripted Document Intelligence Job in the cluster and passed its host
-  check. Substrate's API logged that Job's `CreateActor`, `ResumeActor`,
-  `SuspendActor` and `DeleteActor` as
-  `system:serviceaccount:openai-agent-substrate:openai-agent`, not `ate-client`.
-- The live tests passed (4), including a check that the harness cannot
-  port-forward to the router or API pods, request pod certificates in
-  `ate-system`, or mint `ate-client` tokens, and can still list
-  ClusterTrustBundles. The laptop path, `examples.provider_check` through
-  `kubectl ate proxy`, also passed.
-- A local mutual-TLS server confirmed the transport presents the pod
-  certificate, refuses a router it cannot verify, and presents the new
-  certificate after the bundle file is replaced.
-- On this cluster the router's allowlist was changed with `kubectl patch` to
-  match what `setup` now passes to `ate-setup`. A fresh `setup` with the new
-  flag was not rerun here.
-
 ## Agent Substrate v1.0.0
 
-On 2026-11-15, a fresh ARM64 Kind cluster on macOS Colima installed Substrate
-from the v1.0.0 release commit `b34fbee742906494b5eb4f1f36987176bf8770a4`, with
-Kubernetes 1.37, gVisor, RustFS snapshot storage, and both harness and CLI proxy
-SPIFFE identities in the router allowlist. The checks used the sample `.env`
-with an empty API key.
+The reference deployment pins Agent Substrate v1.0.0 at
+`b34fbee742906494b5eb4f1f36987176bf8770a4` and OpenAI Agents SDK `0.24.0`.
+The fresh cluster verification on 2026-11-15 used Kubernetes 1.37 on ARM64
+Kind with macOS Colima, gVisor, and in-cluster RustFS snapshot storage.
+Both the host CLI proxy and in-cluster harness used their configured SPIFFE
+identities. The cluster checks used scripted models with an empty OpenAI API
+key. [Release pin](../.substrate-revision) · [Kind setup](local-kubernetes.md#set-up)
 
-- The local Python 3.14 suite passed 174 tests with six skips. Eight of those
-  tests exercise the setup guard, repeated setup, and interrupted setup with
-  stand-ins for Kind and Kubernetes.
-- The v1.0.0 execution-server compatibility suite passed 98 tests. The host PDF
-  test skipped because Poppler was absent. That suite uses simulated Actor
-  lifecycle operations.
-- The scripted provider check and the Kubernetes integration test passed
-  against the fresh cluster. The check used the authenticated CLI proxy and
-  verified that its workspace survived synchronous suspend and resume.
-- The scripted Document Intelligence Job passed its host artifact check using
-  the Secret-mounted harness and direct mutual TLS to the router. Four live
-  tests covered the document workflow, Secret configuration, harness
-  permissions, and linked SDK and sandbox traces in Jaeger. The trace verifier
-  checks for a proxy span only on runs that use the CLI proxy. Artifact
-  collection copied the Job outputs from the Kubernetes PVC to the host.
+| Check | Observed result | Reproduce |
+| --- | --- | --- |
+| Latest local Python suite | `python -m pytest -q` in a locked Python 3.13 environment with the `ui` group installed. 219 passed, 8 skipped. | [Development checks](development.md#tests-and-execution-checks) |
+| Local lint, type checks, and packaging | Ruff, focused mypy, and Bash syntax checks passed. The key-free host simulator passed. The provider wheel and source distribution built offline, passed Twine checks, and included the attribution files. | [Development checks](development.md#tests-and-execution-checks) · [Distribution builds](development.md#build-distributions) |
+| Pinned upstream HTTP server on the host | 98 passed. The host PDF check skipped because Poppler was unavailable. Actor lifecycle was simulated. | [Upstream protocol check](development.md#upstream-execution-server-on-the-host) |
+| Fresh Kind cluster | The provider check and Kubernetes integration test passed through the authenticated CLI proxy. The scripted SDK agent read a workspace file after synchronous suspension and resume. | [Kind checks](local-kubernetes.md#test) |
+| Document Intelligence Job on Kind | The scripted Job passed host artifact validation using its Secret-backed harness and direct router mTLS. Kubernetes tests covered the document workflow, Secret configuration, harness permissions, and linked SDK and sandbox spans in Jaeger. Artifact collection copied outputs from the PVC. | [Job guide](../examples/document_intelligence/deploy/README.md) · [Tracing](tracing.md#local-kubernetes-workflow) |
 
 ## Actor lifecycle and gateway checks
 
-- The SDK integration example ran from a clean provider wheel install against
-  the dedicated Kind cluster with a scripted model. It suspended the Actor,
-  restored the session from JSON, and read `report.txt` on the same Actor.
-  [SDK integration example](usage.md#integrate-into-your-application)
-- SDK-owned runs completed with the SDK's default snapshot specification and
-  with an explicit no-op specification. The local tests exercised incomplete
-  startup, cancellation and recovery with a persisted Actor ID.
-- On the dedicated ARM64 Kind cluster, `worker-eviction-test` confirmed that an
-  active SDK shell command wrote a workspace file before its worker pod began
-  graceful termination. The eviction watcher interrupted the turn and saved the
-  pending notice. The Actor synchronously suspended and published a completed
-  durable checkpoint. A new session loaded the saved pre-suspend state and
-  restored the same file on a replacement worker. The test deleted its Actor.
-  [Reproduce the worker-drain check](local-kubernetes.md#test-worker-eviction)
-- Gateway tests used separate TLS identities on loopback for caller and router.
-  They covered exact Actor grants, denial and revocation, trust failures, and
-  forwarding of both execution and eviction requests.
+- The SDK example ran from a clean provider wheel install against the dedicated
+  Kind cluster with a scripted model. It suspended the Actor, loaded the saved
+  session JSON, and read `report.txt` on the same Actor. [SDK integration](usage.md#integrate-into-your-application)
+- Local tests exercised the SDK's default and explicit no-op snapshot options,
+  incomplete startup, cancellation, and recovery with a persisted Actor ID.
+- The opt-in worker-drain check passed twice on the dedicated ARM64 Kind cluster
+  during implementation. A scripted SDK shell command wrote a file before the
+  worker Pod began graceful termination. The harness interrupted the turn,
+  saved the pending eviction notice, and synchronously suspended the Actor.
+  The test confirmed a completed durable checkpoint, loaded the pre-suspend
+  session state, and read the file on the same Actor assigned to a replacement
+  worker with a different Pod UID. It then deleted the test Actor.
+  [Worker-drain check](local-kubernetes.md#test-worker-eviction)
+- The gateway suite used separate caller and router TLS identities on loopback.
+  It covered exact Actor grants, denial and revocation, trust failures, and
+  forwarding of execution and eviction requests. [Gateway checks](../deploy/kubernetes/actor_gateway/README.md#verify-locally)
+
+### External snapshot recovery
+
+A separate pre-release Kind check removed a suspended Actor's node-local
+snapshot reference by reverting it to its completed external snapshot, then
+replaced both idle worker Pods. A new SDK session resumed the same Actor and
+recovered the original report bytes and edited input. This observation used
+Substrate commit `6949841e9dc98edbd2e0042ef95c19b4ce20aef5`.
+
+## Prior live model evidence
+
+Pre-release Kind runs with `gpt-6.1-terra` exercised the Document Intelligence
+Job, Starter's multi-turn conversation, and SRE's evidence-backed analysis.
+The Document Intelligence run used native SDK skill, shell, and patch tools
+and passed its host artifact checks. The pinned-release cluster results above
+used scripted models. [Example workflows](../examples/README.md)
+
+## CI configuration
+
+Regular CI is configured for the key-free Python 3.11–3.14 matrix, the upstream
+HTTP compatibility checks, gateway tests, and a separate provider packaging job.
+The manually dispatched Kubernetes job runs the fresh Kind setup, provider and
+Document Intelligence checks, Jaeger verification, and worker-drain recovery.
+Use the workflow run status for results from GitHub-hosted runners.
+[CI workflow](../.github/workflows/ci.yml) · [CI guide](development.md#ci-and-pinned-tools)
 
 ## Limits of this verification
 
-These checks establish local functional execution and snapshot recovery on a single-node Kind cluster. They do not establish production availability, multi-tenant authorization policy, resistance to sandbox escape, host/node-loss durability, or model quality beyond the documented live fixture workflow. The in-cluster harness uses its own ServiceAccount; the operator's commands and the laptop UIs still use the shared `ate-client` development identity, and shared deployments need operator-defined principals. Substrate's router lets any allowlisted identity reach any Actor.
-
-The UI checks drove ChatKit's uploader from a script rather than its file picker, used only localhost (ChatKit's `local-dev` domain key), and loaded ChatKit's unversioned script from OpenAI's CDN, which publishes no versioned build to pin. Parallel isolation was shown for up to nine conversations on one node, not under sustained load.
-
-The PDF checks used generated PDFs, not a corpus of real-world files. Pages that rely on fonts outside the standard set and not embedded in the PDF (for example most CJK text) may still render without text. Text read from page images is not checked by the host; it is shown for review.
-
-Regular CI runs the key-free protocol and package checks on Python 3.11–3.14.
-The opt-in Kubernetes job runs the real-cluster checks. [Repeat the Kind checks locally](local-kubernetes.md)
-
-The SRE agent was checked against one demo namespace with two kinds of failure.
-Its reads go through `kubectl` with a token-only kubeconfig; `kubectl describe`
-can show literal values from pod specs, which the Role does not restrict.
+- Cluster evidence covers a single-node Kind setup. Production availability,
+  multi-tenant authorization, sandbox-escape resistance, and host or node-loss
+  durability remain open validation areas.
+- Worker-drain recovery depends on the original worker remaining reachable
+  long enough to finish the durable checkpoint. The local protocol simulator
+  executes on the host without an isolation boundary.
+  [Architecture and provider limits](architecture.md) · [Worker-drain check](local-kubernetes.md#test-worker-eviction)
+- Router mTLS authenticates an allowlisted identity across Actors. Shared
+  deployments need application-level authorization scoped to each Actor.
+  [Deployment and authentication](deployment.md#a-harness-in-the-cluster)
+- Live model evidence covers the sample workflows and fixtures. General model
+  quality, PDF extraction and OCR across real-world corpora, and sustained
+  multi-user load remain open validation areas.

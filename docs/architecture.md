@@ -3,7 +3,7 @@
 The trusted application runs the Agents SDK loop and calls the model.
 `SubstrateSandboxClient` connects the SDK sandbox interface to Agent Substrate
 v1.0.0 for commands, workspace files, and Actor lifecycle. The example harness
-keeps one Actor per conversation. [SDK integration](usage.md#integrate-into-your-application) · [Shared harness](agent-harness.md) · [OpenAI Sandbox Agents guide](https://developers.openai.com/api/docs/guides/agents/sandboxes)
+keeps one Actor per conversation. [SDK integration](usage.md#integrate-into-your-application) · [Shared harness](../harness/README.md) · [OpenAI Sandbox Agents guide](https://developers.openai.com/api/docs/guides/agents/sandboxes)
 
 ![Harness separate from compute: the agent harness accesses trusted services while sandbox compute executes commands against a filesystem.](assets/harness-separate-from-compute.png)
 
@@ -163,7 +163,7 @@ thread. Different conversations run concurrently in separate Actors with their
 own workspace volumes. A host file lock serializes turns and deletion for
 each conversation, and the harness records Actor creation intent before making
 the lifecycle call. User uploads enter the volume through the provider's file API,
-which defaults to 10 MiB per file. [Shared agent harness](agent-harness.md)
+which defaults to 10 MiB per file. [Shared agent harness](../harness/README.md#a-turn)
 
 ## Conversation lifecycle and density
 
@@ -189,10 +189,9 @@ the checkpoint. Applications that own their sessions can wrap active work in
 | Next message | The harness resumes the same Actor, possibly on another worker, and reopens the workspace |
 | Conversation deleted | The harness deletes the Actor and its volume |
 
-Each active turn needs space on a worker. At the example templates' 0.5 CPU and
-480 MiB, the pre-release Kind deployment ran four turns per worker. When the
-worker pool is full, the harness shows a waiting step and retries Actor startup
-up to its configured deadline. [Historical measurements](verification.md)
+Each active turn needs space on a worker. Capacity depends on the ActorTemplate
+and the worker pool. When the pool is full, the harness shows a waiting step and
+retries startup up to its configured deadline. [Kind cluster sizing](local-kubernetes.md#cluster-size)
 
 Raw documents, rendered pages and intermediate files stay in the sandbox's
 workspace. What reaches the model, and therefore the conversation history, is

@@ -121,19 +121,23 @@ holds a worker only during its turns. Environment variables set the size:
 | `SANDBOX_WORKERS` | `1` | Sandbox workers, four concurrent turns each |
 | `CONTROL_PLANE_REPLICAS` | `1` | Substrate's API and identity servers |
 
-For concurrency tests, Substrate's own sizing is
-`SANDBOX_WORKERS=2 CONTROL_PLANE_REPLICAS=2 COLIMA_CPUS=6 COLIMA_MEMORY=12`.
-`scale` applies the replica settings to a running cluster; Colima takes a new
-CPU and memory size when it starts, so stop the cluster first, then rerun setup:
+For concurrency tests, scale the API, identity, and sandbox worker replicas on
+the running cluster. Colima applies CPU and memory changes on restart.
 
 ```sh
-SANDBOX_WORKERS=2 ./scripts/local-kubernetes.sh scale
-./scripts/local-kubernetes.sh stop && COLIMA_CPUS=6 COLIMA_MEMORY=12 ./scripts/local-kubernetes.sh setup
+SANDBOX_WORKERS=2 CONTROL_PLANE_REPLICAS=2 ./scripts/local-kubernetes.sh scale
 ```
 
-Use the same variables on every later setup: setup reapplies Substrate's
-manifests and then these sizes. `status` shows each node's allocated CPU and
-memory.
+On macOS, stop Colima before applying the larger VM size. Pass the replica
+settings again because `setup` reapplies them.
+
+```sh
+./scripts/local-kubernetes.sh stop
+COLIMA_CPUS=6 COLIMA_MEMORY=12 SANDBOX_WORKERS=2 CONTROL_PLANE_REPLICAS=2 ./scripts/local-kubernetes.sh setup
+```
+
+Use the same size variables on later setup runs. `status` shows each node's
+allocated CPU and memory.
 
 The cluster enables the PodCertificateRequest and ClusterTrustBundle APIs required by Substrate. The gVisor WorkerPool runs on ARM64 Colima and standard Linux nodes. The bundled credential provider starts with a default-deny namespace policy. The harness keeps its credentials on the host or in its own pod. A Linux host that will run more than about a thousand sandboxes also needs a larger kernel neighbor table, as the quickstart notes.
 
@@ -151,20 +155,9 @@ SUBSTRATE_KUBECONFIG="$PWD/artifacts/local/kubeconfig" \
 uv run --locked pytest -q sandbox/tests/kubernetes/test_live_cluster.py
 ```
 
-For a retained workspace:
-
-```sh
-export PATH="$PWD/artifacts/local/bin:$PATH"
-uv run --locked python -m examples.provider_check --backend substrate \
-  --context kind-openai-agent-substrate \
-  --kubeconfig artifacts/local/kubeconfig \
-  --output-dir artifacts/local/demo --keep-actor
-```
-
-Use `uv run --locked python -m examples.provider_check.resume` with the same
-context, kubeconfig, and `--state-file artifacts/local/demo/session.json` to
-inspect the retained Actor. Add `--delete` to remove it when finished.
-[Provider check guide](../examples/provider_check/README.md)
+To keep a test Actor suspended for inspection, use the provider check's
+`--keep-actor` and resume utility with the Kind context and kubeconfig above.
+[Retain and inspect an Actor](usage.md#run-the-provider-check-on-kubernetes)
 
 ## Test worker eviction
 
@@ -204,45 +197,31 @@ sequenceDiagram
 
 ## Verified recovery scope
 
-The [verification record](verification.md) includes a real restore after replacing both sandbox worker pods and removing the Actor's node-local snapshot reference. The edited input and report were recovered from a completed external snapshot. This is a local functional check, not a production availability or isolation assessment.
+On a pre-release Kind cluster, a separate check replaced both sandbox worker
+pods and removed the Actor's node-local snapshot reference. The edited input and
+report were recovered from a completed external snapshot. The v1.0.0 check
+above exercises a graceful drain of one worker. [External snapshot recovery](verification.md#external-snapshot-recovery)
 
 ## Run example agents
 
 Configure `.env` after cluster setup to use a live model with the shared agent
-harness. Run these commands with `./scripts/local-kubernetes.sh`.
-[Harness design](agent-harness.md)
+harness. [Harness guide](../harness/README.md)
 
-- **Starter.** Run `starter-setup`, then `starter-chat`. `starter-ui` serves the
-  same conversations on <http://localhost:8002>. [Run Starter with a live model](../README.md#run-starter-with-a-live-model)
-- **Document Intelligence.** [Deploy the sandbox](#document-intelligence-skill-workflow)
-  and run `ui` to serve the app on <http://localhost:8000>. Each conversation gets its own Actor and workspace,
-  accepts `.pdf`, `.md`, `.txt` and `.csv` uploads, and displays each turn's
-  files and trace. [Document Intelligence UI](../examples/document_intelligence/ui/README.md)
-- **SRE.** Run `sre-setup`, then `sre-ui`, to investigate two broken demo
-  workloads on <http://localhost:8001>. [SRE agent](../examples/sre/README.md)
+- Chat with Starter in the terminal or browser. [Run Starter](../examples/starter/README.md#run-it)
+- Analyze documents and inspect each turn's files, citations, and trace. [Run the Document Intelligence UI](../examples/document_intelligence/ui/README.md#run-it)
+- Investigate unhealthy demo workloads with read-only cluster access. [Run SRE on Kind](../examples/sre/README.md#run-it-on-kind)
 
 ## Document Intelligence skill workflow
 
-After setup, run `./scripts/local-kubernetes.sh document-intelligence` to build and
-push a Python-capable sandbox image, register its immutable ActorTemplate, run the
-skill-driven SDK workflow, and execute its opt-in Kubernetes test. Reports and
-tool traces are saved under `artifacts/local/document-intelligence/`. See the
-[domain guide](../examples/document_intelligence/README.md) for the workflow,
-fixture attribution, live-model options, and contract-checking limits.
+The scripted workflow exercises the Document Intelligence skill and runs its
+opt-in Kubernetes test. [Deploy and test the Document Intelligence sandbox](../examples/document_intelligence/README.md#deploy-and-test-on-local-kubernetes)
 
 ## Secret-backed agent harness pod
 
-Create `.env` from `.env.example` before setup to import the OpenAI key, endpoint,
-model, and optional organization/project settings into a Kubernetes Secret.
-`agent-setup` builds the dedicated harness image and its resources. Use
-`agent-test` for an execution test without inference, `agent-run` for live model
-execution using `.env`, and `agent-artifacts` to download reports from the PVC.
-See [the complete configuration guide](../examples/document_intelligence/deploy/README.md).
+Run the Document Intelligence harness as a Kubernetes Job with model settings
+mounted from a Secret and artifacts retained on a PVC. [Configure the harness pod](../examples/document_intelligence/deploy/README.md#configure) · [Run and collect the Job](../examples/document_intelligence/deploy/README.md#test-then-run-a-live-model)
 
 ## Jaeger tracing
 
-Run `./scripts/local-kubernetes.sh tracing-setup` to deploy Jaeger all-in-one and
-configure OTLP for new agent Jobs. Run `agent-run` for live model inference, or
-`agent-test` for an explicit scripted evaluation. Start `tracing-ui` in another
-terminal to open a loopback port forward for <http://127.0.0.1:16686>.
-See [tracing and independent verification](tracing.md) for the complete workflow.
+Deploy the local collector, view traces from scripted or live runs, and verify
+them against the run records. [Jaeger on Kind](tracing.md#local-kubernetes-workflow)
