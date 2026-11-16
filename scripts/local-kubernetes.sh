@@ -63,9 +63,19 @@ prepare_source() {
   git -C "$SOURCE_DIR" diff --quiet HEAD --
 }
 
+cluster_revision() {
+  kubectl --context "kind-$CLUSTER" get namespace kube-system \
+    -o 'jsonpath={.metadata.annotations.openai-agent-substrate\.dev/substrate-revision}'
+}
+
 record_cluster_revision() {
   kubectl --context "kind-$CLUSTER" annotate namespace kube-system \
     "openai-agent-substrate.dev/substrate-revision=$1" "${@:2}"
+}
+
+deploy_starter_sandbox() {
+  configure_docker
+  uv run --locked python -m examples.starter.deploy sandbox --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG"
 }
 
 case "${1:-help}" in
@@ -90,8 +100,7 @@ case "${1:-help}" in
     else
       (cd "$SOURCE_DIR" && hack/kind.sh export kubeconfig --name "$CLUSTER" --kubeconfig "$KUBECONFIG")
     fi
-    revision="$(kubectl --context "kind-$CLUSTER" get namespace kube-system \
-      -o 'jsonpath={.metadata.annotations.openai-agent-substrate\.dev/substrate-revision}')"
+    revision="$(cluster_revision)"
     installed="$(kubectl --context "kind-$CLUSTER" get namespace ate-system --ignore-not-found -o name)"
     if [[ "$revision" != "$PIN" && "$revision" != "$PIN-pending" ]]; then
       if [[ -n "$installed" || -n "$revision" ]]; then
@@ -135,7 +144,23 @@ case "${1:-help}" in
     ;;
   test)
     uv run --locked python -m examples.provider_check --backend substrate --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG" --output-dir "$LOCAL_DIR/results"
-    SUBSTRATE_RUN_KUBERNETES_TESTS=1 SUBSTRATE_KUBE_CONTEXT="kind-$CLUSTER" SUBSTRATE_KUBECONFIG="$KUBECONFIG" uv run --locked pytest -q sandbox/tests/kubernetes
+    SUBSTRATE_RUN_KUBERNETES_TESTS=1 SUBSTRATE_KUBE_CONTEXT="kind-$CLUSTER" SUBSTRATE_KUBECONFIG="$KUBECONFIG" uv run --locked pytest -q sandbox/tests/kubernetes/test_live_cluster.py
+    ;;
+  worker-eviction-test)
+    api_server="$(kubectl --context "kind-$CLUSTER" config view --minify -o 'jsonpath={.clusters[0].cluster.server}')"
+    local_kind_api='^https://(127\.0\.0\.1|localhost|\[::1\]):[0-9]+$'
+    if [[ ! "$api_server" =~ $local_kind_api ]]; then
+      echo "Worker eviction requires a loopback Kind API endpoint." >&2
+      exit 1
+    fi
+    if [[ "$(cluster_revision)" != "$PIN" ]]; then
+      echo "Run setup on the dedicated Kind cluster before testing worker eviction." >&2
+      exit 1
+    fi
+    deploy_starter_sandbox
+    EVICTION_TEMPLATE="$(uv run --locked python -c 'import json; print(json.load(open("artifacts/examples/starter/deployment/deployment.json"))["template"])')"
+    SUBSTRATE_RUN_WORKER_EVICTION_TESTS=1 SUBSTRATE_KUBE_CONTEXT="kind-$CLUSTER" SUBSTRATE_KUBECONFIG="$KUBECONFIG" \
+      SUBSTRATE_EVICTION_TEMPLATE="$EVICTION_TEMPLATE" uv run --locked pytest -q -s sandbox/tests/kubernetes/test_worker_eviction.py
     ;;
   document-intelligence)
     configure_docker
@@ -187,15 +212,13 @@ case "${1:-help}" in
     UI_MODULE=examples.document_intelligence.ui
     if [[ "$1" == sre-ui ]]; then UI_MODULE=examples.sre.ui; fi
     if [[ "$1" == starter-ui ]]; then UI_MODULE=examples.starter.ui; fi
-    # The golden path's last step: chat in the terminal; starter-ui shows the same conversations.
+    # The Starter terminal and browser UI share the same conversations.
     if [[ "$1" == starter-chat ]]; then UI_MODULE=examples.starter; fi
     env "${UI_ENV[@]}" uv run --locked --group ui python -m "$UI_MODULE" \
       --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG" "${@:2}"
     ;;
   starter-setup)
-    # The golden path's one agent step: the starter's sandbox image and ActorTemplate.
-    configure_docker
-    uv run --locked python -m examples.starter.deploy sandbox --context "kind-$CLUSTER" --kubeconfig "$KUBECONFIG"
+    deploy_starter_sandbox
     ;;
   sre-setup)
     # The SRE sandbox image and template, the demo namespace, then the reader's Roles in it.
@@ -232,7 +255,7 @@ case "${1:-help}" in
     colima stop --profile "$PROFILE"
     ;;
   *)
-    echo "Usage: $0 {setup|test|document-intelligence|agent-setup|agent-test|agent-run|agent-artifacts|tracing-setup|tracing-ui|ui|starter-setup|starter-chat|starter-ui|sre-setup|sre-ui|scale|status|stop|teardown}"
+    echo "Usage: $0 {setup|test|worker-eviction-test|document-intelligence|agent-setup|agent-test|agent-run|agent-artifacts|tracing-setup|tracing-ui|ui|starter-setup|starter-chat|starter-ui|sre-setup|sre-ui|scale|status|stop|teardown}"
     echo "Uses an isolated Kind cluster and project-local kubeconfig. setup reuses a cluster at the same revision."
     ;;
 esac

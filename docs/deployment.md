@@ -1,17 +1,30 @@
 # Deploy on Kubernetes
 
-The provider check uses the upstream `sandbox-template` ActorTemplate and
-authenticated `kubectl-ate` routing. The local setup builds a complete Kind
-deployment. [Local Kubernetes guide](local-kubernetes.md)
+- **Connect an existing SDK application.** Prepare your Substrate cluster and
+  choose how the application will connect. Then install the provider in your
+  application's environment. [Cluster setup](#existing-substrate-cluster) · [SDK integration](usage.md#integrate-into-your-application)
+- **Try it on your machine.** The key-free Kind quickstart provisions
+  Substrate, the CLI plugin, and the demo template. [Local Kind guide](local-kubernetes.md)
 
 ## Existing Substrate cluster
 
-Install Agent Substrate v1.0.0 on a Linux Kubernetes cluster with durable
-snapshot storage and a supported sandbox class. Use the `kubectl-ate` binary
-from that release and verify its published checksum, or build it from the
-pinned source. Kubernetes supplies the `WorkerPool` and `SandboxConfig`
-resources. Register `ActorTemplate` definitions through Substrate's API with
-`kubectl ate`. Install the sandbox demo for the provider check. [Operator install](https://ate.dev/docs/guides/operator-install/) · [v1.0.0 release assets](https://github.com/agent-substrate/substrate/releases/tag/v1.0.0) · [Sandbox demo](https://github.com/agent-substrate/substrate/tree/v1.0.0/demos/sandbox)
+### Prepare the cluster and template
+
+1. Run Agent Substrate v1.0.0 on a Linux Kubernetes cluster with durable
+   snapshot storage and a supported sandbox class. Kubernetes supplies the
+   `WorkerPool` and `SandboxConfig` resources. [Operator install](https://ate.dev/docs/guides/operator-install/)
+2. Install the release's `kubectl-ate` binary on `PATH` and verify its
+   published checksum. You can also build the plugin from the pinned source.
+   [v1.0.0 release assets](https://github.com/agent-substrate/substrate/releases/tag/v1.0.0)
+3. Register the ActorTemplate through Substrate's API with `kubectl ate`.
+   Install the upstream sandbox demo to get `sandbox-template` in
+   `ate-demo-sandbox` for the provider check and Python example. [Upstream sandbox demo](https://github.com/agent-substrate/substrate/tree/v1.0.0/demos/sandbox) · [Example application templates](#agent-sandbox-templates)
+
+### An application outside the cluster
+
+The provider uses your kubeconfig and opens an ephemeral `kubectl ate proxy actor`
+for each session. The CLI manages the loopback port-forward and mutual TLS to
+Substrate's router. [Deployment diagram](local-kubernetes.md#how-setup-works)
 
 Include the CLI proxy's Pod Identity SPIFFE principal in the control plane's
 router allowlist during installation.
@@ -20,12 +33,35 @@ router allowlist during installation.
 spiffe://cluster.local/ns/ate-system/sa/atenet-client
 ```
 
-The caller also needs the upstream CLI's API permissions and permissions to create, read, and delete PodCertificateRequests in the system namespace. That right can request a certificate for any identity in Substrate's namespace, including its own components, so keep it to operators. The upstream local installation uses shared development identities; operators should configure their own principals and authorization for shared deployments.
+The caller needs the upstream CLI's API permissions and permission to create,
+read, and delete PodCertificateRequests in the system namespace. That right
+can request a certificate for any identity in Substrate's namespace, including
+its own components, so keep it to operators. The upstream local installation
+uses shared development identities. Configure dedicated principals and
+authorization for shared deployments.
+
+Confirm the intended context and the demo template.
+
+```sh
+kubectl config get-contexts
+kubectl ate --context YOUR_KUBERNETES_CONTEXT get actor-template sandbox-template --atespace ate-demo-sandbox
+```
+
+Pass `--kubeconfig PATH` to the CLI when you use a separate kubeconfig. Next,
+run the scripted check or connect your own SDK application.
+[Key-free provider check](usage.md#run-the-provider-check-on-kubernetes) · [SDK integration](usage.md#integrate-into-your-application)
 
 ### A harness in the cluster
 
+For a long-running agent, run the SDK application as its own Kubernetes
+Deployment and keep its conversation state in application-owned durable
+storage. The Document Intelligence batch Job demonstrates the same in-cluster
+authentication. [Example Job](../examples/document_intelligence/deploy/README.md)
+
 A harness in a pod uses its own ServiceAccount for Substrate API calls and
-router ingress. [SDK configuration example](usage.md)
+router ingress. It uses the projected API token for lifecycle calls and its
+projected certificate for direct router connections.
+[In-cluster Python configuration](usage.md#connect-an-in-cluster-harness)
 
 - **API.** Pass a projected ServiceAccount token with audience `api.ate-system.svc` to `kubectl ate --token-file`, with `--endpoint api.ate-system.svc:443`. Grant `system:serviceaccount:NAMESPACE:NAME` the `editor` role on the application's atespace to create, resume, suspend and delete its Actors. Listing workers requires a global role. [Substrate authorization](https://ate.dev/docs/guides/authorization/)
 - **Router.** Project a `podCertificate` from `podidentity.podcert.ate.dev/identity` and the CA from the `servicedns.podcert.ate.dev/identity` ClusterTrustBundle. List the pod's SPIFFE ID, `spiffe://cluster.local/ns/NAMESPACE/sa/NAME`, in `--ingress-allowed-spiffe-ids`. The router admits listed identities across Actors. Account for this scope when choosing which clients to allow. [Substrate networking](https://ate.dev/docs/concepts/architecture/#networking-stack-atenet--atunnel)
@@ -37,26 +73,12 @@ router ingress. [SDK configuration example](usage.md)
 --ingress-allowed-spiffe-ids=spiffe://cluster.local/ns/ate-system/sa/atenet-client,spiffe://cluster.local/ns/openai-agent-substrate/sa/openai-agent
 ```
 
-Inspect the intended context and template:
+### An execution gateway
 
-```sh
-kubectl config get-contexts
-kubectl ate --context YOUR_KUBERNETES_CONTEXT get actor-template sandbox-template --atespace ate-demo-sandbox
-```
-
-Run the scripted SDK workflow:
-
-```sh
-uv run python -m examples.provider_check --backend substrate \
-  --context YOUR_KUBERNETES_CONTEXT \
-  --atespace ate-demo-sandbox --template sandbox-template
-```
-
-Pass `--kubeconfig PATH` for a separate kubeconfig. The provider owns an
-ephemeral loopback `kubectl ate proxy actor` for each session. The CLI handles
-the port-forward and mutual TLS to Substrate's router.
-
-An explicit `--router-url` selects a trusted HTTP gateway you operate, bypassing the owned CLI proxy. Such a gateway must provide the cluster's required upstream authentication and authorization. This option is also used by the local protocol simulator. In the cluster, `router_url` names Substrate's router itself and `router_tls` supplies the pod's certificate; see [a harness in the cluster](#a-harness-in-the-cluster).
+Use `router_url` in your application or `--router-url` in the provider check
+to route execution through a trusted HTTP gateway you operate. The gateway
+provides the cluster's upstream authentication and authorization. The local
+protocol simulator also uses this option. [Provider check options](../examples/provider_check/README.md)
 
 An application gateway can implement the four lifecycle methods in `ActorControl`. Supply a trusted `router_url`, or provide an async `start_proxy(atespace, name)` method returning an object with a loopback `url` and async `aclose()` lifecycle.
 

@@ -7,66 +7,35 @@ application; shell commands and workspace files run in the Actor, which holds
 no credentials.
 
 This provider targets [Agent Substrate v1.0.0](https://github.com/agent-substrate/substrate/releases/tag/v1.0.0)
-with the upstream sandbox demo's HTTP execution server.
+with the upstream sandbox demo's HTTP execution server. It requires Python 3.11
+or newer and pins `openai-agents==0.24.0`.
+
+Install from the repository root.
 
 ```sh
-pip install openai-agent-substrate            # provider only
-pip install 'openai-agent-substrate[tracing]' # with the OTLP exporter
+pip install ./sandbox
 ```
 
-From a checkout of the repository, install `./sandbox` instead. The package
-installs as `openai-agent-substrate` and is imported as `agent_substrate`.
+For the optional OTLP exporter, use `pip install './sandbox[tracing]'`.
+The package installs as `openai-agent-substrate` and is imported as `agent_substrate`.
 
-```python
-from agents import Runner
-from agents.run import RunConfig
-from agents.sandbox import Manifest, SandboxAgent, SandboxRunConfig
-from agents.sandbox.capabilities import Filesystem, Shell
-from agents.sandbox.entries import File
-from agent_substrate import (
-    KubectlActorControl, SubstrateSandboxClient, SubstrateSandboxOptions,
-)
+Create a session with `SubstrateSandboxClient` and pass
+`SandboxRunConfig(session=session)` to your SDK runner. Closing the session
+suspends the Actor synchronously. Save its JSON state after closing, restore
+the session with `client.resume`, and call `client.delete` when your
+application no longer needs the workspace.
+[Complete Python example](https://github.com/SatyKrish/openai-agent-substrate/blob/main/docs/usage.md#integrate-into-your-application)
 
-client = SubstrateSandboxClient(
-    atespace="ate-demo-sandbox",
-    control=KubectlActorControl(context="YOUR_KUBERNETES_CONTEXT"),
-)
-manifest = Manifest(entries={"task.txt": File(content=b"Write a short report.")})
-agent = SandboxAgent(
-    name="Substrate worker",
-    instructions="Read task.txt and write report.txt in the workspace.",
-    capabilities=[Shell(), Filesystem()],
-    default_manifest=manifest,
-)
-session = await client.create(
-    manifest=manifest,
-    options=SubstrateSandboxOptions(template="sandbox-template"),
-)
-try:
-    async with session:
-        result = await Runner.run(
-            agent, "Complete the task.",
-            run_config=RunConfig(
-                sandbox=SandboxRunConfig(session=session),
-                tracing_disabled=True,
-            ),
-        )
-finally:
-    await client.delete(session)
-```
-
-Run it inside an async function, with `OPENAI_API_KEY` set in the host environment.
-
-That client reaches Actors through `kubectl ate proxy` with your kubeconfig. A
+The client reaches Actors through `kubectl ate proxy` with your kubeconfig. A
 harness running in the cluster passes `router_url`, `router_tls=RouterTLS(...)`
 and `KubectlActorControl(..., endpoint=..., token_file=...)` instead, so it calls
-Substrate's API and router directly as its own ServiceAccount; see
-[Usage](https://github.com/SatyKrish/openai-agent-substrate/blob/main/docs/usage.md).
+Substrate's API and router directly as its own ServiceAccount.
+[In-cluster harness configuration](https://github.com/SatyKrish/openai-agent-substrate/blob/main/docs/usage.md#connect-an-in-cluster-harness)
 
 The package contains the provider (`SubstrateSandboxClient`, Actor lifecycle
 through `kubectl ate`, the authenticated Actor proxy, direct router mutual TLS, tracing).
 Its test doubles, a scripted model and a local protocol simulator, stay in the
-repository. It is pinned to `openai-agents==0.24.0`.
+repository.
 
 The [repository](https://github.com/SatyKrish/openai-agent-substrate) also holds
 a shared agent harness, three agents built on it (including a starter to copy), local Kind setup and the

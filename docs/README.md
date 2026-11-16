@@ -1,19 +1,22 @@
 # Documentation
 
-| Guide | Purpose |
-| --- | --- |
-| [Architecture](architecture.md) | Harness/compute separation, Kubernetes mapping, workspace persistence, provider responsibilities, and limits |
-| [Agent harness](agent-harness.md) | The shared harness that runs any agent's loop, what an agent supplies, and the SRE agent |
-| [Local Kubernetes](local-kubernetes.md) | Set up Kind, deploy Substrate, and run real Actor tests |
-| [Deployment](deployment.md) | Connect the provider to a prepared Agent Substrate cluster and register agent sandbox templates |
-| [Usage](usage.md) | Run on Kubernetes, integrate the SDK, resume sessions, and keep one Actor per conversation |
-| [Tracing](tracing.md) | Export SDK and sandbox spans to Jaeger and verify traces |
-| [Development](development.md) | Run tests, verify the upstream server, and build distributions |
-| [Verification record](verification.md) | Tested versions, results, and unverified infrastructure properties |
-| [Shared harness package](../harness/README.md) | The harness modules, a turn step by step, and how to add an agent |
-| [Kubernetes deployment components](../deploy/kubernetes/README.md) | The in-cluster harness's identity and Substrate access, kubeconfig, artifact PVC and sandbox templates |
-| [Document Intelligence deployment](../examples/document_intelligence/deploy/README.md) | .env import, Secret mounting, endpoint/model settings, the sandbox template and agent Jobs |
-| [Document Intelligence UI](../examples/document_intelligence/ui/README.md) | ChatKit conversations with uploads, per-turn files and Jaeger traces |
-| [SRE agent](../examples/sre/README.md) | Read-only Kubernetes investigation with evidence-checked findings |
-| [Starter agent](../examples/starter/README.md) | The quick start's agent: run it from the terminal, then copy it to build your own |
-| [Examples](../examples/README.md) | The starter agent, the other agents, and the provider check |
+## Start here
+
+- **Connect an existing SDK app.** Prepare a Substrate cluster, then install the
+  provider and run the Python session example. [Cluster setup](deployment.md#existing-substrate-cluster) · [SDK integration](usage.md#integrate-into-your-application)
+- **Try the integration without an OpenAI API key.** Set up a dedicated Kind
+  cluster and check that an Actor's workspace survives suspend and resume.
+  [Local Kind guide](local-kubernetes.md)
+
+## Reference
+
+- [Architecture and provider limits](architecture.md) covers execution, workspace persistence, and the trust boundary.
+- [Kubernetes deployment components](../deploy/kubernetes/README.md) covers pod identity, Substrate access, storage, and ActorTemplates.
+- [Tracing](tracing.md) covers exporting SDK and sandbox spans to Jaeger.
+- [Verification record](verification.md) lists tested versions, results, and their scope.
+
+## Examples and development
+
+- [Example applications](../examples/README.md) includes the optional live Starter chat, Document Intelligence, and SRE.
+- [Shared harness design](agent-harness.md) describes the runtime used by those applications.
+- [Development](development.md) covers local tests, upstream protocol checks, and package builds.

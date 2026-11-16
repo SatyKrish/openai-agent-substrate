@@ -1,11 +1,8 @@
 # Agent harness
 
-This project follows the [harness separate from compute](architecture.md)
-pattern: the agent loop runs in a trusted harness and tool execution runs in a
-sandbox. Before this design the harness lived inside the Document Intelligence
-UI, mixed with that agent's behavior and with Substrate details. A second agent would have
-copied all of it. This design splits the code so that adding an agent means
-writing the agent, not another harness.
+The example applications use a shared harness to run the SDK agent loop and
+send sandbox tools to an Actor. This guide describes what an example supplies
+and what the shared runtime handles. [Architecture](architecture.md) · [Use the provider in an existing app](usage.md#integrate-into-your-application)
 
 ## Three parts
 
@@ -45,11 +42,11 @@ settings and behavior.
 
 The harness also provides a terminal chat (`openai_harness.terminal`), which
 drives the same server in-process, so a terminal conversation is an ordinary
-thread that the agent's UI also lists and links to. The starter agent uses the
-terminal chat as the quick start's last step and keeps its UI optional. Turns
-and deletion share a per-thread file lock next to the SQLite store. A process
+thread that the agent's UI also lists and links to. Starter offers a live-model
+walkthrough with terminal chat and an optional browser UI. Turns and deletion
+share a per-thread file lock next to the SQLite store. A process
 on the same host can see when a conversation is running elsewhere, and the OS
-releases its lock if it exits.
+releases its lock if it exits. [Starter walkthrough](../README.md#run-starter-with-a-live-model)
 
 ## Standards, not a new agent format
 
@@ -151,7 +148,7 @@ harness/                      Harness package openai-harness: src/openai_harness
 harness/tests/                Lock and reload, capacity waits, history, evidence, the UI's routes
 testing/harness.py            Scripted model and ChatKit helpers for agents' tests (repository only)
 deploy/kubernetes/sandbox.py  Sandbox profile to ActorTemplate (deploy time)
-examples/starter/             The golden path: smallest complete agent, terminal chat and optional UI (port 8002)
+examples/starter/             Smallest shared-harness example, terminal chat and optional UI (port 8002)
 examples/document_intelligence/
   agent/                      SandboxAgent, skills, spec, PDF processor, citation checks
   ui/                         Its page settings, PDF view, card and launcher (port 8000)

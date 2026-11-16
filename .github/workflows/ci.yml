@@ -140,3 +140,5 @@ jobs:
           SUBSTRATE_KUBECONFIG: ${{ github.workspace }}/artifacts/local/kubeconfig
       - name: Verify artifact collection
         run: ./scripts/local-kubernetes.sh agent-artifacts
+      - name: Verify SDK workspace recovery after worker eviction
+        run: ./scripts/local-kubernetes.sh worker-eviction-test

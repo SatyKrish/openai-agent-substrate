@@ -1,6 +1,9 @@
 # Verification record
 
-Date: 2026-10-29.
+Start with the current v1.0.0 Kind results, the installed-wheel session
+round-trip, and the worker-drain check. [Substrate v1.0.0 results](#agent-substrate-v100) · [Actor lifecycle checks](#actor-lifecycle-and-gateway-checks) · [Scope and limits](#limits-of-this-verification)
+
+The first set of measurements below was recorded on 2026-10-29.
 
 ## Versions and environment
 
@@ -260,8 +263,7 @@ with `gpt-6.1-terra` and the local Jaeger collector.
 The same benchmark ran against one fresh Actor from the Document Intelligence
 template, before and after batching writes and chunking reads. Each `/process`
 round trip took a median of 400 ms on local Kind, and eight concurrent 0.2 s
-commands took 3.4 s: commands to one Actor run one after another, so transfer
-time follows the number of commands. A single command carried 16 arguments of
+commands took 3.4 s in that benchmark. A single command carried 16 arguments of
 120 KiB (1.4 MiB) in the same 0.41 s as an empty one.
 
 | Operation | Before | After |
@@ -620,15 +622,20 @@ with an empty API key.
 
 ## Actor lifecycle and gateway checks
 
+- The SDK integration example ran from a clean provider wheel install against
+  the dedicated Kind cluster with a scripted model. It suspended the Actor,
+  restored the session from JSON, and read `report.txt` on the same Actor.
+  [SDK integration example](usage.md#integrate-into-your-application)
 - SDK-owned runs completed with the SDK's default snapshot specification and
   with an explicit no-op specification. The local tests exercised incomplete
   startup, cancellation and recovery with a persisted Actor ID.
-- On the dedicated ARM64 Kind cluster, a Starter Actor wrote a workspace file
-  and began a command before its worker pod began graceful termination. The
-  eviction watcher interrupted the command and saved the pending notice. The
-  Actor synchronously suspended. A new session loaded the saved pre-suspend
-  state, reconciled the checkpoint, and restored the same file on a replacement
-  worker. The handled notice did not interrupt the resumed session.
+- On the dedicated ARM64 Kind cluster, `worker-eviction-test` confirmed that an
+  active SDK shell command wrote a workspace file before its worker pod began
+  graceful termination. The eviction watcher interrupted the turn and saved the
+  pending notice. The Actor synchronously suspended and published a completed
+  durable checkpoint. A new session loaded the saved pre-suspend state and
+  restored the same file on a replacement worker. The test deleted its Actor.
+  [Reproduce the worker-drain check](local-kubernetes.md#test-worker-eviction)
 - Gateway tests used separate TLS identities on loopback for caller and router.
   They covered exact Actor grants, denial and revocation, trust failures, and
   forwarding of both execution and eviction requests.
@@ -641,7 +648,8 @@ The UI checks drove ChatKit's uploader from a script rather than its file picker
 
 The PDF checks used generated PDFs, not a corpus of real-world files. Pages that rely on fonts outside the standard set and not embedded in the PDF (for example most CJK text) may still render without text. Text read from page images is not checked by the host; it is shown for review.
 
-The existing public CI also exercises the key-free paths on Python 3.11–3.14. See [local-kubernetes.md](local-kubernetes.md) to repeat the real-cluster checks.
+Regular CI runs the key-free protocol and package checks on Python 3.11–3.14.
+The opt-in Kubernetes job runs the real-cluster checks. [Repeat the Kind checks locally](local-kubernetes.md)
 
 The SRE agent was checked against one demo namespace with two kinds of failure.
 Its reads go through `kubectl` with a token-only kubeconfig; `kubectl describe`

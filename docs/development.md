@@ -17,7 +17,8 @@ installs it. Without it, those tests are skipped:
 uv sync --locked --group ui
 ```
 
-The default tests and the provider check use a deterministic model and temporary local workspaces. They require no OpenAI API key or Kubernetes cluster. Loopback sockets must be allowed in your development environment.
+The default suite runs without Kubernetes or an OpenAI API key. Allow loopback
+sockets for the local HTTP integration tests.
 
 ## Tests and execution checks
 
@@ -25,7 +26,6 @@ The default tests and the provider check use a deterministic model and temporary
 uv run ruff check sandbox harness scripts deploy examples testing tests conftest.py
 uv run mypy
 uv run pytest -q
-uv run python -m examples.provider_check --backend local --output-dir artifacts/local
 ```
 
 Tests cover native skill loading, domain code execution, exact citations and artifact reconciliation, the actual SDK tool loop, filesystem patching, binary files and batched multi-command transfers, shell output/exit codes, routing headers, state serialization and resume, lost Actors, unsupported manifest options, file limits, and non-replay of failed executions.
@@ -40,7 +40,21 @@ cover its tool allowlists, the reader's Role, the evidence check, and an
 investigation end to end with a fake cluster. Agents' tests build on
 `testing.harness`.
 
-For wire compatibility with the actual upstream Go execution server:
+### Host protocol simulator
+
+The repository provider check uses a scripted model and a temporary host
+workspace in `--backend local` mode. This mode runs commands on your machine
+without sandbox isolation. [Provider check modes](../examples/provider_check/README.md)
+
+```sh
+uv run --locked python -m examples.provider_check --backend local \
+  --output-dir artifacts/local/protocol-simulator
+```
+
+### Upstream execution server on the host
+
+Use the upstream Go execution server to check HTTP wire compatibility while
+lifecycle operations remain simulated.
 
 ```sh
 sh scripts/build-sandbox-server.sh "$(cat .substrate-revision)" artifacts/upstream-sandbox
@@ -51,11 +65,19 @@ uv run python -m examples.provider_check --backend local \
   --output-dir artifacts/upstream
 ```
 
-The script downloads the v1.0.0 `demos/sandbox` package at the pinned commit through the Go module proxy and compiles it alongside the project's eviction notice handler, just as the sandbox images do. This exercises the upstream HTTP execution code and the handler with simulated lifecycle operations. The server briefly listens on the selected port on all host interfaces. Run this compatibility check only on a trusted development machine.
+The script downloads the v1.0.0 `demos/sandbox` package at the pinned commit
+through the Go module proxy and compiles it alongside the project's eviction
+notice handler, just as the sandbox images do. The server briefly listens on
+the selected port on all host interfaces. Run this compatibility check only on
+a trusted development machine.
 
 ## Real Kubernetes tests
 
-See [local-kubernetes.md](local-kubernetes.md) for the opt-in cluster test. It is skipped by default and requires an explicit local Kind context and kubeconfig.
+The key-free Kind check runs SDK commands in real gVisor-backed Actors and
+verifies that their files survive suspend and resume. The pytest case is opt-in
+and uses an explicit Kind context and kubeconfig. A separate worker-eviction
+test verifies recovery on a replacement worker.
+[Set up Kind](local-kubernetes.md#set-up) · [Run the provider and Kubernetes checks](local-kubernetes.md#test) · [Test worker eviction](local-kubernetes.md#test-worker-eviction)
 
 The domain example adds an opt-in test after its Python image is deployed:
 
@@ -162,9 +184,9 @@ adapter or example module.
 
 For a real cluster run on GitHub, manually dispatch CI with the `kubernetes`
 boolean enabled. That separate, bounded job installs Kind/Substrate, tests the
-provider and document workflow, runs the Secret-mounted harness checks, and
-collects artifacts. It uses an empty-key configuration and explicit evaluation
-mode, so it requires no OpenAI credential.
+provider and document workflow, runs the Secret-mounted harness and worker
+eviction checks, and collects artifacts. It uses an empty-key configuration
+and explicit evaluation mode, so it requires no OpenAI credential.
 
 The Substrate commit used by CI, local setup, and the sandbox and harness images
 is centralized in `.substrate-revision`.
