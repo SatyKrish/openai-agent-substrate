@@ -177,10 +177,30 @@ other agent sessions and pause anything that could start an Actor.
 ```
 
 The command builds the eviction-aware sandbox image and runs a scripted SDK
-agent. It interrupts an active shell command, persists the pending eviction
-notice, and verifies synchronous suspension. It then restores the same Actor
-from the saved state, checks the workspace file on a replacement worker, and
-deletes the test Actor. The opt-in Kubernetes CI job runs the same command.
+agent. The test requires the original worker to remain reachable until the
+durable checkpoint completes. The opt-in Kubernetes CI job runs the same
+command.
+
+```mermaid
+sequenceDiagram
+    participant Test as SDK test harness
+    participant Original as Original worker Pod
+    participant Substrate as Agent Substrate
+    participant Replacement as Replacement worker Pod
+
+    Test->>Original: Delete Pod during<br/>an active shell command
+    Original-->>Test: Actor reports eviction notice
+    Note over Test: Interrupt the turn and<br/>save the pending notice
+    Test->>Substrate: Close session and request synchronous suspend
+    Substrate->>Original: Checkpoint the Actor
+    Test->>Substrate: Check Actor and snapshot status
+    Substrate-->>Test: Actor suspended and<br/>durable snapshot complete
+    Note over Test,Replacement: Wait for a Ready worker Pod with a different UID
+    Test->>Substrate: Resume the same Actor<br/>from saved session state
+    Substrate->>Replacement: Restore the Actor
+    Test->>Replacement: Verify the restored workspace file
+    Test->>Substrate: Delete the test Actor
+```
 
 ## Verified recovery scope
 

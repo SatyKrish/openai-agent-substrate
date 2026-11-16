@@ -209,6 +209,35 @@ it with the conversation. Serialize turns within a conversation so only one
 turn uses its workspace at a time. Separate conversations can run concurrently.
 [Shared ChatKit harness](agent-harness.md) · [Starter agent](../examples/starter/README.md) · [Workspace persistence](architecture.md#workspace-persistence-and-conversations)
 
+```mermaid
+sequenceDiagram
+    participant State as Application storage
+    participant App as SDK application
+    participant Substrate as Agent Substrate
+    participant Snapshots as Snapshot storage
+
+    Note over App,Substrate: First turn
+    App->>Substrate: Create the Actor and start its session
+    App->>Substrate: Run shell and file tools in the Actor
+    App->>Substrate: Close the session and suspend the Actor
+    Substrate->>Snapshots: Write the workspace checkpoint
+    Snapshots-->>Substrate: Durable checkpoint completed
+    Substrate-->>App: Suspend completed
+    App->>State: Save history and<br/>serialized session state
+
+    Note over App,Substrate: Next turn
+    App->>State: Load history and<br/>session state
+    App->>Substrate: Resume the same Actor and start its session
+    opt Durable restore
+        Substrate->>Snapshots: Read the Actor checkpoint
+    end
+    App->>Substrate: Run tools in the restored workspace
+    Note over App,Substrate: Close and save after each turn
+
+    Note over App,Substrate: Conversation deleted
+    App->>Substrate: Delete the Actor and its workspace
+```
+
 Use `async with session, eviction_watch(client, session):` with
 `eviction_watch` imported from `agent_substrate.eviction` for an
 application-owned run on an eviction-aware image. If the worker reports a
