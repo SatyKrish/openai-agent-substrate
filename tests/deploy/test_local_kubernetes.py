@@ -28,12 +28,17 @@ case "$tool:$*" in
     esac
     ;;
   docker:"inspect kind-registry") exit 1 ;;
+  kubectl:*"config view --minify"*) printf '%s' "$SUBSTRATE_TEST_API_SERVER" ;;
   kubectl:*"get namespace kube-system"*)
     [[ "$SUBSTRATE_TEST_REVISION" != error ]] || exit 92
     printf '%s' "$SUBSTRATE_TEST_REVISION"
     ;;
   kubectl:*"get namespace ate-system"*)
     if [[ "$SUBSTRATE_TEST_INSTALLED" == 1 ]]; then echo namespace/ate-system; fi
+    ;;
+  uv:*"artifacts/examples/starter/deployment/deployment.json"*) echo starter-test-template ;;
+  uv:*"sandbox/tests/kubernetes/test_worker_eviction.py"*)
+    printf 'eviction %s %s %s\\n' "$SUBSTRATE_RUN_WORKER_EVICTION_TESTS" "$SUBSTRATE_KUBE_CONTEXT" "$SUBSTRATE_EVICTION_TEMPLATE" >> "$SUBSTRATE_TEST_CALLS"
     ;;
 esac
 """
@@ -54,13 +59,14 @@ def setup_script(tmp_path):
         path.write_text(MOCK_TOOL)
         path.chmod(0o755)
 
-    def run(*, cluster="existing", installed=False, revision="", source_dir=""):
+    def run(command="setup", *, cluster="existing", installed=False, revision="", source_dir="",
+            api_server="https://127.0.0.1:7443"):
         calls = tmp_path / "calls"
         env = dict(os.environ, PATH=f"{tools}:{os.defpath}", SUBSTRATE_SOURCE_DIR=source_dir,
                    SUBSTRATE_TEST_PIN=PIN, SUBSTRATE_TEST_CALLS=str(calls),
                    SUBSTRATE_TEST_CLUSTER=cluster, SUBSTRATE_TEST_REVISION=revision,
-                   SUBSTRATE_TEST_INSTALLED=str(int(installed)))
-        result = subprocess.run(["bash", str(script), "setup"], env=env, capture_output=True, text=True)
+                   SUBSTRATE_TEST_INSTALLED=str(int(installed)), SUBSTRATE_TEST_API_SERVER=api_server)
+        result = subprocess.run(["bash", str(script), command], env=env, capture_output=True, text=True)
         return result, calls.read_text()
 
     return run
@@ -104,3 +110,33 @@ def test_setup_preserves_a_populated_non_git_source_override(setup_script, tmp_p
     assert result.returncode == 1
     assert "git init" not in calls
     assert "existing Git checkout" in result.stderr
+
+
+def test_regular_provider_check_runs_only_the_standard_cluster_test(setup_script):
+    result, calls = setup_script("test")
+    assert result.returncode == 0, result.stderr
+    assert "pytest -q sandbox/tests/kubernetes/test_live_cluster.py" in calls
+    assert "test_worker_eviction.py" not in calls
+
+
+def test_worker_eviction_check_requires_the_pinned_test_cluster(setup_script):
+    result, calls = setup_script("worker-eviction-test", revision=f"{PIN}-pending")
+    assert result.returncode == 1
+    assert "dedicated Kind cluster" in result.stderr
+    assert "examples.starter.deploy" not in calls
+    assert "test_worker_eviction.py" not in calls
+
+
+def test_worker_eviction_check_rejects_a_nonlocal_api_before_deploy(setup_script):
+    result, calls = setup_script("worker-eviction-test", api_server="https://remote.example:7443", revision=PIN)
+    assert result.returncode == 1
+    assert "loopback Kind API endpoint" in result.stderr
+    assert "get namespace kube-system" not in calls
+    assert "examples.starter.deploy" not in calls
+
+
+def test_worker_eviction_check_deploys_the_image_and_opts_into_the_test(setup_script):
+    result, calls = setup_script("worker-eviction-test", revision=PIN)
+    assert result.returncode == 0, result.stderr
+    assert calls.index("examples.starter.deploy sandbox") < calls.index("test_worker_eviction.py")
+    assert "eviction 1 kind-openai-agent-substrate starter-test-template" in calls

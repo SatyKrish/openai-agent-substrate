@@ -1,6 +1,9 @@
 # Architecture
 
-The Agents SDK harness runs the model and agent loop in the trusted application. `SubstrateSandboxClient` adapts Agent Substrate v1.0.0 to the SDK sandbox interface, and the shared harness gives each conversation an Actor for command execution and workspace files. [OpenAI Sandbox Agents guide](https://developers.openai.com/api/docs/guides/agents/sandboxes) · [Shared agent harness](agent-harness.md) · [Agent Substrate v1.0.0](https://github.com/agent-substrate/substrate/releases/tag/v1.0.0)
+The trusted application runs the Agents SDK loop and calls the model.
+`SubstrateSandboxClient` connects the SDK sandbox interface to Agent Substrate
+v1.0.0 for commands, workspace files, and Actor lifecycle. The example harness
+keeps one Actor per conversation. [SDK integration](usage.md#integrate-into-your-application) · [Shared harness](../harness/README.md) · [OpenAI Sandbox Agents guide](https://developers.openai.com/api/docs/guides/agents/sandboxes)
 
 ![Harness separate from compute: the agent harness accesses trusted services while sandbox compute executes commands against a filesystem.](assets/harness-separate-from-compute.png)
 
@@ -89,10 +92,9 @@ credentials. [Upstream egress policy](https://ate.dev/docs/guides/egress-traffic
 | Synchronous shell execution and nonzero exit codes | No PTY, stdin streaming, preview ports, or precise timeout-vs-signal classification |
 | One application owns a session at a time | Do not concurrently resume, run, or delete the same Actor from multiple workers |
 
-File transfer runs over the same `/process` endpoint, so its cost is the number
-of commands: on local Kind each round trip takes about 0.4 s whatever its size,
-and concurrent commands to one Actor run one after another. A write therefore
-sends as much data per command as the argument limits allow: 90 KiB base64
+File transfer uses shell commands over `/process`. Each round trip took about
+0.4 seconds in the local Kind benchmark, so reducing the number of calls helps.
+A write sends as much data per command as the argument limits allow: 90 KiB base64
 parts, which stay under Linux's 128 KiB per-argument limit, seven to a command,
 which stays under macOS's 1 MiB argument limit for the local simulator. The
 first command creates a hidden partial file next to the target and the last
@@ -141,9 +143,9 @@ lifecycle authorization still belongs to Substrate and the owning application.
 
 ## Workspace persistence and conversations
 
-Creating an Actor registers it as suspended with an initial golden snapshot
-from its template. The first explicit start restores that initial state. Later
-starts restore the Actor's own checkpoint. Each example template requests
+The provider creates an Actor in the suspended state. On first start,
+Substrate restores the template's golden snapshot when available or boots from
+the template image. Later starts restore the Actor's own checkpoint. Each example template requests
 `MEMORY` snapshots and mounts a per-Actor `durableDir` at `/workspace`, with the
 SDK workspace root pointing there. The workspace files are included with the
 Actor's snapshots and the volume follows the Actor across workers. Deleting the
@@ -161,11 +163,11 @@ thread. Different conversations run concurrently in separate Actors with their
 own workspace volumes. A host file lock serializes turns and deletion for
 each conversation, and the harness records Actor creation intent before making
 the lifecycle call. User uploads enter the volume through the provider's file API,
-which defaults to 10 MiB per file. [Shared agent harness](agent-harness.md)
+which defaults to 10 MiB per file. [Shared agent harness](../harness/README.md#a-turn)
 
 ## Conversation lifecycle and density
 
-The harness owns the Actor's active session for the turn, including workspace
+The example harness owns the Actor's active session for the turn, including workspace
 setup, tool execution and output collection. Closing the session suspends the
 Actor and releases its worker capacity between turns.
 
@@ -174,9 +176,10 @@ same routed Actor connection. The external harness stops the turn, records the
 pending notice, and requests synchronous suspend. The notice stays visible in
 the Actor. After a successful checkpoint, the harness records which notice it
 handled so that a restored process can report a later signal independently.
-Recovery depends on the worker remaining reachable until Substrate completes the
-checkpoint.
-[Upstream eviction guidance](https://ate.dev/docs/reference/api-guide/#eviction)
+Recovery depends on the worker remaining reachable until Substrate completes
+the checkpoint. Applications that own their sessions can wrap active work in
+`eviction_watch` and store the session state for recovery.
+[Session ownership and retention](usage.md#choose-how-to-retain-a-session) · [Kind eviction check](local-kubernetes.md#test-worker-eviction) · [Upstream eviction guidance](https://ate.dev/docs/reference/api-guide/#eviction)
 
 | Moment | What happens |
 | --- | --- |
@@ -186,10 +189,9 @@ checkpoint.
 | Next message | The harness resumes the same Actor, possibly on another worker, and reopens the workspace |
 | Conversation deleted | The harness deletes the Actor and its volume |
 
-Each active turn needs space on a worker. At the example templates' 0.5 CPU and
-480 MiB, the pre-release Kind deployment ran four turns per worker. When the
-worker pool is full, the harness shows a waiting step and retries Actor startup
-up to its configured deadline. [Historical measurements](verification.md)
+Each active turn needs space on a worker. Capacity depends on the ActorTemplate
+and the worker pool. When the pool is full, the harness shows a waiting step and
+retries startup up to its configured deadline. [Kind cluster sizing](local-kubernetes.md#cluster-size)
 
 Raw documents, rendered pages and intermediate files stay in the sandbox's
 workspace. What reaches the model, and therefore the conversation history, is

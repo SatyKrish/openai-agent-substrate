@@ -3,14 +3,50 @@
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 [![CI](https://github.com/SatyKrish/openai-agent-substrate/actions/workflows/ci.yml/badge.svg)](https://github.com/SatyKrish/openai-agent-substrate/actions/workflows/ci.yml)
 
-A reference implementation of **Kubernetes as a sandbox compute provider for OpenAI Agents SDK `SandboxAgent`**, built on [Agent Substrate v1.0.0](https://github.com/agent-substrate/substrate/releases/tag/v1.0.0). The SDK harness runs in your trusted application. Shell commands and workspace files run in an Actor scheduled onto a Substrate worker.
+Run [OpenAI Agents SDK](https://openai.github.io/openai-agents-python/) sandbox tools on Kubernetes with [Agent Substrate v1.0.0](https://github.com/agent-substrate/substrate/releases/tag/v1.0.0). Your application runs the agent and holds its model credentials and conversation history. Substrate runs shell commands and keeps workspace files in an Actor that can suspend and resume.
+
+## Start here
+
+- **Already have an SDK app?** [Connect it to a Substrate cluster](#use-the-provider-in-your-own-application).
+- **Want to see the integration work?** [Run the key-free check on local Kind](#quick-start).
+
+## Use the provider in your own application
+
+Start with a Substrate v1.0.0 cluster, the matching `kubectl ate` plugin on
+`PATH`, and an ActorTemplate that serves the sandbox execution API. The
+integration example uses `sandbox-template` in `ate-demo-sandbox`.
+[Existing-cluster setup](docs/deployment.md#existing-substrate-cluster) · [Set up local Kind](#quick-start)
+
+The provider requires Python 3.11 or newer and pins `openai-agents==0.24.0`.
+Install it into your application's Python environment from the repository checkout.
+
+```sh
+git clone https://github.com/SatyKrish/openai-agent-substrate.git
+cd openai-agent-substrate
+pip install ./sandbox
+```
+
+Create a session with `SubstrateSandboxClient`. Inside the session's
+`async with` block, pass it to the runner with your existing `SandboxAgent`.
+
+```python
+result = await Runner.run(
+    agent,
+    message,
+    run_config=RunConfig(sandbox=SandboxRunConfig(session=session)),
+)
+```
+
+Closing the session suspends the Actor. The full example configures the
+client, runs the agent, serializes the session state to JSON, and verifies the
+same file after resume. [Run the Python integration example](docs/usage.md#integrate-into-your-application)
 
 ## Quick start
 
-Run a scripted SDK agent in a real gVisor-backed Actor and verify that its
-workspace survives suspend and resume. This check is key-free. You need macOS
-with Colima or Linux with Docker running, plus the Docker CLI, Git, Go,
-kubectl, uv, and internet access. [Local Kubernetes requirements](docs/local-kubernetes.md#requirements)
+Try the provider with a scripted model on a real gVisor-backed Actor. The
+check needs no OpenAI API key. Use macOS with Colima or Linux with Docker,
+plus the Docker CLI, Git, Go, kubectl, uv, and internet access.
+[Local requirements](docs/local-kubernetes.md#requirements)
 
 ```sh
 git clone https://github.com/SatyKrish/openai-agent-substrate.git
@@ -19,177 +55,69 @@ cd openai-agent-substrate
 ./scripts/local-kubernetes.sh test
 ```
 
-Setup provisions a dedicated Kind cluster with a local registry, the pinned
-Substrate release, a sandbox worker pool, and the `kubectl ate` plugin. The test
-creates an Actor, runs commands, resumes the Actor from saved session state,
-and deletes the Actor when finished. Look for `"workspace_survived_resume": true`
-in the output and `artifacts/local/results/verification.json`.
-[Test details](docs/local-kubernetes.md#test) · [Stop or tear down the cluster](docs/local-kubernetes.md#stop-restart-and-tear-down)
+Look for `"workspace_survived_resume": true` in the output and in
+`artifacts/local/results/verification.json`. The check creates an Actor,
+runs an SDK agent, suspends and resumes the Actor, then deletes it.
 
-If you already have an SDK application or a Substrate cluster, start with the
-provider integration and the existing-cluster deployment guide. If you’re
-building an agent, use Starter as a template.
-[SDK integration](docs/usage.md#integrate-into-your-application) · [Existing-cluster deployment](docs/deployment.md) · [Starter agent](examples/starter/README.md)
+The Kind guide covers cluster cleanup and the optional worker-drain test,
+which verifies recovery on a replacement worker.
+[Local Kind guide](docs/local-kubernetes.md) · [Deployment diagram](docs/local-kubernetes.md#how-setup-works)
 
-## Run Starter with a live model
+## Harness separate from compute
 
-After cluster setup, copy the example settings file and set `OPENAI_API_KEY`
-and `OPENAI_MODEL` in `.env`. The harness uses the key on your machine.
+The provider connects the SDK to Actor lifecycle and execution. The trusted
+application retains conversation state, calls the model, and runs any
+credentialed tools. [Architecture and supported capabilities](docs/architecture.md)
+
+![OpenAI architecture diagram showing a trusted harness connected to sandbox compute](docs/assets/harness-separate-from-compute.png)
+
+*Source: [OpenAI Sandbox Agents guide](https://developers.openai.com/api/docs/guides/agents/sandboxes).*
+
+## Examples
+
+The examples use the same provider and a shared harness. Each has its own
+setup and test instructions. [Browse all examples](examples/README.md)
+
+- **Starter** gives each chat a persistent workspace. [Starter guide](examples/starter/README.md)
+- **Document Intelligence** checks generated reports against their sources. [Document Intelligence guide](examples/document_intelligence/README.md)
+- **SRE** collects read-only cluster evidence in the trusted harness. [SRE guide](examples/sre/README.md)
+
+### Run Starter with a live model
+
+After Kind setup, copy the example environment file and set `OPENAI_API_KEY`
+and `OPENAI_MODEL` in `.env`.
 
 ```sh
 cp .env.example .env
 ```
 
-Build the Starter sandbox image, register its ActorTemplate, and start the
-terminal chat.
+Then build the sandbox and start the terminal chat. The Starter guide also
+covers the optional browser UI.
 
 ```sh
 ./scripts/local-kubernetes.sh starter-setup
 ./scripts/local-kubernetes.sh starter-chat
 ```
 
-Ask it to compute something, for example the primes below 200. You see each
-step as it happens: the agent writes and runs Python in its own Actor, saves the
-results in `output/`, and the host checks them after the turn. The chat prints
-where each saved file is on your machine. The first message creates the Actor,
-later messages resume it, and `/quit` leaves the conversation suspended for
-later (`/list` and `/open` find it again). To ask one question and exit, pass
-it as an argument: `./scripts/local-kubernetes.sh starter-chat "What is 2**100?"`.
-
-**Optional: open the UI.** `./scripts/local-kubernetes.sh starter-ui` serves
-the same conversations in a browser at <http://localhost:8002>; the terminal
-chat prints each conversation's link. A side panel opens when a turn writes
-files and shows them, the quotes the host checked, and the turn's trace. A turn
-running in one is refused in the other until it ends. For a
-trace of each turn, run `./scripts/local-kubernetes.sh tracing-setup` first; the
-chat and the UI then link each turn to Jaeger.
-
-## Harness separate from compute
-
-This project follows the [harness separate from compute pattern](https://developers.openai.com/api/docs/guides/agents/sandboxes) in the official OpenAI Sandbox Agents guide.
-
-![Harness separate from compute: trusted agent orchestration calls sandbox compute for shell execution and filesystem work.](docs/assets/harness-separate-from-compute.png)
-
-*Diagram from the [official OpenAI documentation](https://developers.openai.com/api/docs/guides/agents/sandboxes).*
-
-`SubstrateSandboxClient` connects the SDK sandbox interface to Substrate. Kubernetes manages worker infrastructure. Substrate's control plane assigns Actors to workers, and its router forwards requests to the assigned Actor. Each example runs on the [shared agent harness](docs/agent-harness.md). See the [Agent Substrate architecture](https://ate.dev/docs/concepts/architecture/).
-
-| Harness (runs the agent loop) | Sandbox (runs the tools) |
-| --- | --- |
-| The OpenAI Agents SDK, with SDK sessions for history | One Agent Substrate Actor per conversation |
-| ChatKit for the streaming UI, or a terminal chat | Shell, files, skills and agent-written code |
-| OpenTelemetry to Jaeger | A per-Actor volume that keeps the workspace across turns |
-| Model credentials, conversation state, suspend and resume, host checks of outputs | Workspace setup verifies separation from the harness API key and Secret mount |
-
-The harness keeps model calls, credentialed tools and conversation state in the
-trusted application. The SRE agent's read-only cluster tools run there and pass
-their output to the sandbox as evidence. The harness explicitly starts the
-Actor for each turn and requests a synchronous suspend when the turn ends.
-Substrate persists the checkpoint to snapshot storage and frees the worker's
-capacity. The next turn resumes the same Actor and workspace. See the
-[architecture and supported capabilities](docs/architecture.md).
-
-## Build your own agent
-
-Copy [`examples/starter`](examples/starter/README.md). An agent is four small pieces:
-
-| Piece | File | What you change |
-| --- | --- | --- |
-| The agent | `agent/agent.py`, `instructions.md` | A plain SDK `SandboxAgent`: instructions, tools, skills |
-| Its spec | `agent/spec.py` | The starting workspace, the host check, and optional harness tools and uploads |
-| Its sandbox | `deploy/sandbox.Dockerfile`, `deploy/__main__.py` | The tools in the image, and its CPU and memory |
-| Its front ends | `__main__.py`, `server.py`, `ui/` | The terminal chat, the settings both share, and the optional UI |
-
-The [harness guide](harness/README.md) describes what the harness does each
-turn, and the [design](docs/agent-harness.md) explains the split.
-
-## More agents
-
-- **[Document Intelligence](examples/document_intelligence/README.md)** analyzes
-  reports and your own PDF, Markdown, text or CSV uploads, with quotes checked
-  against the cited page. Deploy its sandbox with
-  `./scripts/local-kubernetes.sh document-intelligence`, then open its UI with
-  `./scripts/local-kubernetes.sh ui` (<http://localhost:8000>). Its command-line
-  workflow also runs as a Kubernetes Job with the harness in a pod:
-  `agent-setup`, then `agent-test` (scripted) or `agent-run` (live); see the
-  [Kubernetes agent setup guide](examples/document_intelligence/deploy/README.md).
-- **[SRE agent](examples/sre/README.md)** investigates unhealthy workloads with
-  read-only cluster access in the harness, analyzes the evidence in its sandbox,
-  and has its findings checked against that evidence:
-  `./scripts/local-kubernetes.sh sre-setup`, then `sre-ui` (<http://localhost:8001>).
-
-## Use the provider in your own application
-
-The provider is the `openai-agent-substrate` package in `sandbox/`, imported as `agent_substrate`. From a
-checkout, `pip install ./sandbox` installs it without the OpenTelemetry SDK or
-OTLP exporter; use `pip install './sandbox[tracing]'` for OTLP export. See
-[SDK integration and session resume](docs/usage.md) and, for a cluster you
-already run, the [deployment guide](docs/deployment.md).
-
-The [provider check](examples/provider_check/README.md) exercises the provider
-alone: it runs a scripted SDK agent in an Actor, suspends, serializes, resumes,
-and confirms the workspace survived. With `--backend local` it needs no cluster
-or API key, but it runs commands on your host: **local mode is a protocol
-simulator with no sandbox isolation.**
-
-```sh
-uv sync --locked
-uv run --locked python -m examples.provider_check --backend local
-```
-
 ## Verification
 
-The provider pins `openai-agents==0.24.0`. The verification record identifies
-the Substrate revision and environment for each set of checks. The October
-2026 runs on pre-release Substrate covered real Actor execution with gVisor on
-ARM64 Kind, authenticated routing, snapshot recovery and the Secret-backed
-Document Intelligence Job. The record also describes the limits of those
-checks. [Verification record](docs/verification.md)
-
-## Tracing
-
-`./scripts/local-kubernetes.sh tracing-setup` deploys Jaeger. The terminal
-chats and agent UIs then link each turn to its trace, which holds the SDK's model and tool spans
-and the sandbox's execution and lifecycle spans; `tracing-ui` opens Jaeger on
-<http://127.0.0.1:16686>. The [tracing guide](docs/tracing.md) covers
-configuration, span content and verification. The exporter stays in the
-trusted harness.
-
-## Repository layout
-
-```text
-pyproject.toml              uv workspace root: dev tools and test settings, no package
-sandbox/                    The provider library (openai-agent-substrate), the only published wheel
-  src/agent_substrate/      SDK provider, transport, lifecycle, tracing
-  tests/                    Provider unit, integration, Kubernetes and packaging tests
-harness/                    Shared agent harness package: the agent loop, one sandbox per conversation
-  src/openai_harness/       ChatKit runtime, uploads, evidence, checks, routes
-  tests/                    Harness tests
-examples/                   The starter agent, the other agents, and the provider check
-testing/                    Test doubles: scripted models, a local Substrate stand-in, ChatKit helpers; never shipped
-tests/                      Repository-wide checks: deployment resources and layer boundaries
-docs/                       Architecture, deployment, usage, and development guides
-  assets/                   Documentation images
-scripts/                    Local Kind bootstrap and CLI dispatch
-deploy/kubernetes/          Reusable permissions, connection settings, PVC, and sandbox templates
-.github/                    CI, dependency updates, and contribution templates
-```
-
-## Documentation
-
-- [Architecture and limits](docs/architecture.md) and the [agent harness](docs/agent-harness.md)
-- [Local Kubernetes setup and tests](docs/local-kubernetes.md)
-- [Existing-cluster setup](docs/deployment.md)
-- [SDK integration and session resume](docs/usage.md)
-- [Tracing with Jaeger](docs/tracing.md)
-- [Starter agent](examples/starter/README.md), [all examples](examples/README.md), the [Document Intelligence UI](examples/document_intelligence/ui/README.md) and the [SRE agent](examples/sre/README.md)
-- [Shared harness package](harness/README.md)
-- [Development](docs/development.md) and the [verification record](docs/verification.md)
+The provider check passed on Agent Substrate v1.0.0 with gVisor on ARM64 Kind.
+The Python example restored the same Actor from a clean wheel install with a
+scripted model. The separate worker-drain test interrupted an active SDK
+command and restored its workspace on a replacement worker.
+[Verification record](docs/verification.md#agent-substrate-v100) · [Scope and limits](docs/verification.md#limits-of-this-verification)
 
 ## Contributing
 
-Contributions are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md), use the [issue tracker](https://github.com/SatyKrish/openai-agent-substrate/issues) for bugs and proposals, and follow [SECURITY.md](SECURITY.md) for vulnerability reports.
+Use the development guide for the provider test suite, package builds, and the
+host protocol simulator. For traces from the SDK and sandbox, see the Jaeger
+setup. [Contributor guide](CONTRIBUTING.md) · [Development](docs/development.md) · [Tracing](docs/tracing.md) · [Documentation index](docs/README.md)
+
+Report bugs through GitHub Issues and vulnerabilities through the private
+reporting channel. [Issue tracker](https://github.com/SatyKrish/openai-agent-substrate/issues) · [Security policy](SECURITY.md)
 
 ## License
 
-Original project code and documentation are licensed under [Apache-2.0](LICENSE). Third-party code and the OpenAI diagram retain their respective rights and attribution; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Original code and documentation are licensed under Apache-2.0. The OpenAI diagram and other
+third-party material retain their original rights and notices.
+[License](LICENSE) · [Third-party notices](THIRD_PARTY_NOTICES.md)

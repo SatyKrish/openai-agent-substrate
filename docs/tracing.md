@@ -24,18 +24,20 @@ examples; the harness image explicitly installs the tracing extra.
 
 ## Local Kubernetes workflow
 
-After [local Kubernetes setup](local-kubernetes.md), configure your `.env`, build
-the harness, deploy Jaeger, and run the agent:
+This optional walkthrough traces the Document Intelligence Job. After local
+Kind setup, copy `.env.example` to `.env` if it does not already exist.
+`agent-setup` uses that file to create the Job's Secret. The scripted
+`agent-test` run needs no OpenAI API key. [Key-free provider check](local-kubernetes.md#test)
 
 ```sh
 ./scripts/local-kubernetes.sh agent-setup
 ./scripts/local-kubernetes.sh tracing-setup
-./scripts/local-kubernetes.sh agent-run
+./scripts/local-kubernetes.sh agent-test
 ./scripts/local-kubernetes.sh agent-artifacts
 ```
 
-`agent-run` performs real model inference. For an explicit execution evaluation
-without model calls, use `agent-test` instead. Jaeger all-in-one 1.76.0 is pinned
+For live inference, set `OPENAI_API_KEY` and `OPENAI_MODEL` in `.env`, rerun
+`agent-setup` to update the Secret, and run `agent-run`. Jaeger all-in-one 1.76.0 is pinned
 by digest in `examples/document_intelligence/deploy/jaeger.py`. It runs in namespace
 `openai-agent-substrate` with an in-memory store and ClusterIP Service. It has
 no harness Secret mount or service-account token. Traces disappear when the

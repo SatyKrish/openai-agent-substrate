@@ -1,10 +1,10 @@
 # Provider check
 
-Checks the provider on its own, without the harness or an agent of yours: it
-creates an Actor, runs a scripted SDK agent in it, suspends it, serializes the
-session, resumes it and confirms the workspace survived. It writes
-`verification.json`. To build an agent, start from the
-[starter agent](../starter/README.md) instead.
+This smoke test creates an Actor, runs a scripted SDK agent in it, suspends it,
+serializes the session, and confirms that the workspace survived resume. It
+writes `verification.json`. Use the copyable provider example to integrate it
+into an SDK application, or use Starter as a complete agent reference.
+[SDK integration](../../docs/usage.md#integrate-into-your-application) · [Starter](../starter/README.md)
 
 Run from the repository root after `uv sync --locked`. For Kind, complete
 `./scripts/local-kubernetes.sh setup` first to build the checkout-local

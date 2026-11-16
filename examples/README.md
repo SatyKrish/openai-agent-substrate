@@ -7,7 +7,7 @@ applications and are not installed by the library wheel.
 
 | Example | Workflow |
 | --- | --- |
-| [Starter agent](starter/README.md) | The golden path: the smallest complete agent on the harness, to run and to copy |
+| [Starter agent](starter/README.md) | The smallest complete example on the shared harness, with terminal chat and an optional UI |
 | [Provider check](provider_check/README.md) | The provider alone: execution, suspension, session serialization and resume |
 | [Document Intelligence](document_intelligence/README.md) | Skill loading, source reconciliation, agent-written Python, sandbox execution and cited reports |
 | [Document Intelligence UI](document_intelligence/ui/README.md) | ChatKit conversations, one Actor and workspace volume each, with uploads, per-turn files and Jaeger traces |

@@ -1,72 +1,135 @@
 # Using the sandbox provider
 
-## Run the provider check on Kubernetes
-
-Use a cluster with Substrate installed and the upstream sandbox demo's `sandbox-template` prepared. See [deployment guide](deployment.md) for prerequisites and router access.
-
-```sh
-uv run python -m examples.provider_check \
-  --backend substrate \
-  --context YOUR_KUBERNETES_CONTEXT \
-  --atespace ate-demo-sandbox \
-  --template sandbox-template
-```
-
-The provider manages an authenticated loopback Actor proxy automatically. Use `--kubeconfig PATH` when the cluster configuration is separate.
-
-This uses the scripted model, so it verifies execution and suspend/resume against a real cluster without making OpenAI API calls. It creates a uniquely named Actor and deletes it on exit by default.
-
-For a live model, set `OPENAI_API_KEY` in the **host** environment and add `--model YOUR_OPENAI_MODEL_ID`. The key is used by the SDK harness and is never put in the manifest or execution request. The provider check exports traces when an OTLP endpoint is configured; see the [tracing guide](tracing.md). Without an endpoint, export is disabled.
-
-To retain the workspace, add `--keep-actor`. Closing the session requests `kubectl ate suspend actor --mode sync`; after the second suspension, the check saves `artifacts/session.json`. This retains the Actor and its storage until you explicitly delete it:
-
-```sh
-kubectl ate --context YOUR_KUBERNETES_CONTEXT delete actor ACTOR_NAME --atespace ate-demo-sandbox
-```
-
-Read the Actor name from the check's output. Do not delete the shared template or worker pool to clean up one run.
+- **Connect an SDK application to Substrate.** Set up cluster access, install
+  the provider, and run the example with your own model. [Application integration](#integrate-into-your-application)
+- **Try the provider without an API key.** Run the scripted check on a local
+  Kind cluster or on a cluster you already operate. [Kind setup and test](local-kubernetes.md) · [Existing-cluster check](#run-the-provider-check-on-kubernetes)
 
 ## Integrate into your application
 
+### 1. Prepare Substrate and cluster access
+
+The example needs Substrate v1.0.0, `kubectl ate` on `PATH`, and the upstream
+`sandbox-template` ActorTemplate in `ate-demo-sandbox`. Set up the cluster and
+verify access to the template. [Existing-cluster setup](deployment.md#existing-substrate-cluster) · [Local Kind setup](local-kubernetes.md#set-up)
+
+Set `SUBSTRATE_CONTEXT` to the Kubernetes context. Set
+`SUBSTRATE_KUBECONFIG` when you use a separate kubeconfig. For the local Kind
+cluster, run these exports from the repository root.
+
+```sh
+export PATH="$PWD/artifacts/local/bin:$PATH"
+export SUBSTRATE_CONTEXT=kind-openai-agent-substrate
+export SUBSTRATE_KUBECONFIG="$PWD/artifacts/local/kubeconfig"
+```
+
+### 2. Install the provider
+
+Use your application's Python environment from the repository root. The
+provider requires Python 3.11 or newer and pins `openai-agents==0.24.0`.
+
+```sh
+pip install ./sandbox
+```
+
+### 3. Run and resume an SDK agent
+
+Your application keeps its `SandboxAgent`, model, and conversation state. Give
+your existing `Runner.run` call a `RunConfig` with
+`SandboxRunConfig(session=session)` from `SubstrateSandboxClient`. The provider
+handles Actor lifecycle and sandbox execution.
+
+Set `OPENAI_API_KEY` and `OPENAI_MODEL` in your application environment. Save
+the example as `workspace_demo.py` and run `python workspace_demo.py`. It copies
+a file with SDK sandbox tools, serializes the session to JSON after suspension,
+then opens the same Actor and verifies the file survived.
+
 ```python
+import asyncio
+import json
+import os
+from pathlib import Path
+
 from agents import Runner
 from agents.run import RunConfig
 from agents.sandbox import Manifest, SandboxAgent, SandboxRunConfig
 from agents.sandbox.capabilities import Filesystem, Shell
 from agents.sandbox.entries import File
+
 from agent_substrate import (
-    KubectlActorControl, SubstrateSandboxClient, SubstrateSandboxOptions,
+    KubectlActorControl,
+    SubstrateSandboxClient,
+    SubstrateSandboxOptions,
 )
 
-client = SubstrateSandboxClient(
-    atespace="ate-demo-sandbox",
-    control=KubectlActorControl(context="YOUR_KUBERNETES_CONTEXT"),
-)
-manifest = Manifest(entries={"task.txt": File(content=b"Write a short report.")})
-agent = SandboxAgent(
-    name="Substrate worker",
-    instructions="Read task.txt and write report.txt in the workspace.",
-    capabilities=[Shell(), Filesystem()],
-    default_manifest=manifest,
-)
-session = await client.create(
-    manifest=manifest,
-    options=SubstrateSandboxOptions(template="sandbox-template"),
-)
-try:
-    async with session:
-        result = await Runner.run(
-            agent, "Complete the task.",
-            run_config=RunConfig(
-                sandbox=SandboxRunConfig(session=session),
-                tracing_disabled=True,
-            ),
-        )
-finally:
-    await client.delete(session)
+
+async def run_workspace_round_trip(model):
+    client = SubstrateSandboxClient(
+        atespace="ate-demo-sandbox",
+        control=KubectlActorControl(
+            context=os.environ["SUBSTRATE_CONTEXT"],
+            kubeconfig=os.getenv("SUBSTRATE_KUBECONFIG"),
+        ),
+    )
+    content = b"hello from the Actor\n"
+    report = Path("report.txt")
+    manifest = Manifest(
+        root="/workspace", entries={"input.txt": File(content=content)},
+    )
+    agent = SandboxAgent(
+        name="Substrate workspace demo",
+        model=model,
+        instructions="Use the sandbox tools to copy input.txt to report.txt byte for byte.",
+        capabilities=[Shell(), Filesystem()],
+        default_manifest=manifest,
+    )
+
+    session = await client.create(
+        manifest=manifest,
+        options=SubstrateSandboxOptions(template="sandbox-template"),
+    )
+    try:
+        async with session:
+            await Runner.run(
+                agent, "Copy input.txt to report.txt, then print the report.",
+                run_config=RunConfig(
+                    sandbox=SandboxRunConfig(session=session),
+                    tracing_disabled=True,
+                ),
+            )
+            with await session.read(report) as handle:
+                saved_report = handle.read()
+            if saved_report != content:
+                raise RuntimeError("The agent did not copy input.txt exactly")
+
+        # Leaving the scope suspends the Actor synchronously.
+        actor_ref = f"{session.state.atespace}/{session.state.actor_name}"
+        state_json = json.dumps(client.serialize_session_state(session.state))
+
+        # Store this JSON in trusted application storage between turns.
+        state = client.deserialize_session_state(json.loads(state_json))
+        resumed = await client.resume(state)
+        async with resumed:
+            if f"{resumed.state.atespace}/{resumed.state.actor_name}" != actor_ref:
+                raise RuntimeError("The resumed session points to a different Actor")
+            with await resumed.read(report) as handle:
+                if handle.read() != saved_report:
+                    raise RuntimeError("The workspace file changed across resume")
+        print(f"Resumed {actor_ref} with report.txt intact")
+    finally:
+        await client.delete(session)
+
+
+if __name__ == "__main__":
+    asyncio.run(run_workspace_round_trip(os.environ["OPENAI_MODEL"]))
 ```
 
-The example belongs inside an async function. Set the host API key and a model available to your account when using a live model.
+The example deletes the Actor when it finishes. For a conversation, persist the
+JSON in your application and delete the Actor when the conversation ends.
+Store SDK conversation history or `RunState` alongside the Actor state so the
+next run can restore both. [SDK conversation sessions](https://openai.github.io/openai-agents-python/sessions/)
+
+## Choose how to retain a session
 
 For a disposable run, pass `SandboxRunConfig(client=client, options=options)`
 with `options = SubstrateSandboxOptions(template="sandbox-template")`. The SDK
@@ -111,11 +174,16 @@ lost. If it cannot confirm cleanup, `ActorCreateUncertainError.actor_ref`
 identifies the Actor to reconcile. If the create reply for an explicitly chosen
 name is lost, that error leaves ownership and cleanup with the caller.
 
-That client runs `kubectl ate` with your kubeconfig and reaches each Actor through `kubectl ate proxy`, the path for a harness outside the cluster. A harness in a pod calls Substrate as its own ServiceAccount instead, with the credentials [`substrate_volume()`](../deploy/kubernetes/base/README.md) mounts:
+## Connect an in-cluster harness
+
+The example client runs `kubectl ate` with your kubeconfig and reaches each
+Actor through `kubectl ate proxy`. A harness in a pod calls Substrate as its own
+ServiceAccount, using the volume provided by `substrate_volume()`.
+[Credential projection](../deploy/kubernetes/base/README.md)
 
 ```python
 from pathlib import Path
-from agent_substrate import RouterTLS
+from agent_substrate import KubectlActorControl, RouterTLS, SubstrateSandboxClient
 
 credentials = Path("/var/run/substrate")
 client = SubstrateSandboxClient(
@@ -129,22 +197,46 @@ client = SubstrateSandboxClient(
 )
 ```
 
-Lifecycle calls go straight to Substrate's API with the pod's token, and commands go straight to its router over mutual TLS with the pod's certificate. Neither borrows the shared `ate-client` identity or needs a port-forward. See [deployment](deployment.md#a-harness-in-the-cluster) for the grants it needs.
+Lifecycle calls reach Substrate's API with the pod's token. Sandbox commands
+reach the router over mutual TLS with the pod's certificate.
+[In-cluster access grants](deployment.md#a-harness-in-the-cluster)
 
-For retained sessions, omit deletion, serialize **after** closing, and reconnect using the same configured client:
+## Use one Actor per conversation
 
-```python
-payload = client.serialize_session_state(session.state)
-# Save payload as JSON in trusted application storage.
-resumed = await client.resume(client.deserialize_session_state(payload))
-async with resumed:
-    # Pass resumed through SandboxRunConfig(session=resumed).
-    ...
+Create an Actor on the first message and store its serialized state alongside
+the conversation history. Resume the same Actor for later messages and delete
+it with the conversation. Serialize turns within a conversation so only one
+turn uses its workspace at a time. Separate conversations can run concurrently.
+[Shared ChatKit harness](agent-harness.md) · [Starter agent](../examples/starter/README.md) · [Workspace persistence](architecture.md#workspace-persistence-and-conversations)
+
+```mermaid
+sequenceDiagram
+    participant State as Application storage
+    participant App as SDK application
+    participant Substrate as Agent Substrate
+    participant Snapshots as Snapshot storage
+
+    Note over App,Substrate: First turn
+    App->>Substrate: Create the Actor and start its session
+    App->>Substrate: Run shell and file tools in the Actor
+    App->>Substrate: Close the session and suspend the Actor
+    Substrate->>Snapshots: Write the workspace checkpoint
+    Snapshots-->>Substrate: Durable checkpoint completed
+    Substrate-->>App: Suspend completed
+    App->>State: Save history and<br/>serialized session state
+
+    Note over App,Substrate: Next turn
+    App->>State: Load history and<br/>session state
+    App->>Substrate: Resume the same Actor and start its session
+    opt Durable restore
+        Substrate->>Snapshots: Read the Actor checkpoint
+    end
+    App->>Substrate: Run tools in the restored workspace
+    Note over App,Substrate: Close and save after each turn
+
+    Note over App,Substrate: Conversation deleted
+    App->>Substrate: Delete the Actor and its workspace
 ```
-
-Keep SDK conversation history or `RunState` separately. Actor suspension preserves compute/workspace state, not the external SDK harness. `examples/provider_check/main.py` shows carrying `result.to_input_list()` into the next run.
-
-For a chat application, keep one Actor per conversation: create it on the first message, store the serialized state with the conversation and its history in an SDK session (or `result.to_input_list()`), resume the Actor for each later message, and delete it when the conversation is deleted. Serialize turns within one conversation; separate conversations can run concurrently. The [shared agent harness](agent-harness.md) implements this with ChatKit for the example agents; the [starter agent](../examples/starter/README.md) is the smallest one, and [architecture](architecture.md#workspace-persistence-and-conversations) covers the workspace volume that makes it durable.
 
 Use `async with session, eviction_watch(client, session):` with
 `eviction_watch` imported from `agent_substrate.eviction` for an
@@ -159,9 +251,34 @@ Rebuild and deploy the example sandbox image to enable eviction handling for
 new conversations. Existing Actors keep their original image and template.
 [Local deployment commands](local-kubernetes.md) · [Substrate eviction guidance](https://ate.dev/docs/reference/api-guide/#eviction)
 
-For complete runnable examples, see [examples/README.md](../examples/README.md).
+The provider check shows how to carry `result.to_input_list()` into the next
+run. [Provider check source](../examples/provider_check/main.py) · [Complete example applications](../examples/README.md)
 
-The generic retained-session utility is `python -m examples.provider_check.resume`:
+## Run the provider check on Kubernetes
+
+From the repository checkout, use a Substrate cluster with the upstream
+`sandbox-template` ready. The check runs a scripted SDK agent, verifies that
+its workspace survives suspend and resume, and deletes its Actor by default.
+It runs without an OpenAI API key. [Deployment prerequisites](deployment.md)
+
+```sh
+uv run --locked python -m examples.provider_check \
+  --backend substrate \
+  --context YOUR_KUBERNETES_CONTEXT \
+  --atespace ate-demo-sandbox \
+  --template sandbox-template
+```
+
+The provider opens an authenticated loopback Actor proxy. Pass
+`--kubeconfig PATH` for a separate cluster configuration. For live inference,
+set `OPENAI_API_KEY` in your application environment and add `--model MODEL_ID`.
+The check exports traces when you configure an OTLP endpoint.
+[Tracing setup](tracing.md)
+
+Add `--keep-actor` to retain the suspended Actor and save its state to
+`artifacts/session.json`. It retains the workspace until you delete the Actor.
+
+Inspect a retained Actor with the companion resume utility.
 
 ```sh
 uv run python -m examples.provider_check.resume --context YOUR_KUBERNETES_CONTEXT --state-file artifacts/session.json
@@ -169,4 +286,3 @@ uv run python -m examples.provider_check.resume --context YOUR_KUBERNETES_CONTEX
 
 Pass the same `--kubeconfig` and `--atespace` used for creation when applicable.
 Use `--command` to inspect artifacts, or `--delete` to remove the retained Actor.
-Domain workflows are documented under [examples/](../examples/README.md).

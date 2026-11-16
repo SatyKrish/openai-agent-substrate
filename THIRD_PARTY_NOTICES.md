@@ -23,4 +23,11 @@ The Apache-2.0 license in the repository root covers original project code and d
 - The image was supplied for inclusion in this project's README and is reproduced without modification.
 - The diagram and associated trademarks remain subject to their original rights and terms. They are excluded from the project's Apache-2.0 license grant.
 
+## Kubernetes stencils
+
+`docs/assets/kind-deployment.svg` embeds the Deployment, DaemonSet, and Pod
+stencils from the Kubernetes community icon set at commit
+`a222663ef579405457f78f9fe3c077894565a918`. The stencils are used under the
+Apache-2.0 license. [Kubernetes icon set](https://github.com/kubernetes/community/tree/a222663ef579405457f78f9fe3c077894565a918/icons)
+
 Dependencies installed through `uv.lock` retain their respective licenses; they are not vendored into this repository.

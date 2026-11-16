@@ -1,46 +1,45 @@
 # Development
 
-Use Python 3.11 or later on macOS or Linux. The repository is a uv workspace
-with two packages: the provider in `sandbox/` (`openai-agent-substrate`, imported
-as `agent_substrate`) and the shared agent harness in `harness/` (`openai-harness`,
-imported as `openai_harness`). Install the provider and the development tools with:
-
-```sh
-uv sync --locked
-```
-
-The harness, the agents' terminal chats and UIs, and their tests need the `ui` dependency group,
-which installs the harness package with ChatKit, Starlette and uvicorn. CI
-installs it. Without it, those tests are skipped:
+Use Python 3.11 or later on macOS or Linux. The [coding agent guide](../AGENTS.md)
+maps the code and the contracts to preserve. Install the locked workspace with
+the `ui` group for the same dependency coverage as CI.
 
 ```sh
 uv sync --locked --group ui
 ```
 
-The default tests and the provider check use a deterministic model and temporary local workspaces. They require no OpenAI API key or Kubernetes cluster. Loopback sockets must be allowed in your development environment.
+For provider-only work, `uv sync --locked` omits the `ui` group. Tests that
+require the harness dependencies skip. The default suite runs without Kubernetes
+or an OpenAI API key and uses loopback sockets for local HTTP integration tests.
 
 ## Tests and execution checks
 
 ```sh
-uv run ruff check sandbox harness scripts deploy examples testing tests conftest.py
-uv run mypy
-uv run pytest -q
-uv run python -m examples.provider_check --backend local --output-dir artifacts/local
+uv run --locked --group ui ruff check sandbox harness scripts deploy examples testing tests conftest.py
+uv run --locked --group ui mypy
+uv run --locked --group ui pytest -q
 ```
 
-Tests cover native skill loading, domain code execution, exact citations and artifact reconciliation, the actual SDK tool loop, filesystem patching, binary files and batched multi-command transfers, shell output/exit codes, routing headers, state serialization and resume, lost Actors, unsupported manifest options, file limits, and non-replay of failed executions.
+Use [provider unit tests](../sandbox/tests/unit/) for lifecycle and proxy
+contracts, [provider integration tests](../sandbox/tests/integration/) for HTTP
+and SDK tool execution, and [harness tests](../harness/tests/) for conversation
+behavior. Each example owns its workflow tests under `evals/`.
 
-The harness tests (`harness/tests/`) cover two messages sent to one conversation
-at once, waiting for and timing out on a full worker pool, history after a
-failed turn, evidence from parallel harness tools, and the terminal chat (one
-question, an interactive session, and stripped control characters). The starter
-agent's tests run a turn end to end, check its host check and sandbox profile,
-and confirm its terminal chat and UI share a conversation. The SRE agent's tests
-cover its tool allowlists, the reader's Role, the evidence check, and an
-investigation end to end with a fake cluster. Agents' tests build on
-`testing.harness`.
+### Host protocol simulator
 
-For wire compatibility with the actual upstream Go execution server:
+The repository provider check uses a scripted model and a temporary host
+workspace in `--backend local` mode. This mode runs commands on your machine
+without sandbox isolation. [Provider check modes](../examples/provider_check/README.md)
+
+```sh
+uv run --locked python -m examples.provider_check --backend local \
+  --output-dir artifacts/local/protocol-simulator
+```
+
+### Upstream execution server on the host
+
+Use the upstream Go execution server to check HTTP wire compatibility while
+lifecycle operations remain simulated.
 
 ```sh
 sh scripts/build-sandbox-server.sh "$(cat .substrate-revision)" artifacts/upstream-sandbox
@@ -51,11 +50,19 @@ uv run python -m examples.provider_check --backend local \
   --output-dir artifacts/upstream
 ```
 
-The script downloads the v1.0.0 `demos/sandbox` package at the pinned commit through the Go module proxy and compiles it alongside the project's eviction notice handler, just as the sandbox images do. This exercises the upstream HTTP execution code and the handler with simulated lifecycle operations. The server briefly listens on the selected port on all host interfaces. Run this compatibility check only on a trusted development machine.
+The script downloads the v1.0.0 `demos/sandbox` package at the pinned commit
+through the Go module proxy and compiles it alongside the project's eviction
+notice handler, just as the sandbox images do. The server briefly listens on
+the selected port on all host interfaces. Run this compatibility check only on
+a trusted development machine.
 
 ## Real Kubernetes tests
 
-See [local-kubernetes.md](local-kubernetes.md) for the opt-in cluster test. It is skipped by default and requires an explicit local Kind context and kubeconfig.
+The key-free Kind check runs SDK commands in real gVisor-backed Actors and
+verifies that their files survive suspend and resume. The pytest case is opt-in
+and uses an explicit Kind context and kubeconfig. A separate worker-eviction
+test verifies recovery on a replacement worker.
+[Set up Kind](local-kubernetes.md#set-up) · [Run the provider and Kubernetes checks](local-kubernetes.md#test) · [Test worker eviction](local-kubernetes.md#test-worker-eviction)
 
 The domain example adds an opt-in test after its Python image is deployed:
 
@@ -108,14 +115,9 @@ uv build --no-sources --package openai-agent-substrate --out-dir dist
 uv run --locked twine check dist/*
 ```
 
-The repository is a uv workspace with two packages: the provider library in
-`sandbox/` (`openai-agent-substrate`) and the shared agent harness in `harness/`
-(`openai-harness`). Only the provider is meant for publishing.
-Its wheel and source distribution contain the SDK adapter, tracing and license
-notices; they install no console command, harness or example application.
-Guides, examples, tests, the `testing/` helpers and the upstream execution server
-stay in the repository. `uv sync --locked` installs the provider for development;
-`--group ui` adds the harness and its ChatKit dependencies.
+The build packages the provider library, tracing support, and license notices.
+The harness, guides, examples, tests, `testing/` helpers, and upstream execution
+server stay in the repository.
 
 The package CI also installs the base wheel in a fresh environment and runs
 `sandbox/tests/packaging/core_smoke.py`. It verifies provider import and sandbox execution
@@ -140,16 +142,11 @@ workspace root with its environment.
 
 ## Working on the provider
 
-- Keep Actor lifecycle and credentials in the trusted application.
-- Implement backend behavior in `sandbox/src/agent_substrate/`, and agent-runtime behavior in `harness/src/openai_harness/`.
-- Keep domain agent definitions and skills under `examples/DOMAIN/agent/` and their evaluations under sibling `evals/`.
-- Keep runnable session utilities under `examples/provider_check/` and shared Kubernetes setup under `deploy/kubernetes/base/`. `scripts/` contains only the shell bootstrap.
-- Keep test doubles in `testing/` at the repository root: the provider's scripted model and local Substrate stand-in (`testing.model`, `testing.server`) and the harness's scripted streaming model and ChatKit helpers (`testing.harness`). Tests and the examples' `--backend local` import them; no published package does, and the boundary tests check that.
-- Put pure lifecycle tests in `sandbox/tests/unit/` and HTTP/SDK contract tests in `sandbox/tests/integration/`; harness tests go in `harness/tests/`, and repository-wide checks (deployment resources, layer boundaries) in `tests/`.
-- Keep unsupported capabilities explicit and preserve saved-session compatibility.
-- Update [architecture and limits](architecture.md) when behavior changes.
-
-See [CONTRIBUTING.md](../CONTRIBUTING.md) for contribution and review guidance, and [verification.md](verification.md) for the checks actually performed.
+Keep unsupported capabilities explicit and preserve compatibility with saved
+sessions. Update [architecture and limits](architecture.md) when behavior changes.
+Use the repository-only scripted models, server, and harness fixtures from
+[`testing/`](../testing/). See the [contribution guide](../CONTRIBUTING.md)
+for review guidance and the [verification record](verification.md) for results.
 
 ## CI and pinned tools
 
@@ -162,9 +159,9 @@ adapter or example module.
 
 For a real cluster run on GitHub, manually dispatch CI with the `kubernetes`
 boolean enabled. That separate, bounded job installs Kind/Substrate, tests the
-provider and document workflow, runs the Secret-mounted harness checks, and
-collects artifacts. It uses an empty-key configuration and explicit evaluation
-mode, so it requires no OpenAI credential.
+provider and document workflow, runs the Secret-mounted harness and worker
+eviction checks, and collects artifacts. It uses an empty-key configuration
+and explicit evaluation mode, so it requires no OpenAI credential.
 
 The Substrate commit used by CI, local setup, and the sandbox and harness images
 is centralized in `.substrate-revision`.
